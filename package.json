@@ -3,16 +3,25 @@
   "version": "1.0.0",
   "main": "index.js",
   "dependencies": {
+    "@expo/metro-runtime": "~58.0.17",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~58.0.23",
+    "expo-secure-store": "~58.0.2",
     "expo-status-bar": "~58.0.4",
     "react": "19.3.0",
-    "react-native": "0.88.1"
+    "react-dom": "19.3.0",
+    "react-native": "0.88.1",
+    "react-native-safe-area-context": "~5.11.1",
+    "react-native-web": "^0.21.4"
   },
   "scripts": {
+    "dev": "expo start --web --port 3000",
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web --port 3000",
+    "build": "expo export --platform web",
+    "lint": "node --check index.js && node --check App.js && node --check src/services/cookieManager.js && node --check src/services/apiClient.js && node --check src/services/authService.js && node --check src/services/projectService.js && node --check src/context/AuthContext.js && node --check src/context/ProjectContext.js && node --check src/theme/theme.js && node --check src/data/initialData.js && node --check src/context/WorkspaceContext.js && node --check src/components/VectorIcon.js && node --check src/components/ProjectFormModal.js && node --check src/components/ProjectSelectionScreen.js && node --check src/components/ProjectDetailsScreen.js && node --check src/components/AuthScreen.js && node --check src/components/DashboardScreen.js && node --check src/components/TestCasesScreen.js && node --check src/components/TestRunsScreen.js && node --check src/components/DefectsScreen.js && node --check src/components/ProfileSettingsScreen.js"
   },
   "private": true
 }
