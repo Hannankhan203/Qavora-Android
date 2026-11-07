@@ -38,6 +38,7 @@ import {
   updateProjectPut as updateProjectPutApi,
   updateProjectMetadata as updateProjectMetadataApi,
   updateProjectStatus as updateProjectStatusApi,
+  updateProjectData as updateProjectDataApi,
   deleteProject as deleteProjectApi,
 } from '../services/projectService.js';
 
@@ -539,6 +540,78 @@ export function ProjectProvider({ children }) {
   );
 
   /**
+   * Updates nested project QA data (`testPlan`, `testSuites`, summary counts) via
+   * `PATCH /api/projects/:id/data` with optimistic concurrency (`expectedUpdatedAt`)
+   * and updates the hydrated project in state.
+   */
+  const updateProjectData = useCallback(
+    async (projectId, dataUpdates = {}, options = {}) => {
+      setIsMutating(true);
+      setProjectError(null);
+      setConflictState(null);
+
+      try {
+        const existingProject = projectsRef.current.find(
+          (p) => p.id === projectId || p._id === projectId
+        );
+
+        const {
+          skipOptimisticConcurrency = false,
+          skipRefreshAfterMutation = true,
+          ...resolvedOptions
+        } = options || {};
+
+        const hasExplicitExpected =
+          (dataUpdates &&
+            typeof dataUpdates.expectedUpdatedAt === 'string' &&
+            dataUpdates.expectedUpdatedAt.trim()) ||
+          (resolvedOptions &&
+            typeof resolvedOptions.expectedUpdatedAt === 'string' &&
+            resolvedOptions.expectedUpdatedAt.trim());
+
+        if (
+          !hasExplicitExpected &&
+          !skipOptimisticConcurrency &&
+          existingProject &&
+          existingProject.updatedAt
+        ) {
+          resolvedOptions.expectedUpdatedAt = existingProject.updatedAt;
+        }
+
+        const result = await updateProjectDataApi(
+          projectId,
+          dataUpdates,
+          resolvedOptions
+        );
+
+        if (result.ok && result.project) {
+          upsertProjectInState(result.project);
+          if (!skipRefreshAfterMutation) {
+            await refreshProjects({ silent: true });
+          }
+          return result;
+        }
+
+        if (result.isConflict) {
+          setConflictState({
+            isConflict: true,
+            projectId,
+            currentUpdatedAt: result.currentUpdatedAt || null,
+            expectedUpdatedAt: result.expectedUpdatedAt || null,
+            message: result.error,
+          });
+        }
+
+        setProjectError(result.error || 'Failed to save project QA data.');
+        return result;
+      } finally {
+        setIsMutating(false);
+      }
+    },
+    [upsertProjectInState, refreshProjects]
+  );
+
+  /**
    * Deletes a project via `DELETE /api/projects/:id`.
    * Explicitly clears `selectedProjectId` if the deleted project was selected,
    * and refreshes the project list.
@@ -621,6 +694,7 @@ export function ProjectProvider({ children }) {
       updateProject,
       updateProjectPut,
       updateProjectStatus,
+      updateProjectData,
       deleteProject,
       clearProjectError,
     }),
@@ -641,13 +715,16 @@ export function ProjectProvider({ children }) {
       updateProject,
       updateProjectPut,
       updateProjectStatus,
+      updateProjectData,
       deleteProject,
       clearProjectError,
     ]
   );
 
-  return (
-    <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>
+  return React.createElement(
+    ProjectContext.Provider,
+    { value },
+    children
   );
 }
 

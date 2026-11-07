@@ -72,7 +72,9 @@ export function deriveActualProjectStatistics(project) {
     typeof project.testCaseCount === 'number' ? project.testCaseCount : null;
   if (testCaseCount === null && hasSuitesArray) {
     testCaseCount = project.testSuites.reduce((acc, suite) => {
-      const cases = Array.isArray(suite && suite.testCases)
+      const cases = Array.isArray(suite && suite.cases)
+        ? suite.cases.length
+        : Array.isArray(suite && suite.testCases)
         ? suite.testCases.length
         : 0;
       return acc + cases;

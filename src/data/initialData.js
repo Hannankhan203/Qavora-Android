@@ -6,18 +6,28 @@ export const TEST_TYPES = [
   'Smoke',
   'UI/UX',
   'Integration',
+  'Security',
+  'Performance',
+  'API',
 ];
 
 export const EXECUTION_STATUSES = ['Passed', 'Failed', 'Blocked', 'Untested'];
 
+export const WEB_EXECUTION_OUTCOMES = ['Pass', 'Fail', 'Blocked', 'Not Run'];
+
 export const DEFECT_SEVERITIES = ['Critical', 'High', 'Medium', 'Low'];
+
+export const DEFECT_PRIORITIES = ['Critical', 'High', 'Medium', 'Low'];
 
 export const DEFECT_STATUSES = [
   'Open',
   'In Progress',
   'Ready for Retest',
+  'Resolved',
   'Closed',
+  'Reopened',
 ];
+
 
 export const INITIAL_SUITES = [
   {

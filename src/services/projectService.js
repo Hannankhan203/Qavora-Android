@@ -92,6 +92,148 @@ export const ALLOWED_PROJECT_PATCH_FIELDS = new Set([
   'expectedUpdatedAt',
 ]);
 
+export const ALLOWED_PROJECT_DATA_PATCH_FIELDS = new Set([
+  'name',
+  'type',
+  'projectType',
+  'version',
+  'description',
+  'status',
+  'environment',
+  'environments',
+  'baseUrl',
+  'tags',
+  'testPlan',
+  'testSuites',
+  'phases',
+  'executions',
+  'executionRuns',
+  'activeRun',
+  'defects',
+  'team',
+  'automation',
+  'testData',
+  'sourceChecklistId',
+  'promotedFromChecklistTitle',
+  'promotedAt',
+  'testCaseCount',
+  'executedTests',
+  'passedTests',
+  'failedTests',
+  'blockedTests',
+  'skippedTests',
+  'notRunTests',
+  'passRate',
+  'totalDefects',
+  'openDefects',
+  'inProgressDefects',
+  'resolvedDefects',
+  'closedDefects',
+  'criticalDefects',
+  'expectedUpdatedAt',
+]);
+
+/**
+ * Checks recursively whether an object contains prohibited keys
+ * (MongoDB `$` operators, dotted paths, or prototype pollution keys),
+ * matching `containsProhibitedKeys` in Qavora Web `server.ts`.
+ *
+ * @param {any} value
+ * @returns {boolean}
+ */
+export function containsProhibitedKeys(value) {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => containsProhibitedKeys(item));
+  }
+  const keys = Object.keys(value);
+  for (let i = 0; i < keys.length; i += 1) {
+    const key = keys[i];
+    if (
+      key.startsWith('$') ||
+      key.includes('.') ||
+      key === '__proto__' ||
+      key === 'constructor' ||
+      key === 'prototype'
+    ) {
+      return true;
+    }
+    if (containsProhibitedKeys(value[key])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Builds a normalized default `testPlan` object matching Qavora Web's
+ * `POST /api/projects` and `ensureProjectTestPlan` contract while preserving
+ * any existing fields on the plan.
+ *
+ * @param {object} [rawProject]
+ * @returns {object}
+ */
+export function buildDefaultTestPlan(rawProject = {}) {
+  const projectId =
+    (typeof rawProject.id === 'string' && rawProject.id.trim()) ||
+    (rawProject._id ? String(rawProject._id).trim() : 'project');
+  const projectName =
+    typeof rawProject.name === 'string' && rawProject.name.trim()
+      ? rawProject.name.trim()
+      : 'Project';
+  const now = new Date().toISOString();
+  const rawPlan =
+    rawProject.testPlan &&
+    typeof rawProject.testPlan === 'object' &&
+    !Array.isArray(rawProject.testPlan)
+      ? rawProject.testPlan
+      : {};
+
+  return {
+    id:
+      typeof rawPlan.id === 'string' && rawPlan.id.trim()
+        ? rawPlan.id.trim()
+        : `plan_${projectId}`,
+    name:
+      typeof rawPlan.name === 'string' && rawPlan.name.trim()
+        ? rawPlan.name.trim()
+        : `${projectName} Master Test Plan`,
+    description:
+      typeof rawPlan.description === 'string' ? rawPlan.description : '',
+    objective: typeof rawPlan.objective === 'string' ? rawPlan.objective : '',
+    scope: typeof rawPlan.scope === 'string' ? rawPlan.scope : '',
+    outOfScope:
+      typeof rawPlan.outOfScope === 'string' ? rawPlan.outOfScope : '',
+    strategy: typeof rawPlan.strategy === 'string' ? rawPlan.strategy : '',
+    environment:
+      typeof rawPlan.environment === 'string' ? rawPlan.environment : '',
+    entryCriteria:
+      typeof rawPlan.entryCriteria === 'string' ? rawPlan.entryCriteria : '',
+    exitCriteria:
+      typeof rawPlan.exitCriteria === 'string' ? rawPlan.exitCriteria : '',
+    deliverables:
+      typeof rawPlan.deliverables === 'string' ? rawPlan.deliverables : '',
+    risks: typeof rawPlan.risks === 'string' ? rawPlan.risks : '',
+    tools: typeof rawPlan.tools === 'string' ? rawPlan.tools : '',
+    schedule: typeof rawPlan.schedule === 'string' ? rawPlan.schedule : '',
+    approvals: typeof rawPlan.approvals === 'string' ? rawPlan.approvals : '',
+    notes: typeof rawPlan.notes === 'string' ? rawPlan.notes : '',
+    testTypes: Array.isArray(rawPlan.testTypes) ? rawPlan.testTypes : [],
+    phases: Array.isArray(rawPlan.phases) ? rawPlan.phases : [],
+    createdAt:
+      rawPlan.createdAt || rawProject.createdAt
+        ? String(rawPlan.createdAt || rawProject.createdAt)
+        : now,
+    updatedAt:
+      rawPlan.updatedAt || rawProject.updatedAt
+        ? String(rawPlan.updatedAt || rawProject.updatedAt)
+        : now,
+    ...rawPlan,
+  };
+}
+
 /**
  * Normalizes a backend project document into a consistent structure while
  * preserving all backend fields (`_id`, `id`, `userId`, `updatedAt`, nested QA arrays, etc.).
@@ -150,8 +292,16 @@ export function normalizeProject(rawProject) {
       : [],
     createdAt: rawProject.createdAt ? String(rawProject.createdAt) : '',
     updatedAt: rawProject.updatedAt ? String(rawProject.updatedAt) : '',
+    testPlan: buildDefaultTestPlan({ ...rawProject, id, name }),
     testSuites: Array.isArray(rawProject.testSuites) ? rawProject.testSuites : [],
     executions: Array.isArray(rawProject.executions) ? rawProject.executions : [],
+    executionRuns: Array.isArray(rawProject.executionRuns)
+      ? rawProject.executionRuns
+      : [],
+    activeRun:
+      rawProject.activeRun && typeof rawProject.activeRun === 'object'
+        ? rawProject.activeRun
+        : null,
     defects: Array.isArray(rawProject.defects) ? rawProject.defects : [],
   };
 }
@@ -706,6 +856,188 @@ export async function deleteProject(projectId, options = {}) {
   }
 }
 
+/**
+ * 8. `PATCH /api/projects/:id/data` (Phase 2C)
+ * Full project and nested QA data update (`testPlan`, `testSuites`, summary counts, etc.)
+ * with `expectedUpdatedAt` optimistic concurrency control and strict field validation
+ * matching `server.ts:3288–3492`.
+ *
+ * @param {string} projectId
+ * @param {object} dataUpdates
+ * @param {object} [options]
+ * @param {string} [options.expectedUpdatedAt]
+ */
+export async function updateProjectData(projectId, dataUpdates, options = {}) {
+  const cleanId = typeof projectId === 'string' ? projectId.trim() : '';
+  if (!cleanId) {
+    return {
+      ok: false,
+      status: 400,
+      project: null,
+      isConflict: false,
+      error: 'Project ID parameter is required and must be a non-empty string.',
+    };
+  }
+
+  if (!dataUpdates || typeof dataUpdates !== 'object' || Array.isArray(dataUpdates)) {
+    return {
+      ok: false,
+      status: 400,
+      project: null,
+      isConflict: false,
+      error: 'Request body must be a JSON object containing project update data.',
+    };
+  }
+
+  const mergedInput = {
+    ...dataUpdates,
+    ...(options && options.expectedUpdatedAt !== undefined
+      ? { expectedUpdatedAt: options.expectedUpdatedAt }
+      : {}),
+  };
+
+  if (containsProhibitedKeys(mergedInput)) {
+    return {
+      ok: false,
+      status: 400,
+      project: null,
+      isConflict: false,
+      error:
+        'Request body contains prohibited keys (NoSQL operators, dotted paths, or prototype pollution keys are not allowed).',
+    };
+  }
+
+  const inputKeys = Object.keys(mergedInput);
+  const disallowedKeys = inputKeys.filter(
+    (k) => !ALLOWED_PROJECT_DATA_PATCH_FIELDS.has(k)
+  );
+  if (disallowedKeys.length > 0) {
+    return {
+      ok: false,
+      status: 400,
+      project: null,
+      isConflict: false,
+      error: `Disallowed field(s) in project data update payload: ${disallowedKeys.join(', ')}.`,
+    };
+  }
+
+  const payload = {};
+  inputKeys.forEach((key) => {
+    if (mergedInput[key] !== undefined) {
+      payload[key] = mergedInput[key];
+    }
+  });
+
+  if (payload.expectedUpdatedAt !== undefined) {
+    if (
+      typeof payload.expectedUpdatedAt !== 'string' ||
+      payload.expectedUpdatedAt.trim() === ''
+    ) {
+      return {
+        ok: false,
+        status: 400,
+        project: null,
+        isConflict: false,
+        error:
+          "Field 'expectedUpdatedAt' must be a non-empty string when provided.",
+      };
+    }
+    payload.expectedUpdatedAt = payload.expectedUpdatedAt.trim();
+  }
+
+  const dataFieldKeys = Object.keys(payload).filter(
+    (k) => k !== 'expectedUpdatedAt'
+  );
+  if (dataFieldKeys.length === 0) {
+    return {
+      ok: false,
+      status: 400,
+      project: null,
+      isConflict: false,
+      error: 'Request body must contain at least one field to update.',
+    };
+  }
+
+  if (payload.testPlan !== undefined) {
+    if (
+      typeof payload.testPlan !== 'object' ||
+      payload.testPlan === null ||
+      Array.isArray(payload.testPlan)
+    ) {
+      return {
+        ok: false,
+        status: 400,
+        project: null,
+        isConflict: false,
+        error: "Field 'testPlan' must be an object.",
+      };
+    }
+  }
+
+  if (payload.testSuites !== undefined && !Array.isArray(payload.testSuites)) {
+    return {
+      ok: false,
+      status: 400,
+      project: null,
+      isConflict: false,
+      error: "Field 'testSuites' must be an array.",
+    };
+  }
+
+  if (payload.executions !== undefined && !Array.isArray(payload.executions)) {
+    return {
+      ok: false,
+      status: 400,
+      project: null,
+      isConflict: false,
+      error: "Field 'executions' must be an array.",
+    };
+  }
+
+  if (
+    payload.executionRuns !== undefined &&
+    !Array.isArray(payload.executionRuns)
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      project: null,
+      isConflict: false,
+      error: "Field 'executionRuns' must be an array.",
+    };
+  }
+
+  if (payload.defects !== undefined && !Array.isArray(payload.defects)) {
+    return {
+      ok: false,
+      status: 400,
+      project: null,
+      isConflict: false,
+      error: "Field 'defects' must be an array.",
+    };
+  }
+
+  const { expectedUpdatedAt: _ignored, ...requestOptions } = options || {};
+
+  try {
+    const response = await apiPatch(
+      `/api/projects/${encodeURIComponent(cleanId)}/data`,
+      payload,
+      requestOptions
+    );
+    const project = normalizeProject(response.data);
+    return {
+      ok: true,
+      status: response.status,
+      project,
+      isConflict: false,
+      error: null,
+    };
+  } catch (err) {
+    return buildProjectErrorResult(err, 'Failed to save project data.');
+  }
+}
+
 export const projectService = {
   fetchProjects,
   fetchProjectById,
@@ -713,9 +1045,13 @@ export const projectService = {
   updateProjectPut,
   updateProjectMetadata,
   updateProjectStatus,
+  updateProjectData,
   deleteProject,
   normalizeProject,
+  buildDefaultTestPlan,
+  containsProhibitedKeys,
   PROJECT_STATUSES,
 };
 
 export default projectService;
+
