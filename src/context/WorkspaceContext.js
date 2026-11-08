@@ -12,6 +12,14 @@ import { useAuth } from './AuthContext.js';
 import { useProjects } from './ProjectContext.js';
 import { buildDefaultTestPlan } from '../services/projectService.js';
 import {
+  REPORT_TYPES,
+  DATE_RANGE_FILTERS,
+  EXPORT_FORMATS,
+  computeProjectDashboardMetrics,
+  generateProjectReport,
+  exportGeneratedReport,
+} from '../services/reportService.js';
+import {
   INITIAL_SUITES,
   INITIAL_TEST_CASES,
   INITIAL_TEST_RUNS,
@@ -1036,6 +1044,7 @@ export function WorkspaceProvider({ children }) {
 
   // Navigation & Active Selection State
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'testcases' | 'testruns' | 'defects' | 'profile'
+  const [dashboardSubTab, setDashboardSubTab] = useState('overview'); // 'overview' | 'reports'
   const [projectViewMode, setProjectViewMode] = useState('workspace'); // 'workspace' | 'selection' | 'details'
   const [selectedTestCaseId, setSelectedTestCaseId] = useState(null);
   const [selectedTestRunId, setSelectedTestRunId] = useState(null);
@@ -1072,6 +1081,18 @@ export function WorkspaceProvider({ children }) {
 
   const openWorkspace = useCallback(() => {
     setProjectViewMode('workspace');
+  }, []);
+
+  const openDashboardOverview = useCallback(() => {
+    setProjectViewMode('workspace');
+    setActiveTab('dashboard');
+    setDashboardSubTab('overview');
+  }, []);
+
+  const openReportsView = useCallback(() => {
+    setProjectViewMode('workspace');
+    setActiveTab('dashboard');
+    setDashboardSubTab('reports');
   }, []);
 
   // Switch workspace data cleanly whenever the selected project changes
@@ -3622,84 +3643,57 @@ export function WorkspaceProvider({ children }) {
     showToast('Cleared test cases, runs, and defects for this project', 'info');
   };
 
-  // --- Genuine Dynamic QA Metrics ---
+  // --- Genuine Dynamic QA Metrics (Phase 2E parity with Qavora Web) ---
   const metrics = useMemo(() => {
-    const totalTestCases = testCases.length;
-    const passedCases = testCases.filter(
-      (tc) => tc.lastStatus === 'Passed'
-    ).length;
-    const failedCases = testCases.filter(
-      (tc) => tc.lastStatus === 'Failed'
-    ).length;
-    const blockedCases = testCases.filter(
-      (tc) => tc.lastStatus === 'Blocked'
-    ).length;
-    const untestedCases = testCases.filter(
-      (tc) => tc.lastStatus === 'Untested'
-    ).length;
-    const executedCases = totalTestCases - untestedCases;
+    return computeProjectDashboardMetrics({
+      project: selectedProject,
+      testPlan,
+      suites,
+      testCases,
+      testRuns,
+      executions,
+      defects,
+    });
+  }, [selectedProject, testPlan, suites, testCases, testRuns, executions, defects]);
 
-    const passRate =
-      executedCases > 0 ? Math.round((passedCases / executedCases) * 100) : 0;
-    const coverageRate =
-      totalTestCases > 0
-        ? Math.round((executedCases / totalTestCases) * 100)
-        : 0;
+  // --- Read-Only Project Report Generation & Export (Phase 2E) ---
+  const generateReport = useCallback(
+    (filters = {}) => {
+      return generateProjectReport(
+        {
+          project: selectedProject,
+          testPlan: testPlanRef.current,
+          suites: suitesRef.current,
+          testCases: testCasesRef.current,
+          testRuns: testRunsRef.current,
+          executions: executionsRef.current,
+          defects: defectsRef.current,
+        },
+        filters
+      );
+    },
+    [selectedProject]
+  );
 
-    const totalRuns = testRuns.length;
-    const activeRuns = testRuns.filter(
-      (r) => r.status === 'In Progress'
-    ).length;
-    const completedRuns = testRuns.filter(
-      (r) => r.status === 'Completed'
-    ).length;
-
-    const totalDefects = defects.length;
-    const openDefects = defects.filter(
-      (d) => d.status !== 'Closed' && d.status !== 'Resolved'
-    ).length;
-    const inProgressDefects = defects.filter(
-      (d) => d.status === 'In Progress' || d.status === 'Ready for Retest'
-    ).length;
-    const resolvedDefects = defects.filter(
-      (d) => d.status === 'Resolved' || d.status === 'Closed'
-    ).length;
-    const criticalDefects = defects.filter(
-      (d) =>
-        (d.severity === 'Critical' || d.severity === 'High') &&
-        d.status !== 'Closed'
-    ).length;
-    const retestDefects = defects.filter(
-      (d) => d.status === 'Ready for Retest'
-    ).length;
-
-    const totalPhases = Array.isArray(testPlan && testPlan.phases)
-      ? testPlan.phases.length
-      : 0;
-
-    return {
-      totalPhases,
-      totalSuites: suites.length,
-      totalTestCases,
-      passedCases,
-      failedCases,
-      blockedCases,
-      untestedCases,
-      executedCases,
-      passRate,
-      coverageRate,
-      totalRuns,
-      activeRuns,
-      completedRuns,
-      totalExecutions: executions.length,
-      totalDefects,
-      openDefects,
-      inProgressDefects,
-      resolvedDefects,
-      criticalDefects,
-      retestDefects,
-    };
-  }, [testPlan, suites, testCases, testRuns, executions, defects]);
+  const exportReport = useCallback(
+    async (filters = {}, format = 'json', options = {}) => {
+      const report =
+        filters && filters.generatedAt && filters.kpis
+          ? filters
+          : generateReport(filters);
+      const res = await exportGeneratedReport(report, format, options);
+      if (res.ok && !options.silentToast) {
+        showToast(
+          `Exported ${res.formatLabel} (${res.filename})`,
+          'success'
+        );
+      } else if (!res.ok && !options.silentToast) {
+        showToast(res.error || 'Failed to export report', 'danger');
+      }
+      return { ...res, report };
+    },
+    [generateReport, showToast]
+  );
 
   const value = {
     activeProject: selectedProject,
@@ -3721,6 +3715,11 @@ export function WorkspaceProvider({ children }) {
     defects,
     activityLog,
     metrics,
+    reportTypes: REPORT_TYPES,
+    dateRangeFilters: DATE_RANGE_FILTERS,
+    exportFormats: EXPORT_FORMATS,
+    generateReport,
+    exportReport,
     priorities: PRIORITIES,
     testTypes: TEST_TYPES,
     executionStatuses: EXECUTION_STATUSES,
@@ -3730,11 +3729,15 @@ export function WorkspaceProvider({ children }) {
     defectStatuses: DEFECT_STATUSES,
     activeTab,
     setActiveTab,
+    dashboardSubTab,
+    setDashboardSubTab,
     projectViewMode,
     setProjectViewMode,
     openProjectSelection,
     openProjectDetails,
     openWorkspace,
+    openDashboardOverview,
+    openReportsView,
     selectedTestCaseId,
     setSelectedTestCaseId,
     selectedTestRunId,

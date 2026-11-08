@@ -3,704 +3,1645 @@ import {
   StyleSheet,
   View,
   Text,
-  Pressable,
   ScrollView,
+  Pressable,
+  RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useProjects } from '../context/ProjectContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
+import ReportsView from './ReportsView';
 
 export default function DashboardScreen() {
   const { colors } = useTheme();
-  const { selectedProject } = useProjects();
+  const {
+    selectedProject,
+    projects,
+    isRefreshing,
+    refreshSelectedProject,
+  } = useProjects();
   const {
     profile,
-    suites,
-    testCases,
+    testPlan,
+    metrics,
     testRuns,
+    executions,
     defects,
     activityLog,
-    metrics,
-    lastPersistedAt,
+    dashboardSubTab,
+    setDashboardSubTab,
+    reloadProjectDataFromBackend,
+    isSyncingProjectData,
     setActiveTab,
     openProjectSelection,
     openProjectDetails,
     setSelectedTestCaseId,
     setSelectedTestRunId,
     setSelectedDefectId,
+    showToast,
   } = useWorkspace();
 
-  const totalForBar = Math.max(metrics.totalTestCases, 1);
-  const passedFlex = metrics.passedCases / totalForBar;
-  const failedFlex = metrics.failedCases / totalForBar;
-  const blockedFlex = metrics.blockedCases / totalForBar;
-  const untestedFlex = metrics.untestedCases / totalForBar;
+  const isRefreshingAny = isRefreshing || isSyncingProjectData;
 
-  const openDefectsList = defects.filter((d) => d.status !== 'Closed').slice(0, 3);
-  const recentRunsList = testRuns.slice(0, 2);
-
-  const getSeverityTone = (severity) => {
-    if (severity === 'Critical') return colors.danger;
-    if (severity === 'High') return colors.warning;
-    if (severity === 'Medium') return colors.primary;
-    return colors.textMuted;
+  const handleRefreshDashboard = async () => {
+    const res = await reloadProjectDataFromBackend();
+    if (!res || !res.ok) {
+      await refreshSelectedProject();
+    } else {
+      showToast('Refreshed project dashboard from server', 'success');
+    }
   };
 
-  const activeName =
-    (selectedProject && selectedProject.name) || profile.projectName;
-  const activeVersion =
-    (selectedProject && selectedProject.version) ||
-    profile.targetVersion ||
-    'v1.0.0';
-  const activeStatus =
-    (selectedProject && selectedProject.status) || 'Active';
-  const activeType =
-    (selectedProject && selectedProject.type) || 'Mobile Application';
-  const activeEnv =
-    (selectedProject && selectedProject.environment) || profile.defaultDevice;
+  const totalCases = Math.max(metrics.totalTestCases, 1);
+  const passFlex = metrics.passedCases / totalCases;
+  const failFlex = metrics.failedCases / totalCases;
+  const blockedFlex = metrics.blockedCases / totalCases;
+  const untestedFlex = metrics.untestedCases / totalCases;
+
+  const recentRuns = testRuns.slice(0, 3);
+  const recentExecutions = [...executions]
+    .sort((a, b) => {
+      const dtA = a.executedAt || a.timestamp || a.createdAt || '';
+      const dtB = b.executedAt || b.timestamp || b.createdAt || '';
+      return dtA < dtB ? 1 : -1;
+    })
+    .slice(0, 5);
+  const recentDefects = [...defects]
+    .sort((a, b) => {
+      const dtA = a.updatedAt || a.createdAt || '';
+      const dtB = b.updatedAt || b.createdAt || '';
+      return dtA < dtB ? 1 : -1;
+    })
+    .slice(0, 4);
+  const recentActivities = activityLog.slice(0, 5);
+
+  const projectStatus = (selectedProject && selectedProject.status) || 'Active';
+  const statusPalette =
+    projectStatus === 'Active'
+      ? { bg: colors.successSoft, fg: colors.success }
+      : projectStatus === 'Completed'
+      ? { bg: colors.infoSoft, fg: colors.info }
+      : { bg: colors.warningSoft, fg: colors.warning };
+
+  const healthPalette =
+    metrics.healthTone === 'success'
+      ? { bg: colors.successSoft, fg: colors.success }
+      : metrics.healthTone === 'warning'
+      ? { bg: colors.warningSoft, fg: colors.warning }
+      : metrics.healthTone === 'danger'
+      ? { bg: colors.dangerSoft, fg: colors.danger }
+      : { bg: colors.surfaceHighlight, fg: colors.textSecondary };
+
+  const defectStatusCounts = metrics.defectStatusBreakdown || {
+    Open: 0,
+    'In Progress': 0,
+    'Ready for Retest': 0,
+    Resolved: 0,
+    Closed: 0,
+    Reopened: 0,
+  };
+
+  const defectSeverityCounts = metrics.defectSeverityBreakdown || {
+    Critical: 0,
+    High: 0,
+    Medium: 0,
+    Low: 0,
+  };
+
+  const suiteProgressList = Array.isArray(metrics.suiteProgress)
+    ? metrics.suiteProgress
+    : [];
+  const phaseProgressList = Array.isArray(metrics.phaseProgress)
+    ? metrics.phaseProgress
+    : [];
 
   return (
     <ScrollView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
+      style={[styles.scrollRoot, { backgroundColor: colors.background }]}
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={isRefreshingAny}
+          onRefresh={handleRefreshDashboard}
+          tintColor={colors.primary}
+          colors={[colors.primary]}
+        />
+      }
     >
-      {/* Project Overview Card */}
-      <View
-        style={[
-          styles.projectCard,
-          { backgroundColor: colors.surface, borderColor: colors.border },
-        ]}
-      >
-        <View style={styles.projectHeader}>
-          <View style={styles.projectTitleCol}>
-            <Text
-              style={[
-                styles.kicker,
-                { color: colors.primary, fontFamily: monoFontFamily },
-              ]}
-            >
-              {activeStatus.toUpperCase()} PROJECT · {activeType.toUpperCase()} ·{' '}
-              {activeVersion}
-            </Text>
-            <Text style={[styles.projectTitle, { color: colors.text }]}>
-              {activeName}
-            </Text>
-            {selectedProject && selectedProject.description ? (
-              <Text
-                numberOfLines={2}
-                style={[styles.projectSub, { color: colors.textSecondary }]}
-              >
-                {selectedProject.description}
-              </Text>
-            ) : (
-              <Text style={[styles.projectSub, { color: colors.textSecondary }]}>
-                Environment: {activeEnv} · Build {profile.defaultBuild}
-              </Text>
-            )}
-          </View>
-        </View>
-
-        {/* Project Management Bar */}
+      <View style={styles.container}>
+        {/* Top Segmented Mode Toggle: QA Overview | Reports & Analytics */}
         <View
-          style={{
-            flexDirection: 'row',
-            flexWrap: 'wrap',
-            gap: 8,
-            marginBottom: 10,
-          }}
+          style={[
+            styles.modeToggleContainer,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
         >
           <Pressable
-            onPress={openProjectDetails}
+            onPress={() => setDashboardSubTab('overview')}
             style={[
-              styles.secondaryQuickBtn,
+              styles.modeToggleBtn,
               {
-                backgroundColor: colors.surfaceAccent,
-                borderColor: colors.primary,
-                flexDirection: 'row',
-                gap: 6,
+                backgroundColor:
+                  dashboardSubTab === 'overview'
+                    ? colors.primary
+                    : 'transparent',
               },
             ]}
           >
-            <VectorIcon name="info" size={15} color={colors.primary} />
-            <Text style={[styles.secondaryQuickBtnText, { color: colors.primary }]}>
-              Project Details
+            <VectorIcon
+              name="layers"
+              size={14}
+              color={
+                dashboardSubTab === 'overview'
+                  ? colors.textOnPrimary
+                  : colors.textSecondary
+              }
+            />
+            <Text
+              style={[
+                styles.modeToggleBtnText,
+                {
+                  color:
+                    dashboardSubTab === 'overview'
+                      ? colors.textOnPrimary
+                      : colors.textSecondary,
+                  fontWeight: dashboardSubTab === 'overview' ? '700' : '600',
+                },
+              ]}
+            >
+              QA Dashboard
             </Text>
           </Pressable>
 
           <Pressable
-            onPress={openProjectSelection}
+            onPress={() => setDashboardSubTab('reports')}
             style={[
-              styles.secondaryQuickBtn,
+              styles.modeToggleBtn,
               {
-                backgroundColor: colors.background,
-                borderColor: colors.borderStrong,
-                flexDirection: 'row',
-                gap: 6,
+                backgroundColor:
+                  dashboardSubTab === 'reports'
+                    ? colors.primary
+                    : 'transparent',
               },
             ]}
           >
-            <VectorIcon name="switch" size={15} color={colors.text} />
-            <Text style={[styles.secondaryQuickBtnText, { color: colors.text }]}>
-              Switch Project
-            </Text>
-          </Pressable>
-        </View>
-
-        {/* Quick Action Row */}
-        <View style={styles.quickActionRow}>
-          <Pressable
-            onPress={() => setActiveTab('testcases')}
-            style={[styles.primaryQuickBtn, { backgroundColor: colors.primary }]}
-          >
-            <Text style={[styles.primaryQuickBtnText, { color: colors.textOnPrimary }]}>
-              + Test Case
-            </Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => setActiveTab('testruns')}
-            style={[
-              styles.secondaryQuickBtn,
-              { backgroundColor: colors.surfaceAccent, borderColor: colors.primary },
-            ]}
-          >
-            <Text style={[styles.secondaryQuickBtnText, { color: colors.primary }]}>
-              Run Tests
-            </Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => setActiveTab('defects')}
-            style={[
-              styles.secondaryQuickBtn,
-              { backgroundColor: colors.dangerSoft, borderColor: colors.danger },
-            ]}
-          >
-            <Text style={[styles.secondaryQuickBtnText, { color: colors.danger }]}>
-              + Defect
-            </Text>
-          </Pressable>
-        </View>
-      </View>
-
-      {/* 4-Card Core QA Metrics Grid */}
-      <View style={styles.kpiGrid}>
-        <Pressable
-          onPress={() => setActiveTab('testcases')}
-          style={[
-            styles.kpiCard,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-          ]}
-        >
-          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>
-            Total Test Cases
-          </Text>
-          <Text
-            style={[
-              styles.kpiValue,
-              { color: colors.text, fontFamily: monoFontFamily },
-            ]}
-          >
-            {metrics.totalTestCases}
-          </Text>
-          <Text style={[styles.kpiSub, { color: colors.textMuted }]}>
-            Across {metrics.totalSuites} suites
-          </Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => setActiveTab('testruns')}
-          style={[
-            styles.kpiCard,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-          ]}
-        >
-          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>
-            Execution Pass Rate
-          </Text>
-          <Text
-            style={[
-              styles.kpiValue,
-              { color: colors.success, fontFamily: monoFontFamily },
-            ]}
-          >
-            {metrics.passRate}%
-          </Text>
-          <Text style={[styles.kpiSub, { color: colors.textMuted }]}>
-            {metrics.executedCases}/{metrics.totalTestCases} executed ({metrics.coverageRate}%)
-          </Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => setActiveTab('testruns')}
-          style={[
-            styles.kpiCard,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-          ]}
-        >
-          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>
-            Test Runs
-          </Text>
-          <Text
-            style={[
-              styles.kpiValue,
-              { color: colors.primary, fontFamily: monoFontFamily },
-            ]}
-          >
-            {metrics.totalRuns}
-          </Text>
-          <Text style={[styles.kpiSub, { color: colors.textMuted }]}>
-            {metrics.activeRuns} in progress · {metrics.completedRuns} done
-          </Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => setActiveTab('defects')}
-          style={[
-            styles.kpiCard,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-          ]}
-        >
-          <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>
-            Open Defects
-          </Text>
-          <Text
-            style={[
-              styles.kpiValue,
-              {
-                color: metrics.openDefects > 0 ? colors.danger : colors.success,
-                fontFamily: monoFontFamily,
-              },
-            ]}
-          >
-            {metrics.openDefects}
-          </Text>
-          <Text style={[styles.kpiSub, { color: colors.textMuted }]}>
-            {metrics.criticalDefects} critical/high severity
-          </Text>
-        </Pressable>
-      </View>
-
-      {/* Test Execution Status Breakdown */}
-      <View
-        style={[
-          styles.sectionCard,
-          { backgroundColor: colors.surface, borderColor: colors.border },
-        ]}
-      >
-        <View style={styles.sectionHeaderRow}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            Test Case Execution Breakdown
-          </Text>
-          <Text
-            style={[
-              styles.sectionCounter,
-              { color: colors.textMuted, fontFamily: monoFontFamily },
-            ]}
-          >
-            {metrics.coverageRate}% Coverage
-          </Text>
-        </View>
-
-        {metrics.totalTestCases > 0 ? (
-          <View style={[styles.stackedBar, { backgroundColor: colors.surfaceMuted }]}>
-            {passedFlex > 0 && (
-              <View
-                style={[
-                  styles.barSegment,
-                  { flex: passedFlex, backgroundColor: colors.success },
-                ]}
-              />
-            )}
-            {failedFlex > 0 && (
-              <View
-                style={[
-                  styles.barSegment,
-                  { flex: failedFlex, backgroundColor: colors.danger },
-                ]}
-              />
-            )}
-            {blockedFlex > 0 && (
-              <View
-                style={[
-                  styles.barSegment,
-                  { flex: blockedFlex, backgroundColor: colors.warning },
-                ]}
-              />
-            )}
-            {untestedFlex > 0 && (
-              <View
-                style={[
-                  styles.barSegment,
-                  { flex: untestedFlex, backgroundColor: colors.borderStrong },
-                ]}
-              />
-            )}
-          </View>
-        ) : null}
-
-        <View style={styles.statusBreakdownRow}>
-          <View style={styles.statusStatItem}>
+            <VectorIcon
+              name="file-text"
+              size={14}
+              color={
+                dashboardSubTab === 'reports'
+                  ? colors.textOnPrimary
+                  : colors.textSecondary
+              }
+            />
             <Text
               style={[
-                styles.statusStatValue,
-                { color: colors.success, fontFamily: monoFontFamily },
+                styles.modeToggleBtnText,
+                {
+                  color:
+                    dashboardSubTab === 'reports'
+                      ? colors.textOnPrimary
+                      : colors.textSecondary,
+                  fontWeight: dashboardSubTab === 'reports' ? '700' : '600',
+                },
               ]}
             >
-              {metrics.passedCases}
+              Reports & Analytics
             </Text>
-            <Text style={[styles.statusStatLabel, { color: colors.textSecondary }]}>
-              Passed
-            </Text>
-          </View>
-
-          <View style={styles.statusStatItem}>
-            <Text
-              style={[
-                styles.statusStatValue,
-                { color: colors.danger, fontFamily: monoFontFamily },
-              ]}
-            >
-              {metrics.failedCases}
-            </Text>
-            <Text style={[styles.statusStatLabel, { color: colors.textSecondary }]}>
-              Failed
-            </Text>
-          </View>
-
-          <View style={styles.statusStatItem}>
-            <Text
-              style={[
-                styles.statusStatValue,
-                { color: colors.warning, fontFamily: monoFontFamily },
-              ]}
-            >
-              {metrics.blockedCases}
-            </Text>
-            <Text style={[styles.statusStatLabel, { color: colors.textSecondary }]}>
-              Blocked
-            </Text>
-          </View>
-
-          <View style={styles.statusStatItem}>
-            <Text
-              style={[
-                styles.statusStatValue,
-                { color: colors.textMuted, fontFamily: monoFontFamily },
-              ]}
-            >
-              {metrics.untestedCases}
-            </Text>
-            <Text style={[styles.statusStatLabel, { color: colors.textSecondary }]}>
-              Untested
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      {/* Suite Coverage Overview */}
-      <View
-        style={[
-          styles.sectionCard,
-          { backgroundColor: colors.surface, borderColor: colors.border },
-        ]}
-      >
-        <View style={styles.sectionHeaderRow}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            Test Suites Summary ({suites.length})
-          </Text>
-          <Pressable
-            onPress={() => setActiveTab('testcases')}
-            style={[styles.linkTouch, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}
-          >
-            <Text style={[styles.linkText, { color: colors.primary }]}>
-              Manage Suites
-            </Text>
-            <VectorIcon name="chevron-right" size={13} color={colors.primary} />
           </Pressable>
         </View>
 
-        {suites.map((suite) => {
-          const suiteCases = testCases.filter((tc) => tc.suiteId === suite.id);
-          const passed = suiteCases.filter((tc) => tc.lastStatus === 'Passed').length;
-          const failed = suiteCases.filter((tc) => tc.lastStatus === 'Failed').length;
-
-          return (
-            <Pressable
-              key={suite.id}
-              onPress={() => setActiveTab('testcases')}
-              style={[styles.suiteRow, { borderTopColor: colors.border }]}
-            >
-              <View style={styles.suiteInfoCol}>
-                <Text style={[styles.suiteName, { color: colors.text }]}>
-                  {suite.name}
-                </Text>
-                <Text
-                  numberOfLines={1}
-                  style={[styles.suiteDesc, { color: colors.textMuted }]}
-                >
-                  {suite.description}
-                </Text>
-              </View>
-              <Text
-                style={[
-                  styles.suiteStats,
-                  { color: colors.textSecondary, fontFamily: monoFontFamily },
-                ]}
-              >
-                {suiteCases.length} cases · {passed}P / {failed}F
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      {/* Active Test Runs & Open Defects Preview */}
-      <View
-        style={[
-          styles.sectionCard,
-          { backgroundColor: colors.surface, borderColor: colors.border },
-        ]}
-      >
-        <View style={styles.sectionHeaderRow}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            Active Test Runs
-          </Text>
-          <Pressable
-            onPress={() => setActiveTab('testruns')}
-            style={[styles.linkTouch, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}
-          >
-            <Text style={[styles.linkText, { color: colors.primary }]}>
-              All Runs
-            </Text>
-            <VectorIcon name="chevron-right" size={13} color={colors.primary} />
-          </Pressable>
-        </View>
-
-        {recentRunsList.length === 0 ? (
-          <Text style={[styles.emptyHint, { color: colors.textMuted }]}>
-            No test runs created yet. Tap "Run Tests" above to start a test execution cycle.
-          </Text>
+        {dashboardSubTab === 'reports' ? (
+          <ReportsView />
         ) : (
-          recentRunsList.map((run) => {
-            const passedCount = run.results.filter((r) => r.status === 'Passed').length;
-            const failedCount = run.results.filter((r) => r.status === 'Failed').length;
-            const totalCount = run.results.length;
+          <>
+            {/* 1. Active Project Overview Card */}
+            <View
+              style={[
+                styles.bannerCard,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <View style={styles.bannerTopRow}>
+                <View style={styles.bannerTextCol}>
+                  <View style={styles.projectStatusRow}>
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        { backgroundColor: statusPalette.bg },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.statusBadgeText,
+                          {
+                            color: statusPalette.fg,
+                            fontFamily: monoFontFamily,
+                          },
+                        ]}
+                      >
+                        {projectStatus.toUpperCase()}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        { backgroundColor: healthPalette.bg },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.statusBadgeText,
+                          {
+                            color: healthPalette.fg,
+                            fontFamily: monoFontFamily,
+                          },
+                        ]}
+                      >
+                        HEALTH: {metrics.healthStatus || 'NO DATA'}
+                      </Text>
+                    </View>
+                    {selectedProject && selectedProject.type ? (
+                      <Text
+                        style={[
+                          styles.bannerOverline,
+                          {
+                            color: colors.primary,
+                            fontFamily: monoFontFamily,
+                          },
+                        ]}
+                      >
+                        {selectedProject.type.toUpperCase()}
+                        {selectedProject.version
+                          ? ` · v${selectedProject.version}`
+                          : ''}
+                      </Text>
+                    ) : null}
+                  </View>
 
-            return (
-              <Pressable
-                key={run.id}
-                onPress={() => {
-                  setSelectedTestRunId(run.id);
-                  setActiveTab('testruns');
-                }}
-                style={[styles.itemRow, { borderTopColor: colors.border }]}
-              >
-                <View style={styles.itemRowMain}>
+                  <Text style={[styles.bannerTitle, { color: colors.text }]}>
+                    {(selectedProject && selectedProject.name) ||
+                      profile.projectName}
+                  </Text>
                   <Text
                     style={[
-                      styles.itemCode,
+                      styles.bannerSub,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    {(selectedProject && selectedProject.description) ||
+                      `Environment: ${
+                        (selectedProject && selectedProject.environment) ||
+                        'Android QA'
+                      } · Lead: ${profile.testerName}`}
+                  </Text>
+                </View>
+
+                <View style={styles.coverageRingBox}>
+                  <Text
+                    style={[
+                      styles.coverageBigVal,
                       { color: colors.primary, fontFamily: monoFontFamily },
                     ]}
                   >
-                    {run.id} · {run.status.toUpperCase()} · {run.buildVersion}
+                    {metrics.coverageRate}%
                   </Text>
-                  <Text style={[styles.itemRowTitle, { color: colors.text }]}>
-                    {run.name}
-                  </Text>
-                  <Text style={[styles.itemRowMeta, { color: colors.textMuted }]}>
-                    {run.deviceInfo} · {passedCount} Passed · {failedCount} Failed ({totalCount} total)
+                  <Text
+                    style={[styles.coverageLabel, { color: colors.textMuted }]}
+                  >
+                    Coverage
                   </Text>
                 </View>
-              </Pressable>
-            );
-          })
-        )}
-      </View>
-
-      {/* Open Defects Snapshot */}
-      <View
-        style={[
-          styles.sectionCard,
-          { backgroundColor: colors.surface, borderColor: colors.border },
-        ]}
-      >
-        <View style={styles.sectionHeaderRow}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            Open Defects ({metrics.openDefects})
-          </Text>
-          <Pressable
-            onPress={() => setActiveTab('defects')}
-            style={[styles.linkTouch, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}
-          >
-            <Text style={[styles.linkText, { color: colors.primary }]}>
-              All Defects
-            </Text>
-            <VectorIcon name="chevron-right" size={13} color={colors.primary} />
-          </Pressable>
-        </View>
-
-        {openDefectsList.length === 0 ? (
-          <Text style={[styles.emptyHint, { color: colors.textMuted }]}>
-            Zero open defects. All reported bugs are currently resolved.
-          </Text>
-        ) : (
-          openDefectsList.map((bug) => (
-            <Pressable
-              key={bug.id}
-              onPress={() => {
-                setSelectedDefectId(bug.id);
-                setActiveTab('defects');
-              }}
-              style={[styles.itemRow, { borderTopColor: colors.border }]}
-            >
-              <View style={styles.itemRowMain}>
-                <Text
-                  style={[
-                    styles.itemCode,
-                    { color: getSeverityTone(bug.severity), fontFamily: monoFontFamily },
-                  ]}
-                >
-                  {bug.id} · {bug.severity.toUpperCase()} · {bug.status}
-                  {bug.linkedTestCaseId ? ` · Linked ${bug.linkedTestCaseId}` : ''}
-                </Text>
-                <Text style={[styles.itemRowTitle, { color: colors.text }]}>
-                  {bug.title}
-                </Text>
-                <Text style={[styles.itemRowMeta, { color: colors.textMuted }]}>
-                  {bug.environment}
-                </Text>
               </View>
-            </Pressable>
-          ))
-        )}
-      </View>
 
-      {/* Recent QA Activity Log */}
-      <View
-        style={[
-          styles.sectionCard,
-          { backgroundColor: colors.surface, borderColor: colors.border },
-        ]}
-      >
-        <View style={styles.sectionHeaderRow}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            Recent QA Activity
-          </Text>
-          {lastPersistedAt ? (
-            <Text
-              style={[
-                styles.savedTimestamp,
-                { color: colors.textMuted, fontFamily: monoFontFamily },
-              ]}
-            >
-              Saved {lastPersistedAt}
-            </Text>
-          ) : null}
-        </View>
-
-        {activityLog.slice(0, 6).map((act) => (
-          <View
-            key={act.id}
-            style={[styles.activityRow, { borderTopColor: colors.border }]}
-          >
-            <View style={styles.activityHeader}>
-              <Text style={[styles.activityTitle, { color: colors.text }]}>
-                {act.title}
-              </Text>
-              <Text
+              {/* Project Management & Refresh Actions */}
+              <View
                 style={[
-                  styles.activityTime,
-                  { color: colors.textMuted, fontFamily: monoFontFamily },
+                  styles.projectActionRow,
+                  { borderTopColor: colors.border },
                 ]}
               >
-                {act.timestamp}
-              </Text>
+                <Pressable
+                  onPress={handleRefreshDashboard}
+                  disabled={isRefreshingAny}
+                  style={[
+                    styles.projectActionBtn,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderColor: colors.border,
+                      opacity: isRefreshingAny ? 0.6 : 1,
+                    },
+                  ]}
+                >
+                  {isRefreshingAny ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <VectorIcon
+                      name="refresh"
+                      size={14}
+                      color={colors.primary}
+                    />
+                  )}
+                  <Text
+                    style={[styles.projectActionText, { color: colors.text }]}
+                  >
+                    {isRefreshingAny ? 'Syncing...' : 'Refresh'}
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => setDashboardSubTab('reports')}
+                  style={[
+                    styles.projectActionBtn,
+                    {
+                      backgroundColor: colors.surfaceAccent,
+                      borderColor: colors.primary,
+                    },
+                  ]}
+                >
+                  <VectorIcon
+                    name="file-text"
+                    size={14}
+                    color={colors.primary}
+                  />
+                  <Text
+                    style={[
+                      styles.projectActionText,
+                      { color: colors.primary },
+                    ]}
+                  >
+                    Reports & Export
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={openProjectDetails}
+                  style={[
+                    styles.projectActionBtn,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <VectorIcon name="info" size={14} color={colors.primary} />
+                  <Text
+                    style={[styles.projectActionText, { color: colors.text }]}
+                  >
+                    Details
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={openProjectSelection}
+                  style={[
+                    styles.projectActionBtn,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <VectorIcon name="folder" size={14} color={colors.primary} />
+                  <Text
+                    style={[styles.projectActionText, { color: colors.text }]}
+                  >
+                    Projects ({projects.length})
+                  </Text>
+                </Pressable>
+              </View>
+
+              {/* Quick Navigation Shortcuts */}
+              <View style={styles.quickActionRow}>
+                <Pressable
+                  onPress={() => setActiveTab('testcases')}
+                  style={[
+                    styles.quickActionBtn,
+                    {
+                      backgroundColor: colors.surfaceAccent,
+                      borderColor: colors.primary,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[styles.quickActionText, { color: colors.primary }]}
+                  >
+                    + Test Case
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => setActiveTab('testruns')}
+                  style={[
+                    styles.quickActionBtn,
+                    {
+                      backgroundColor: colors.primary,
+                      borderColor: colors.primary,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.quickActionText,
+                      { color: colors.textOnPrimary },
+                    ]}
+                  >
+                    Execute Run
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => setActiveTab('defects')}
+                  style={[
+                    styles.quickActionBtn,
+                    {
+                      backgroundColor: colors.dangerSoft,
+                      borderColor: colors.danger,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[styles.quickActionText, { color: colors.danger }]}
+                  >
+                    Log Defect
+                  </Text>
+                </Pressable>
+              </View>
             </View>
-            {act.detail ? (
-              <Text style={[styles.activityDetail, { color: colors.textSecondary }]}>
-                {act.detail}
-              </Text>
+
+            {/* 2. Primary 4-KPI Grid (Qavora Web Dashboard Parity) */}
+            <View style={styles.kpiGrid}>
+              <Pressable
+                onPress={() => setActiveTab('testcases')}
+                style={[
+                  styles.kpiCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.kpiLabel,
+                    { color: colors.textMuted, fontFamily: monoFontFamily },
+                  ]}
+                >
+                  TOTAL TEST CASES
+                </Text>
+                <Text style={[styles.kpiValue, { color: colors.primary }]}>
+                  {metrics.totalTestCases}
+                </Text>
+                <Text style={[styles.kpiSub, { color: colors.textSecondary }]}>
+                  {metrics.totalSuites} suites · {metrics.totalPhases} phases
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => setActiveTab('testruns')}
+                style={[
+                  styles.kpiCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.kpiLabel,
+                    { color: colors.textMuted, fontFamily: monoFontFamily },
+                  ]}
+                >
+                  PASS RATE & PROGRESS
+                </Text>
+                <Text style={[styles.kpiValue, { color: colors.success }]}>
+                  {metrics.passRate}%
+                </Text>
+                <Text style={[styles.kpiSub, { color: colors.textSecondary }]}>
+                  {metrics.executedCases} of {metrics.totalTestCases} executed
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => setActiveTab('testruns')}
+                style={[
+                  styles.kpiCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.kpiLabel,
+                    { color: colors.textMuted, fontFamily: monoFontFamily },
+                  ]}
+                >
+                  TEST RUNS & EXECS
+                </Text>
+                <Text style={[styles.kpiValue, { color: colors.info }]}>
+                  {metrics.totalRuns}
+                </Text>
+                <Text style={[styles.kpiSub, { color: colors.textSecondary }]}>
+                  {metrics.activeRuns} active · {metrics.completedRuns} done ·{' '}
+                  {metrics.totalExecutions} execs
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => setActiveTab('defects')}
+                style={[
+                  styles.kpiCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.kpiLabel,
+                    { color: colors.textMuted, fontFamily: monoFontFamily },
+                  ]}
+                >
+                  ACTIVE DEFECTS
+                </Text>
+                <Text
+                  style={[
+                    styles.kpiValue,
+                    {
+                      color:
+                        metrics.openDefects > 0
+                          ? colors.danger
+                          : colors.success,
+                    },
+                  ]}
+                >
+                  {metrics.openDefects}
+                </Text>
+                <Text style={[styles.kpiSub, { color: colors.textSecondary }]}>
+                  {metrics.criticalOnlyActiveDefects} Critical ·{' '}
+                  {metrics.highOnlyActiveDefects} High ({metrics.totalDefects}{' '}
+                  total)
+                </Text>
+              </Pressable>
+            </View>
+
+            {/* 3. Test Case Execution Status Breakdown Card */}
+            <View
+              style={[
+                styles.sectionCard,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  Test Execution Progress & Case Verdicts
+                </Text>
+                <Text
+                  style={[
+                    styles.sectionMeta,
+                    { color: colors.textMuted, fontFamily: monoFontFamily },
+                  ]}
+                >
+                  {metrics.executedCases}/{metrics.totalTestCases} Executed (
+                  {metrics.coverageRate}%)
+                </Text>
+              </View>
+
+              {metrics.totalTestCases === 0 ? (
+                <View style={styles.emptyBlock}>
+                  <Text
+                    style={[styles.emptyText, { color: colors.textSecondary }]}
+                  >
+                    No test cases defined for this project yet. Create your
+                    first test suite and test case to track execution progress.
+                  </Text>
+                  <Pressable
+                    onPress={() => setActiveTab('testcases')}
+                    style={[
+                      styles.emptyPrimaryBtn,
+                      { backgroundColor: colors.primary },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.emptyPrimaryBtnText,
+                        { color: colors.textOnPrimary },
+                      ]}
+                    >
+                      + Create First Test Case
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <>
+                  {/* Stacked Progress Bar */}
+                  <View
+                    style={[
+                      styles.stackedBar,
+                      { backgroundColor: colors.surfaceHighlight },
+                    ]}
+                  >
+                    {passFlex > 0 && (
+                      <View
+                        style={[
+                          styles.barSegment,
+                          {
+                            flex: passFlex,
+                            backgroundColor: colors.success,
+                          },
+                        ]}
+                      />
+                    )}
+                    {failFlex > 0 && (
+                      <View
+                        style={[
+                          styles.barSegment,
+                          {
+                            flex: failFlex,
+                            backgroundColor: colors.danger,
+                          },
+                        ]}
+                      />
+                    )}
+                    {blockedFlex > 0 && (
+                      <View
+                        style={[
+                          styles.barSegment,
+                          {
+                            flex: blockedFlex,
+                            backgroundColor: colors.warning,
+                          },
+                        ]}
+                      />
+                    )}
+                    {untestedFlex > 0 && (
+                      <View
+                        style={[
+                          styles.barSegment,
+                          {
+                            flex: untestedFlex,
+                            backgroundColor: colors.border,
+                          },
+                        ]}
+                      />
+                    )}
+                  </View>
+
+                  <View style={styles.legendGrid}>
+                    <View
+                      style={[
+                        styles.statusStatBox,
+                        {
+                          backgroundColor: colors.surfaceElevated,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      <View style={styles.legendItem}>
+                        <View
+                          style={[
+                            styles.legendDot,
+                            { backgroundColor: colors.success },
+                          ]}
+                        />
+                        <Text
+                          style={[
+                            styles.legendText,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          Passed
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.statusStatNum,
+                          { color: colors.success, fontFamily: monoFontFamily },
+                        ]}
+                      >
+                        {metrics.passedCases}
+                      </Text>
+                    </View>
+
+                    <View
+                      style={[
+                        styles.statusStatBox,
+                        {
+                          backgroundColor: colors.surfaceElevated,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      <View style={styles.legendItem}>
+                        <View
+                          style={[
+                            styles.legendDot,
+                            { backgroundColor: colors.danger },
+                          ]}
+                        />
+                        <Text
+                          style={[
+                            styles.legendText,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          Failed
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.statusStatNum,
+                          { color: colors.danger, fontFamily: monoFontFamily },
+                        ]}
+                      >
+                        {metrics.failedCases}
+                      </Text>
+                    </View>
+
+                    <View
+                      style={[
+                        styles.statusStatBox,
+                        {
+                          backgroundColor: colors.surfaceElevated,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      <View style={styles.legendItem}>
+                        <View
+                          style={[
+                            styles.legendDot,
+                            { backgroundColor: colors.warning },
+                          ]}
+                        />
+                        <Text
+                          style={[
+                            styles.legendText,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          Blocked
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.statusStatNum,
+                          { color: colors.warning, fontFamily: monoFontFamily },
+                        ]}
+                      >
+                        {metrics.blockedCases}
+                      </Text>
+                    </View>
+
+                    <View
+                      style={[
+                        styles.statusStatBox,
+                        {
+                          backgroundColor: colors.surfaceElevated,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      <View style={styles.legendItem}>
+                        <View
+                          style={[
+                            styles.legendDot,
+                            { backgroundColor: colors.textMuted },
+                          ]}
+                        />
+                        <Text
+                          style={[
+                            styles.legendText,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          Not Run
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.statusStatNum,
+                          {
+                            color: colors.textSecondary,
+                            fontFamily: monoFontFamily,
+                          },
+                        ]}
+                      >
+                        {metrics.notRunCases}
+                      </Text>
+                    </View>
+                  </View>
+                </>
+              )}
+            </View>
+
+            {/* 4. Defect Status & Priority/Severity Breakdown Card */}
+            <View
+              style={[
+                styles.sectionCard,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  Defect Status & Priority Breakdown
+                </Text>
+                <Pressable onPress={() => setActiveTab('defects')}>
+                  <Text style={[styles.linkText, { color: colors.primary }]}>
+                    {metrics.totalDefects} Total · {metrics.defectResolutionRate}
+                    % Resolved →
+                  </Text>
+                </Pressable>
+              </View>
+
+              {/* Critical & High Priority Highlight Strip */}
+              <View style={styles.priorityAlertRow}>
+                <View
+                  style={[
+                    styles.priorityAlertBox,
+                    {
+                      backgroundColor: colors.dangerSoft,
+                      borderColor: colors.danger,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.priorityAlertLabel,
+                      { color: colors.danger, fontFamily: monoFontFamily },
+                    ]}
+                  >
+                    CRITICAL ACTIVE
+                  </Text>
+                  <Text
+                    style={[
+                      styles.priorityAlertVal,
+                      { color: colors.danger, fontFamily: monoFontFamily },
+                    ]}
+                  >
+                    {metrics.criticalOnlyActiveDefects}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.priorityAlertSub,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    {defectSeverityCounts.Critical} total critical
+                  </Text>
+                </View>
+
+                <View
+                  style={[
+                    styles.priorityAlertBox,
+                    {
+                      backgroundColor: colors.warningSoft,
+                      borderColor: colors.warning,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.priorityAlertLabel,
+                      { color: colors.warning, fontFamily: monoFontFamily },
+                    ]}
+                  >
+                    HIGH ACTIVE
+                  </Text>
+                  <Text
+                    style={[
+                      styles.priorityAlertVal,
+                      { color: colors.warning, fontFamily: monoFontFamily },
+                    ]}
+                  >
+                    {metrics.highOnlyActiveDefects}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.priorityAlertSub,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    {defectSeverityCounts.High} total high
+                  </Text>
+                </View>
+              </View>
+
+              {/* 6-Status Breakdown Grid */}
+              <View style={styles.legendGrid}>
+                {[
+                  {
+                    label: 'Open',
+                    count: defectStatusCounts.Open || 0,
+                    color: colors.danger,
+                  },
+                  {
+                    label: 'In Progress',
+                    count: defectStatusCounts['In Progress'] || 0,
+                    color: colors.warning,
+                  },
+                  {
+                    label: 'Ready for Retest',
+                    count: defectStatusCounts['Ready for Retest'] || 0,
+                    color: colors.info,
+                  },
+                  {
+                    label: 'Resolved',
+                    count: defectStatusCounts.Resolved || 0,
+                    color: colors.success,
+                  },
+                  {
+                    label: 'Closed',
+                    count: defectStatusCounts.Closed || 0,
+                    color: colors.textSecondary,
+                  },
+                  {
+                    label: 'Reopened',
+                    count: defectStatusCounts.Reopened || 0,
+                    color: colors.danger,
+                  },
+                ].map((item) => (
+                  <View
+                    key={item.label}
+                    style={[
+                      styles.statusStatBox,
+                      {
+                        backgroundColor: colors.surfaceElevated,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.legendText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      {item.label}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.statusStatNum,
+                        { color: item.color, fontFamily: monoFontFamily },
+                      ]}
+                    >
+                      {item.count}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            {/* 5. Test Plan & Test Suites Progress Card */}
+            <View
+              style={[
+                styles.sectionCard,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionTitleCol}>
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                    Test Plan & Suite Progress
+                  </Text>
+                  {testPlan && testPlan.name ? (
+                    <Text
+                      style={[
+                        styles.planSubtitle,
+                        { color: colors.textMuted, fontFamily: monoFontFamily },
+                      ]}
+                    >
+                      Plan: {testPlan.name} ({metrics.totalPhases} phases ·{' '}
+                      {metrics.totalSuites} suites)
+                    </Text>
+                  ) : null}
+                </View>
+                <Pressable onPress={() => setActiveTab('testcases')}>
+                  <Text style={[styles.linkText, { color: colors.primary }]}>
+                    View Suites →
+                  </Text>
+                </Pressable>
+              </View>
+
+              {suiteProgressList.length === 0 &&
+              phaseProgressList.length === 0 ? (
+                <Text
+                  style={[styles.emptyText, { color: colors.textSecondary }]}
+                >
+                  No test suites or plan phases configured yet.
+                </Text>
+              ) : (
+                <View style={styles.rowList}>
+                  {suiteProgressList.map((sp) => (
+                    <Pressable
+                      key={sp.id}
+                      onPress={() => setActiveTab('testcases')}
+                      style={[
+                        styles.suiteProgressItem,
+                        {
+                          backgroundColor: colors.surfaceElevated,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      <View style={styles.rowItemTop}>
+                        <Text
+                          numberOfLines={1}
+                          style={[styles.rowTitle, { color: colors.text }]}
+                        >
+                          {sp.name}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.rowCode,
+                            {
+                              color:
+                                sp.passRate >= 80
+                                  ? colors.success
+                                  : colors.primary,
+                              fontFamily: monoFontFamily,
+                            },
+                          ]}
+                        >
+                          {sp.coveragePct}% Covered · {sp.passRate}% Pass
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.rowMeta,
+                          {
+                            color: colors.textSecondary,
+                            fontFamily: monoFontFamily,
+                          },
+                        ]}
+                      >
+                        Phase: {sp.phaseName} · {sp.executedCases}/
+                        {sp.totalCases} executed ({sp.passedCases}P /{' '}
+                        {sp.failedCases}F / {sp.blockedCases}B /{' '}
+                        {sp.untestedCases} Not Run)
+                      </Text>
+                      <View
+                        style={[
+                          styles.miniProgressTrack,
+                          { backgroundColor: colors.surfaceHighlight },
+                        ]}
+                      >
+                        <View
+                          style={[
+                            styles.miniProgressFill,
+                            {
+                              width: `${Math.min(100, sp.coveragePct)}%`,
+                              backgroundColor:
+                                sp.failedCases > 0
+                                  ? colors.warning
+                                  : colors.success,
+                            },
+                          ]}
+                        />
+                      </View>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </View>
+
+            {/* 6. Recent Test Runs & Execution Activity */}
+            <View
+              style={[
+                styles.sectionCard,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  Recent Test Runs & Execution Activity
+                </Text>
+                <Pressable onPress={() => setActiveTab('testruns')}>
+                  <Text style={[styles.linkText, { color: colors.primary }]}>
+                    All Runs ({metrics.totalRuns}) →
+                  </Text>
+                </Pressable>
+              </View>
+
+              {recentRuns.length === 0 && recentExecutions.length === 0 ? (
+                <Text
+                  style={[styles.emptyText, { color: colors.textSecondary }]}
+                >
+                  No test runs or execution records logged yet. Start a Test Run
+                  to record Pass, Fail, or Blocked verdicts.
+                </Text>
+              ) : (
+                <View style={styles.rowList}>
+                  {recentRuns.map((run) => {
+                    const isCompleted = run.status === 'Completed';
+                    return (
+                      <Pressable
+                        key={run.id}
+                        onPress={() => {
+                          setSelectedTestRunId(run.id);
+                          setActiveTab('testruns');
+                        }}
+                        style={[
+                          styles.rowItem,
+                          {
+                            backgroundColor: colors.surfaceElevated,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                      >
+                        <View style={styles.rowItemTop}>
+                          <Text
+                            style={[
+                              styles.rowCode,
+                              {
+                                color: colors.primary,
+                                fontFamily: monoFontFamily,
+                              },
+                            ]}
+                          >
+                            {run.id} · Build {run.buildVersion}
+                          </Text>
+                          <View
+                            style={[
+                              styles.badgePill,
+                              {
+                                backgroundColor: isCompleted
+                                  ? colors.successSoft
+                                  : colors.warningSoft,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.badgeText,
+                                {
+                                  color: isCompleted
+                                    ? colors.success
+                                    : colors.warning,
+                                },
+                              ]}
+                            >
+                              {run.status}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text
+                          numberOfLines={1}
+                          style={[styles.rowTitle, { color: colors.text }]}
+                        >
+                          {run.name}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.rowMeta,
+                            {
+                              color: colors.textSecondary,
+                              fontFamily: monoFontFamily,
+                            },
+                          ]}
+                        >
+                          {run.deviceInfo} · {run.metrics.passed}P /{' '}
+                          {run.metrics.failed}F / {run.metrics.blocked}B (
+                          {run.metrics.passRate}% Pass)
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+
+                  {/* Recent Individual Case Executions */}
+                  {recentExecutions.length > 0 ? (
+                    <View
+                      style={[
+                        styles.subListDivider,
+                        { borderTopColor: colors.border },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.subListHeading,
+                          {
+                            color: colors.textMuted,
+                            fontFamily: monoFontFamily,
+                          },
+                        ]}
+                      >
+                        LATEST CASE EXECUTIONS ({metrics.totalExecutions})
+                      </Text>
+                      {recentExecutions.map((ex, idx) => {
+                        const st = String(
+                          ex.status || ex.outcome || ''
+                        ).toUpperCase();
+                        const isPass = st === 'PASSED' || st === 'PASS';
+                        const isFail = st === 'FAILED' || st === 'FAIL';
+                        const pillBg = isPass
+                          ? colors.successSoft
+                          : isFail
+                          ? colors.dangerSoft
+                          : colors.warningSoft;
+                        const pillFg = isPass
+                          ? colors.success
+                          : isFail
+                          ? colors.danger
+                          : colors.warning;
+
+                        return (
+                          <Pressable
+                            key={ex.id || `${ex.testCaseId}-${idx}`}
+                            onPress={() => {
+                              if (ex.testRunId) {
+                                setSelectedTestRunId(ex.testRunId);
+                                setActiveTab('testruns');
+                              } else if (ex.testCaseId) {
+                                setSelectedTestCaseId(ex.testCaseId);
+                                setActiveTab('testcases');
+                              }
+                            }}
+                            style={[
+                              styles.rowItem,
+                              {
+                                backgroundColor: colors.surfaceElevated,
+                                borderColor: colors.border,
+                              },
+                            ]}
+                          >
+                            <View style={styles.rowItemTop}>
+                              <Text
+                                style={[
+                                  styles.rowCode,
+                                  {
+                                    color: colors.primary,
+                                    fontFamily: monoFontFamily,
+                                  },
+                                ]}
+                              >
+                                {ex.testCaseId || ex.caseId}
+                              </Text>
+                              <View
+                                style={[
+                                  styles.badgePill,
+                                  { backgroundColor: pillBg },
+                                ]}
+                              >
+                                <Text
+                                  style={[styles.badgeText, { color: pillFg }]}
+                                >
+                                  {st || 'EXECUTED'}
+                                </Text>
+                              </View>
+                            </View>
+                            <Text
+                              numberOfLines={1}
+                              style={[styles.rowTitle, { color: colors.text }]}
+                            >
+                              {ex.testCaseTitle ||
+                                ex.caseTitle ||
+                                'Test Execution'}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.rowMeta,
+                                {
+                                  color: colors.textSecondary,
+                                  fontFamily: monoFontFamily,
+                                },
+                              ]}
+                            >
+                              {ex.testerName || ex.tester || 'QA Tester'} ·{' '}
+                              {ex.environment || 'Staging'} ·{' '}
+                              {String(ex.executedAt || '')
+                                .slice(0, 16)
+                                .replace('T', ' ')}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  ) : null}
+                </View>
+              )}
+            </View>
+
+            {/* 7. Recent Defects Card */}
+            <View
+              style={[
+                styles.sectionCard,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  Recent Project Defects
+                </Text>
+                <Pressable onPress={() => setActiveTab('defects')}>
+                  <Text style={[styles.linkText, { color: colors.primary }]}>
+                    All Defects ({metrics.totalDefects}) →
+                  </Text>
+                </Pressable>
+              </View>
+
+              {recentDefects.length === 0 ? (
+                <Text
+                  style={[styles.emptyText, { color: colors.textSecondary }]}
+                >
+                  Zero defects logged for this project.
+                </Text>
+              ) : (
+                <View style={styles.rowList}>
+                  {recentDefects.map((bug) => {
+                    const isCritical =
+                      bug.severity === 'Critical' || bug.severity === 'High';
+                    return (
+                      <Pressable
+                        key={bug.id}
+                        onPress={() => {
+                          setSelectedDefectId(bug.id);
+                          setActiveTab('defects');
+                        }}
+                        style={[
+                          styles.rowItem,
+                          {
+                            backgroundColor: colors.surfaceElevated,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                      >
+                        <View style={styles.rowItemTop}>
+                          <Text
+                            style={[
+                              styles.rowCode,
+                              {
+                                color: isCritical
+                                  ? colors.danger
+                                  : colors.textSecondary,
+                                fontFamily: monoFontFamily,
+                              },
+                            ]}
+                          >
+                            {bug.id} · {bug.severity}
+                          </Text>
+                          <View
+                            style={[
+                              styles.badgePill,
+                              {
+                                backgroundColor:
+                                  bug.status === 'Closed' ||
+                                  bug.status === 'Resolved'
+                                    ? colors.successSoft
+                                    : colors.dangerSoft,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.badgeText,
+                                {
+                                  color:
+                                    bug.status === 'Closed' ||
+                                    bug.status === 'Resolved'
+                                      ? colors.success
+                                      : colors.danger,
+                                },
+                              ]}
+                            >
+                              {bug.status}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text
+                          numberOfLines={1}
+                          style={[styles.rowTitle, { color: colors.text }]}
+                        >
+                          {bug.title}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.rowMeta,
+                            {
+                              color: colors.textSecondary,
+                              fontFamily: monoFontFamily,
+                            },
+                          ]}
+                        >
+                          Assignee: {bug.assignee || 'Unassigned'}
+                          {bug.linkedTestCaseId
+                            ? ` · Case: ${bug.linkedTestCaseId}`
+                            : ''}
+                          {bug.linkedTestRunId
+                            ? ` · Run: ${bug.linkedTestRunId}`
+                            : ''}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+
+            {/* 8. Recent Workspace Activity Stream */}
+            {recentActivities.length > 0 ? (
+              <View
+                style={[
+                  styles.sectionCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  Recent Workspace Activity
+                </Text>
+                <View style={styles.activityList}>
+                  {recentActivities.map((act) => (
+                    <View
+                      key={act.id}
+                      style={[
+                        styles.activityRow,
+                        { borderBottomColor: colors.border },
+                      ]}
+                    >
+                      <View style={styles.activityLeft}>
+                        <Text
+                          style={[styles.activityTitle, { color: colors.text }]}
+                        >
+                          {act.title}
+                        </Text>
+                        {act.detail ? (
+                          <Text
+                            numberOfLines={1}
+                            style={[
+                              styles.activityDetail,
+                              { color: colors.textSecondary },
+                            ]}
+                          >
+                            {act.detail}
+                          </Text>
+                        ) : null}
+                      </View>
+                      <Text
+                        style={[
+                          styles.activityTime,
+                          {
+                            color: colors.textMuted,
+                            fontFamily: monoFontFamily,
+                          },
+                        ]}
+                      >
+                        {act.timestamp.split(' ')[1] || act.timestamp}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
             ) : null}
-          </View>
-        ))}
+          </>
+        )}
       </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  scrollRoot: {
     flex: 1,
   },
-  content: {
+  scrollContent: {
     paddingHorizontal: 14,
     paddingTop: 14,
-    paddingBottom: 96,
+    paddingBottom: 28,
+  },
+  container: {
     maxWidth: 920,
     width: '100%',
     alignSelf: 'center',
     gap: 14,
   },
-  projectCard: {
-    borderRadius: 16,
+  modeToggleContainer: {
+    flexDirection: 'row',
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 4,
+    gap: 6,
+  },
+  modeToggleBtn: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    paddingHorizontal: 10,
+  },
+  modeToggleBtnText: {
+    fontSize: 13,
+  },
+  bannerCard: {
+    borderRadius: 14,
     borderWidth: 1,
     padding: 16,
+    gap: 14,
   },
-  projectHeader: {
-    marginBottom: 14,
+  bannerTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
   },
-  projectTitleCol: {
-    flexShrink: 1,
+  bannerTextCol: {
+    flex: 1,
+    gap: 4,
   },
-  kicker: {
+  projectStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 2,
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  statusBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  bannerOverline: {
     fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 0.4,
-    marginBottom: 4,
+    letterSpacing: 0.5,
   },
-  projectTitle: {
-    fontSize: 20,
+  bannerTitle: {
+    fontSize: 19,
     fontWeight: '700',
-    lineHeight: 26,
-    marginBottom: 4,
+    letterSpacing: -0.3,
   },
-  projectSub: {
-    fontSize: 13,
-    lineHeight: 18,
+  bannerSub: {
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  coverageRingBox: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  coverageBigVal: {
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  coverageLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  projectActionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+  },
+  projectActionBtn: {
+    minHeight: 36,
+    paddingHorizontal: 11,
+    borderRadius: 9,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  projectActionText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   quickActionRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
   },
-  primaryQuickBtn: {
+  quickActionBtn: {
     flex: 1,
-    minWidth: 100,
-    minHeight: 44,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-  },
-  primaryQuickBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  secondaryQuickBtn: {
-    flex: 1,
-    minWidth: 95,
-    minHeight: 44,
+    minWidth: 96,
+    minHeight: 40,
     borderRadius: 10,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 10,
   },
-  secondaryQuickBtnText: {
-    fontSize: 13,
+  quickActionText: {
+    fontSize: 12,
     fontWeight: '700',
   },
   kpiGrid: {
@@ -709,162 +1650,228 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   kpiCard: {
-    flexGrow: 1,
-    flexBasis: '46%',
-    minWidth: 148,
+    flex: 1,
+    minWidth: 150,
     borderRadius: 14,
     borderWidth: 1,
     padding: 14,
+    gap: 4,
   },
   kpiLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 4,
+    fontSize: 10,
+    fontWeight: '700',
   },
   kpiValue: {
     fontSize: 24,
     fontWeight: '700',
-    marginBottom: 2,
+    letterSpacing: -0.5,
   },
   kpiSub: {
     fontSize: 11,
-    lineHeight: 15,
   },
   sectionCard: {
-    borderRadius: 16,
+    borderRadius: 14,
     borderWidth: 1,
     padding: 16,
+    gap: 12,
   },
-  sectionHeaderRow: {
+  sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    flexWrap: 'wrap',
     gap: 8,
-    marginBottom: 12,
+  },
+  sectionTitleCol: {
+    flex: 1,
+    gap: 2,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
-    flexShrink: 1,
   },
-  sectionCounter: {
-    fontSize: 12,
+  planSubtitle: {
+    fontSize: 11,
+  },
+  sectionMeta: {
+    fontSize: 11,
     fontWeight: '600',
+  },
+  linkText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  emptyBlock: {
+    gap: 10,
+    paddingVertical: 6,
+  },
+  emptyPrimaryBtn: {
+    alignSelf: 'flex-start',
+    minHeight: 38,
+    paddingHorizontal: 14,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyPrimaryBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   stackedBar: {
     height: 10,
     borderRadius: 5,
-    flexDirection: 'row',
     overflow: 'hidden',
-    marginBottom: 14,
+    flexDirection: 'row',
   },
   barSegment: {
     height: '100%',
   },
-  statusBreakdownRow: {
+  legendGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     flexWrap: 'wrap',
     gap: 8,
   },
-  statusStatItem: {
+  statusStatBox: {
     flex: 1,
-    minWidth: 68,
+    minWidth: 125,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4,
+    justifyContent: 'space-between',
+    gap: 6,
   },
-  statusStatValue: {
-    fontSize: 18,
+  statusStatNum: {
+    fontSize: 15,
     fontWeight: '700',
   },
-  statusStatLabel: {
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  legendText: {
     fontSize: 12,
-    marginTop: 2,
-  },
-  linkTouch: {
-    minHeight: 36,
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  linkText: {
-    fontSize: 13,
     fontWeight: '600',
   },
-  suiteRow: {
+  priorityAlertRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderTopWidth: 1,
-    paddingVertical: 11,
+    flexWrap: 'wrap',
     gap: 10,
   },
-  suiteInfoCol: {
+  priorityAlertBox: {
     flex: 1,
-    flexShrink: 1,
+    minWidth: 140,
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 12,
+    gap: 2,
   },
-  suiteName: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  suiteDesc: {
-    fontSize: 12,
-  },
-  suiteStats: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  emptyHint: {
-    fontSize: 13,
-    lineHeight: 19,
-    paddingVertical: 6,
-  },
-  itemRow: {
-    borderTopWidth: 1,
-    paddingVertical: 12,
-  },
-  itemRowMain: {
-    flexShrink: 1,
-  },
-  itemCode: {
-    fontSize: 11,
+  priorityAlertLabel: {
+    fontSize: 10,
     fontWeight: '700',
-    marginBottom: 3,
   },
-  itemRowTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    lineHeight: 20,
-    marginBottom: 3,
+  priorityAlertVal: {
+    fontSize: 20,
+    fontWeight: '700',
   },
-  itemRowMeta: {
-    fontSize: 12,
-  },
-  savedTimestamp: {
+  priorityAlertSub: {
     fontSize: 11,
   },
-  activityRow: {
-    borderTopWidth: 1,
-    paddingVertical: 10,
+  rowList: {
+    gap: 8,
   },
-  activityHeader: {
+  suiteProgressItem: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 12,
+    gap: 6,
+  },
+  miniProgressTrack: {
+    height: 6,
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  miniProgressFill: {
+    height: '100%',
+    borderRadius: 999,
+  },
+  rowItem: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 12,
+    gap: 4,
+  },
+  rowItemTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: 8,
-    marginBottom: 2,
   },
-  activityTitle: {
+  rowCode: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  rowTitle: {
     fontSize: 13,
     fontWeight: '600',
+  },
+  rowMeta: {
+    fontSize: 11,
+  },
+  badgePill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  subListDivider: {
+    borderTopWidth: 1,
+    paddingTop: 10,
+    marginTop: 4,
+    gap: 8,
+  },
+  subListHeading: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+  },
+  emptyText: {
+    fontSize: 12,
+    paddingVertical: 4,
+    lineHeight: 18,
+  },
+  activityList: {
+    gap: 8,
+  },
+  activityRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    gap: 10,
+  },
+  activityLeft: {
     flex: 1,
+    gap: 2,
+  },
+  activityTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  activityDetail: {
+    fontSize: 11,
   },
   activityTime: {
     fontSize: 11,
-  },
-  activityDetail: {
-    fontSize: 12,
-    lineHeight: 17,
   },
 });

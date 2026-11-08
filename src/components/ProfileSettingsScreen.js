@@ -30,6 +30,7 @@ export default function ProfileSettingsScreen() {
     lastPersistedAt,
     openProjectSelection,
     openProjectDetails,
+    openReportsView,
     updateProfile,
     resetToSampleData,
     clearAllWorkspaceData,
@@ -148,7 +149,7 @@ export default function ProfileSettingsScreen() {
 
           <View style={[styles.dataButtonsRow, { marginBottom: 12 }]}>
             <Pressable
-              onPress={openProjectDetails}
+              onPress={openReportsView}
               style={[
                 styles.secondaryBtn,
                 {
@@ -159,8 +160,26 @@ export default function ProfileSettingsScreen() {
                 },
               ]}
             >
-              <VectorIcon name="info" size={15} color={colors.primary} />
+              <VectorIcon name="file-text" size={15} color={colors.primary} />
               <Text style={[styles.secondaryBtnText, { color: colors.primary }]}>
+                Reports & Export
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={openProjectDetails}
+              style={[
+                styles.secondaryBtn,
+                {
+                  backgroundColor: colors.background,
+                  borderColor: colors.borderStrong,
+                  flexDirection: 'row',
+                  gap: 6,
+                },
+              ]}
+            >
+              <VectorIcon name="info" size={15} color={colors.primary} />
+              <Text style={[styles.secondaryBtnText, { color: colors.text }]}>
                 Project Details
               </Text>
             </Pressable>

@@ -45,6 +45,8 @@ function QavoraQAShell() {
   const {
     activeTab,
     setActiveTab,
+    dashboardSubTab,
+    setDashboardSubTab,
     projectViewMode,
     setProjectViewMode,
     metrics,
@@ -78,6 +80,10 @@ function QavoraQAShell() {
         setSelectedDefectId(null);
         return true;
       }
+      if (activeTab === 'dashboard' && dashboardSubTab === 'reports') {
+        setDashboardSubTab('overview');
+        return true;
+      }
       if (activeTab !== 'dashboard') {
         setActiveTab('dashboard');
         return true;
@@ -89,10 +95,12 @@ function QavoraQAShell() {
     effectiveViewMode,
     selectedProject,
     activeTab,
+    dashboardSubTab,
     selectedTestCaseId,
     selectedDefectId,
     setProjectViewMode,
     setActiveTab,
+    setDashboardSubTab,
     setSelectedTestCaseId,
     setSelectedDefectId,
   ]);
@@ -103,6 +111,8 @@ function QavoraQAShell() {
     ? `Switching Project · Active: ${selectedProject.name}`
     : effectiveViewMode === 'details'
     ? `${selectedProject.name} · Project Details`
+    : activeTab === 'dashboard' && dashboardSubTab === 'reports'
+    ? `${selectedProject.name} · Reports & Analytics`
     : `${selectedProject.name} · ${SCREEN_TITLES[activeTab] || 'QA Manager'}`;
 
   return (
