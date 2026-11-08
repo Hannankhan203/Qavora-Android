@@ -1,8 +1,9 @@
 /**
- * Qavora Android — Offline-First Cache & Synchronization Engine (Phase 2F)
+ * Qavora Android — Offline-First Cache & Synchronization Engine (Phases 2F & 3A)
  *
  * Implements parity with Qavora Web's `src/modules/qaChecklistSyncQueue.js`
- * for React Native / Expo using per-user AsyncStorage persistence:
+ * for React Native / Expo using per-user AsyncStorage persistence and native
+ * Android / iOS / Web network monitoring (`@react-native-community/netinfo`):
  * 1. Per-User Offline Project Cache (`@qavora_offline_projects_cache_v1:<userId>`)
  * 2. Durable Per-User Offline Mutation Queue (`@qavora_pending_project_ops_v1:<userId>`)
  * 3. Idempotent Operation Coalescing & Dependency Ordering
@@ -12,9 +13,13 @@
  * 6. Safe HTTP 409 Conflict Capture & Explicit Resolution (`merge` / `keep_local`
  *    vs `keep_server` / `discard_local`)
  * 7. Strict Multi-User Isolation & Logout Preservation
+ * 8. Native Android (`@react-native-community/netinfo`) + Web (`window` online/offline)
+ *    + `AppState` Connectivity Monitoring with Offline-to-Online Transition Deduplication
  */
 
+import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 import {
   fetchProjectById,
   createProject as createProjectApi,
@@ -33,10 +38,49 @@ const BASE_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30000;
 const DEFAULT_MAX_RETRIES = 5;
 const SYNC_LOCK_TTL_MS = 45000;
+const DEFAULT_RECONNECT_DEBOUNCE_MS = 60;
+
+const INITIAL_NETWORK_STATE = {
+  type: 'unknown',
+  isConnected: null,
+  isInternetReachable: null,
+  isOnline: true,
+  isKnown: false,
+  reason: 'initial',
+  details: null,
+  updatedAt: null,
+};
 
 let customSyncStorageAdapter = null;
+let customNetInfoAdapter = null;
+let customAppStateAdapter = null;
 let simulatedOfflineMode = false;
 let monotonicSeqCounter = 0;
+let reconnectDebounceMs = DEFAULT_RECONNECT_DEBOUNCE_MS;
+
+// Tracks the currently authenticated user ID so User A's queue is never synced while User B is active
+let activeAuthenticatedUserId = null;
+
+// Tracks normalized native + web network state
+let networkConnectivityState = { ...INITIAL_NETWORK_STATE };
+
+// Subscription & debounce management for native NetInfo + web window + AppState
+let connectivityMonitorRefCount = 0;
+let netInfoUnsubscribe = null;
+let windowOnlineHandler = null;
+let windowOfflineHandler = null;
+let appStateSubscription = null;
+let lastKnownAppState =
+  AppState && typeof AppState.currentState === 'string'
+    ? AppState.currentState
+    : 'active';
+let pendingReconnectTimer = null;
+let pendingReconnectUserId = null;
+
+// Single-flight reconnect promise registry keyed by userId
+const activeReconnectSyncPromises = new Map();
+// Optional callback invoked when an automatic reconnect sync finishes
+const reconnectSyncCallbacks = new Set();
 
 // In-memory lock registry keyed by userId
 const activeMemoryLocks = new Map();
@@ -50,6 +94,20 @@ function getStorage() {
   return AsyncStorage;
 }
 
+function getNetInfo() {
+  if (customNetInfoAdapter) {
+    return customNetInfoAdapter;
+  }
+  return NetInfo;
+}
+
+function getAppStateModule() {
+  if (customAppStateAdapter) {
+    return customAppStateAdapter;
+  }
+  return AppState;
+}
+
 /**
  * Injects a custom storage adapter for deterministic Node verification tests.
  *
@@ -60,17 +118,699 @@ export function setOfflineSyncStorageAdapter(adapter) {
 }
 
 /**
+ * Injects a custom NetInfo adapter (`fetch`, `addEventListener`, `refresh`) for
+ * deterministic connectivity verification tests.
+ *
+ * @param {object | null} adapter
+ */
+export function setNetInfoAdapterForTesting(adapter) {
+  customNetInfoAdapter = adapter;
+}
+
+/**
+ * Injects a custom AppState adapter (`currentState`, `addEventListener`) for
+ * deterministic foreground/background transition tests.
+ *
+ * @param {object | null} adapter
+ */
+export function setAppStateAdapterForTesting(adapter) {
+  customAppStateAdapter = adapter;
+  if (adapter && typeof adapter.currentState === 'string') {
+    lastKnownAppState = adapter.currentState;
+  }
+}
+
+/**
+ * Configures the reconnect debounce window (ms) for rapid network transition coalescing.
+ *
+ * @param {number} ms
+ */
+export function setReconnectDebounceMsForTesting(ms) {
+  reconnectDebounceMs =
+    typeof ms === 'number' && ms >= 0 ? ms : DEFAULT_RECONNECT_DEBOUNCE_MS;
+}
+
+/**
+ * Resets internal connectivity tracking state to initial defaults (used in test suites).
+ */
+export function resetConnectivityStateForTesting() {
+  clearPendingReconnectTimer();
+  activeReconnectSyncPromises.clear();
+  networkConnectivityState = { ...INITIAL_NETWORK_STATE };
+  simulatedOfflineMode = false;
+  lastKnownAppState = 'active';
+}
+
+/**
+ * Registers the currently authenticated user ID so background/reconnection sync
+ * strictly enforces per-user isolation and never syncs User A's queue while User B
+ * is authenticated.
+ *
+ * @param {string | null} userId
+ */
+export function setActiveSyncUser(userId) {
+  const cleanUser =
+    typeof userId === 'string' && userId.trim() ? userId.trim() : null;
+  const previousUser = activeAuthenticatedUserId;
+  activeAuthenticatedUserId = cleanUser;
+
+  if (previousUser && previousUser !== cleanUser) {
+    if (pendingReconnectUserId === previousUser) {
+      clearPendingReconnectTimer();
+    }
+  }
+}
+
+/**
+ * Returns the currently registered authenticated user ID for synchronization.
+ *
+ * @returns {string | null}
+ */
+export function getActiveSyncUser() {
+  return activeAuthenticatedUserId;
+}
+
+/**
+ * Returns a copy of the current normalized network connectivity state.
+ *
+ * @returns {object}
+ */
+export function getNetworkConnectivityState() {
+  return {
+    ...networkConnectivityState,
+    simulatedOffline: simulatedOfflineMode,
+    effectiveOnline: !isClientOffline(),
+  };
+}
+
+function isBrowserNavigatorOffline() {
+  return (
+    typeof navigator !== 'undefined' &&
+    typeof navigator.onLine === 'boolean' &&
+    navigator.onLine === false
+  );
+}
+
+/**
+ * Evaluates a raw NetInfo state snapshot (or browser event) into a normalized
+ * connectivity state.
+ *
+ * Rules:
+ * 1. `type === 'none'` or `isConnected === false` -> Offline (`reason: 'disconnected'`)
+ * 2. `isConnected === true` AND `isInternetReachable === false` -> Offline
+ *    (`reason: 'internet_unreachable'`, internet unavailable despite active Wi-Fi/cellular)
+ * 3. `type === 'unknown'` or `isConnected === null` -> Unknown state (`reason: 'unknown'`);
+ *    preserves last known `isOnline` state without triggering false transitions
+ * 4. `isConnected === true` AND `isInternetReachable !== false` -> Online (`reason: 'online'`,
+ *    unless browser `navigator.onLine === false`)
+ *
+ * @param {object | null | undefined} rawState
+ * @param {object} prevState
+ * @returns {object}
+ */
+export function evaluateNetInfoState(rawState, prevState = networkConnectivityState) {
+  const safePrev = prevState || INITIAL_NETWORK_STATE;
+  const nowIso = new Date().toISOString();
+
+  if (!rawState || typeof rawState !== 'object') {
+    const fallbackOnline = safePrev.isKnown
+      ? safePrev.isOnline
+      : !isBrowserNavigatorOffline();
+    return {
+      ...safePrev,
+      type: 'unknown',
+      isConnected: null,
+      isInternetReachable: null,
+      isOnline: fallbackOnline,
+      isKnown: safePrev.isKnown,
+      reason: 'unknown',
+      updatedAt: nowIso,
+    };
+  }
+
+  const normalizedType = String(rawState.type || 'unknown')
+    .trim()
+    .toLowerCase();
+  const isConnected =
+    typeof rawState.isConnected === 'boolean' ? rawState.isConnected : null;
+  const isInternetReachable =
+    typeof rawState.isInternetReachable === 'boolean'
+      ? rawState.isInternetReachable
+      : null;
+
+  // 1. Explicitly disconnected (`none` or `isConnected === false`)
+  if (normalizedType === 'none' || isConnected === false) {
+    return {
+      type: normalizedType === 'unknown' ? 'none' : normalizedType,
+      isConnected: false,
+      isInternetReachable: false,
+      isOnline: false,
+      isKnown: true,
+      reason: 'disconnected',
+      details: rawState.details || null,
+      updatedAt: nowIso,
+    };
+  }
+
+  // 2. Active Wi-Fi / Cellular connection, but internet is explicitly unreachable
+  if (isConnected === true && isInternetReachable === false) {
+    return {
+      type: normalizedType,
+      isConnected: true,
+      isInternetReachable: false,
+      isOnline: false,
+      isKnown: true,
+      reason: 'internet_unreachable',
+      details: rawState.details || null,
+      updatedAt: nowIso,
+    };
+  }
+
+  // 3. Unknown / transitional state (`type === 'unknown'` or `isConnected === null`)
+  if (normalizedType === 'unknown' || isConnected === null) {
+    const preservedOnline = safePrev.isKnown
+      ? safePrev.isOnline
+      : !isBrowserNavigatorOffline();
+    return {
+      type: 'unknown',
+      isConnected: null,
+      isInternetReachable,
+      isOnline: preservedOnline,
+      isKnown: safePrev.isKnown,
+      reason: 'unknown',
+      details: rawState.details || null,
+      updatedAt: nowIso,
+    };
+  }
+
+  // 4. Connected (`wifi`, `cellular`, `ethernet`, `vpn`, `other`) and internet is not unreachable
+  if (isBrowserNavigatorOffline()) {
+    return {
+      type: normalizedType,
+      isConnected: true,
+      isInternetReachable: false,
+      isOnline: false,
+      isKnown: true,
+      reason: 'browser_offline',
+      details: rawState.details || null,
+      updatedAt: nowIso,
+    };
+  }
+
+  return {
+    type: normalizedType,
+    isConnected: true,
+    isInternetReachable,
+    isOnline: true,
+    isKnown: true,
+    reason: 'online',
+    details: rawState.details || null,
+    updatedAt: nowIso,
+  };
+}
+
+function clearPendingReconnectTimer() {
+  if (pendingReconnectTimer !== null) {
+    clearTimeout(pendingReconnectTimer);
+    pendingReconnectTimer = null;
+  }
+  pendingReconnectUserId = null;
+}
+
+/**
+ * Registers a callback invoked whenever an automatic connectivity-restored sync
+ * pass completes for the active user.
+ *
+ * @param {(result: object) => void} callback
+ * @returns {() => void}
+ */
+export function subscribeToReconnectSyncResults(callback) {
+  if (typeof callback !== 'function') {
+    return () => {};
+  }
+  reconnectSyncCallbacks.add(callback);
+  return () => {
+    reconnectSyncCallbacks.delete(callback);
+  };
+}
+
+function notifyReconnectSyncCallbacks(payload) {
+  reconnectSyncCallbacks.forEach((cb) => {
+    try {
+      cb(payload);
+    } catch {
+      // Ignore callback errors
+    }
+  });
+}
+
+/**
+ * Executes a single-flight reconnect synchronization pass for `userId`.
+ * If a reconnect sync or manual sync is already running for `userId`, returns
+ * the existing promise or skips without spawning duplicate backend requests.
+ *
+ * @param {string} userId
+ * @param {object} [meta]
+ * @returns {Promise<object>}
+ */
+export async function triggerReconnectSyncForUser(userId, meta = {}) {
+  const targetUserId = String(userId || activeAuthenticatedUserId || '').trim();
+  if (!targetUserId) {
+    return {
+      synced: 0,
+      failed: 0,
+      conflicts: 0,
+      skipped: true,
+      reason: 'missing_user_id',
+      updatedProjects: [],
+    };
+  }
+
+  // Enforce strict user isolation: never sync User A's queue while User B is authenticated
+  if (
+    activeAuthenticatedUserId !== null &&
+    targetUserId !== activeAuthenticatedUserId
+  ) {
+    return {
+      synced: 0,
+      failed: 0,
+      conflicts: 0,
+      skipped: true,
+      reason: 'user_mismatch',
+      updatedProjects: [],
+    };
+  }
+
+  if (isClientOffline()) {
+    return {
+      synced: 0,
+      failed: 0,
+      conflicts: 0,
+      skipped: true,
+      reason: 'offline',
+      updatedProjects: [],
+    };
+  }
+
+  // If a reconnect sync promise is already in flight for this user, reuse it
+  const existingPromise = activeReconnectSyncPromises.get(targetUserId);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
+  // If a manual sync already holds the memory lock for this user, do not start a duplicate pass
+  const existingLock = activeMemoryLocks.get(targetUserId);
+  if (existingLock && existingLock.expiresAt > Date.now()) {
+    return {
+      synced: 0,
+      failed: 0,
+      conflicts: 0,
+      skipped: true,
+      reason: 'already_syncing',
+      updatedProjects: [],
+    };
+  }
+
+  const syncPromise = (async () => {
+    try {
+      const res = await processProjectSyncQueue(targetUserId, {
+        ignoreBackoff: true,
+        triggerSource: meta.source || 'auto_reconnect',
+      });
+      notifyReconnectSyncCallbacks({
+        userId: targetUserId,
+        result: res,
+        meta,
+      });
+      return res;
+    } finally {
+      if (activeReconnectSyncPromises.get(targetUserId) === syncPromise) {
+        activeReconnectSyncPromises.delete(targetUserId);
+      }
+    }
+  })();
+
+  activeReconnectSyncPromises.set(targetUserId, syncPromise);
+  return syncPromise;
+}
+
+/**
+ * Schedules a coalesced automatic reconnect sync for the active authenticated user.
+ * Rapid offline/online transitions within `reconnectDebounceMs` are coalesced into
+ * a single execution, and cancelled immediately if the device drops back offline
+ * before execution begins.
+ *
+ * @param {object} [meta]
+ */
+function scheduleAutoReconnectSync(meta = {}) {
+  const targetUserId = activeAuthenticatedUserId;
+  if (!targetUserId || isClientOffline()) {
+    return;
+  }
+
+  // If a sync lock is already active for this user, skip scheduling a duplicate timer
+  const existingLock = activeMemoryLocks.get(targetUserId);
+  if (
+    activeReconnectSyncPromises.has(targetUserId) ||
+    (existingLock && existingLock.expiresAt > Date.now())
+  ) {
+    return;
+  }
+
+  clearPendingReconnectTimer();
+  pendingReconnectUserId = targetUserId;
+
+  if (reconnectDebounceMs <= 0) {
+    pendingReconnectUserId = null;
+    triggerReconnectSyncForUser(targetUserId, meta).catch(() => {});
+    return;
+  }
+
+  pendingReconnectTimer = setTimeout(() => {
+    const scheduledUser = pendingReconnectUserId;
+    pendingReconnectTimer = null;
+    pendingReconnectUserId = null;
+
+    if (
+      !scheduledUser ||
+      scheduledUser !== activeAuthenticatedUserId ||
+      isClientOffline()
+    ) {
+      return;
+    }
+    triggerReconnectSyncForUser(scheduledUser, meta).catch(() => {});
+  }, reconnectDebounceMs);
+}
+
+/**
+ * Applies a raw connectivity state update from NetInfo, Web `window` online/offline,
+ * or `AppState` foreground checks, detects true offline-to-online transitions,
+ * and triggers automatic queue synchronization without duplicate calls.
+ *
+ * @param {object | null | undefined} rawState
+ * @param {string} [source]
+ * @returns {object}
+ */
+export function handleConnectivityStateChange(rawState, source = 'netinfo') {
+  const hadKnownState = networkConnectivityState.isKnown;
+  const wasOffline = isClientOffline();
+  const prevType = networkConnectivityState.type;
+  const prevReachable = networkConnectivityState.isInternetReachable;
+
+  const nextState = evaluateNetInfoState(rawState, networkConnectivityState);
+  networkConnectivityState = nextState;
+
+  const nowOffline = isClientOffline();
+
+  // Safe handling of unknown connectivity states: never trigger false transitions
+  if (nextState.reason === 'unknown') {
+    if (nowOffline) {
+      clearPendingReconnectTimer();
+    }
+    notifySyncListeners({
+      type: 'connectivity_unknown',
+      source,
+      connectionType: nextState.type,
+      networkState: getNetworkConnectivityState(),
+    });
+    return getNetworkConnectivityState();
+  }
+
+  // Transition 1: Offline -> Online (or initial check confirming online with pending ops)
+  if (wasOffline && !nowOffline) {
+    notifySyncListeners({
+      type: 'online',
+      transition: 'offline_to_online',
+      source,
+      connectionType: nextState.type,
+      networkState: getNetworkConnectivityState(),
+    });
+    scheduleAutoReconnectSync({
+      source,
+      connectionType: nextState.type,
+      transition: 'offline_to_online',
+    });
+    return getNetworkConnectivityState();
+  }
+
+  // Transition 2: Online -> Offline (including active network with isInternetReachable: false)
+  if (!wasOffline && nowOffline) {
+    clearPendingReconnectTimer();
+    notifySyncListeners({
+      type: 'offline',
+      transition: 'online_to_offline',
+      source,
+      connectionType: nextState.type,
+      reason: nextState.reason,
+      networkState: getNetworkConnectivityState(),
+    });
+    return getNetworkConnectivityState();
+  }
+
+  // Transition 3: Initial connectivity check confirmed online from startup
+  if (!hadKnownState && nextState.isKnown && !nowOffline) {
+    notifySyncListeners({
+      type: 'connectivity_initialized',
+      source,
+      connectionType: nextState.type,
+      networkState: getNetworkConnectivityState(),
+    });
+    return getNetworkConnectivityState();
+  }
+
+  // Transition 4: Already online, interface changed (e.g., wifi <-> cellular handover)
+  if (
+    !nowOffline &&
+    (prevType !== nextState.type || prevReachable !== nextState.isInternetReachable)
+  ) {
+    notifySyncListeners({
+      type: 'connectivity_changed',
+      transition: 'none',
+      source,
+      connectionType: nextState.type,
+      networkState: getNetworkConnectivityState(),
+    });
+  }
+
+  return getNetworkConnectivityState();
+}
+
+/**
+ * Performs an explicit connectivity check using `NetInfo.fetch()` (with browser
+ * fallback if native NetInfo is unavailable). Called automatically when the app starts
+ * and on foreground transitions.
+ *
+ * @param {string} [source]
+ * @returns {Promise<object>}
+ */
+export async function checkInitialConnectivity(source = 'initial_check') {
+  try {
+    const netInfo = getNetInfo();
+    if (netInfo && typeof netInfo.fetch === 'function') {
+      const state = await netInfo.fetch();
+      return handleConnectivityStateChange(state, source);
+    }
+  } catch {
+    // Fall back to browser navigator.onLine if NetInfo.fetch throws
+  }
+
+  if (typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean') {
+    return handleConnectivityStateChange(
+      {
+        type: navigator.onLine ? 'other' : 'none',
+        isConnected: navigator.onLine,
+        isInternetReachable: navigator.onLine,
+      },
+      `${source}_navigator_fallback`
+    );
+  }
+
+  return getNetworkConnectivityState();
+}
+
+/**
+ * Starts reference-counted native Android/iOS (`@react-native-community/netinfo`),
+ * Web (`window.addEventListener('online' / 'offline')`), and React Native `AppState`
+ * connectivity monitoring.
+ *
+ * Returns an unsubscribe cleanup function. When all subscribers have cleaned up,
+ * all native and web listeners and timers are removed.
+ *
+ * @returns {() => void}
+ */
+export function startConnectivityMonitoring() {
+  connectivityMonitorRefCount += 1;
+
+  if (connectivityMonitorRefCount === 1) {
+    // 1. Native / Cross-Platform NetInfo Subscription
+    try {
+      const netInfo = getNetInfo();
+      if (netInfo && typeof netInfo.addEventListener === 'function') {
+        netInfoUnsubscribe = netInfo.addEventListener((state) => {
+          handleConnectivityStateChange(state, 'netinfo_listener');
+        });
+      }
+    } catch {
+      netInfoUnsubscribe = null;
+    }
+
+    // 2. Preserve Web online/offline listeners (`window.addEventListener`)
+    if (
+      typeof window !== 'undefined' &&
+      typeof window.addEventListener === 'function'
+    ) {
+      windowOnlineHandler = () => {
+        handleConnectivityStateChange(
+          {
+            type:
+              networkConnectivityState.type &&
+              networkConnectivityState.type !== 'none' &&
+              networkConnectivityState.type !== 'unknown'
+                ? networkConnectivityState.type
+                : 'other',
+            isConnected: true,
+            isInternetReachable: true,
+          },
+          'window_online'
+        );
+      };
+      windowOfflineHandler = () => {
+        handleConnectivityStateChange(
+          {
+            type: 'none',
+            isConnected: false,
+            isInternetReachable: false,
+          },
+          'window_offline'
+        );
+      };
+      window.addEventListener('online', windowOnlineHandler);
+      window.addEventListener('offline', windowOfflineHandler);
+    }
+
+    // 3. React Native AppState Foreground/Background Listener
+    try {
+      const appStateMod = getAppStateModule();
+      if (appStateMod && typeof appStateMod.addEventListener === 'function') {
+        if (typeof appStateMod.currentState === 'string') {
+          lastKnownAppState = appStateMod.currentState;
+        }
+        appStateSubscription = appStateMod.addEventListener(
+          'change',
+          (nextAppState) => {
+            const prevAppState = lastKnownAppState;
+            lastKnownAppState = nextAppState;
+            // Only check connectivity when transitioning from background/inactive -> active
+            if (
+              (prevAppState === 'background' || prevAppState === 'inactive') &&
+              nextAppState === 'active'
+            ) {
+              checkInitialConnectivity('appstate_foreground').catch(() => {});
+            }
+          }
+        );
+      }
+    } catch {
+      appStateSubscription = null;
+    }
+
+    // 4. Trigger initial connectivity check immediately on startup
+    checkInitialConnectivity('startup').catch(() => {});
+  }
+
+  let isCleanedUp = false;
+  return () => {
+    if (isCleanedUp) return;
+    isCleanedUp = true;
+    connectivityMonitorRefCount = Math.max(0, connectivityMonitorRefCount - 1);
+
+    if (connectivityMonitorRefCount === 0) {
+      stopAllConnectivityMonitoring();
+    }
+  };
+}
+
+/**
+ * Forces teardown of all active NetInfo, window, and AppState subscriptions and
+ * clears pending reconnect timers.
+ */
+export function stopAllConnectivityMonitoring() {
+  connectivityMonitorRefCount = 0;
+  clearPendingReconnectTimer();
+
+  if (typeof netInfoUnsubscribe === 'function') {
+    try {
+      netInfoUnsubscribe();
+    } catch {
+      // Ignore unsubscribe errors
+    }
+  }
+  netInfoUnsubscribe = null;
+
+  if (
+    typeof window !== 'undefined' &&
+    typeof window.removeEventListener === 'function'
+  ) {
+    if (windowOnlineHandler) {
+      window.removeEventListener('online', windowOnlineHandler);
+    }
+    if (windowOfflineHandler) {
+      window.removeEventListener('offline', windowOfflineHandler);
+    }
+  }
+  windowOnlineHandler = null;
+  windowOfflineHandler = null;
+
+  if (appStateSubscription) {
+    try {
+      if (typeof appStateSubscription.remove === 'function') {
+        appStateSubscription.remove();
+      } else if (typeof appStateSubscription === 'function') {
+        appStateSubscription();
+      }
+    } catch {
+      // Ignore AppState cleanup errors
+    }
+  }
+  appStateSubscription = null;
+}
+
+/**
  * Enables or disables simulated offline mode (used for device offline testing
  * and automated verification).
  *
  * @param {boolean} isOffline
+ * @param {object} [options]
  */
-export function setSimulatedOfflineMode(isOffline) {
+export function setSimulatedOfflineMode(isOffline, options = {}) {
+  const wasOffline = isClientOffline();
   simulatedOfflineMode = Boolean(isOffline);
+  const nowOffline = isClientOffline();
+
+  if (nowOffline) {
+    clearPendingReconnectTimer();
+  }
+
   notifySyncListeners({
-    type: simulatedOfflineMode ? 'offline' : 'online',
-    online: !isClientOffline(),
+    type: simulatedOfflineMode ? 'offline' : nowOffline ? 'offline' : 'online',
+    online: !nowOffline,
+    simulatedOffline: simulatedOfflineMode,
+    source: 'simulated_toggle',
+    networkState: getNetworkConnectivityState(),
   });
+
+  if (
+    wasOffline &&
+    !nowOffline &&
+    !options.skipAutoReconnect &&
+    activeAuthenticatedUserId
+  ) {
+    scheduleAutoReconnectSync({
+      source: 'simulated_toggle',
+      connectionType: networkConnectivityState.type,
+      transition: 'offline_to_online',
+    });
+  }
 }
 
 /**
@@ -79,8 +819,14 @@ export function setSimulatedOfflineMode(isOffline) {
 export const setOfflineModeForTesting = setSimulatedOfflineMode;
 
 /**
- * Returns true if the client is currently offline (either via simulated offline
- * toggle or browser/navigator.onLine === false).
+ * Returns true if the client is currently offline via:
+ * 1. Simulated offline toggle (`simulatedOfflineMode === true`), OR
+ * 2. Confirmed NetInfo state (`isConnected === false`, `type === 'none'`, or
+ *    `isConnected === true && isInternetReachable === false`), OR
+ * 3. Browser `navigator.onLine === false` when NetInfo state is not yet known.
+ *
+ * Unknown NetInfo states (`type === 'unknown'` or `isConnected === null`) safely
+ * preserve the last known connectivity state.
  *
  * @returns {boolean}
  */
@@ -88,11 +834,10 @@ export function isClientOffline() {
   if (simulatedOfflineMode) {
     return true;
   }
-  if (
-    typeof navigator !== 'undefined' &&
-    typeof navigator.onLine === 'boolean' &&
-    navigator.onLine === false
-  ) {
+  if (networkConnectivityState.isKnown) {
+    return !networkConnectivityState.isOnline;
+  }
+  if (isBrowserNavigatorOffline()) {
     return true;
   }
   return false;
@@ -121,6 +866,9 @@ function notifySyncListeners(event = {}) {
         ...event,
         online: !isClientOffline(),
         simulatedOffline: simulatedOfflineMode,
+        connectionType: networkConnectivityState.type,
+        isConnected: networkConnectivityState.isConnected,
+        isInternetReachable: networkConnectivityState.isInternetReachable,
         timestamp: new Date().toISOString(),
       });
     } catch {
@@ -958,6 +1706,12 @@ export async function getProjectSyncStatus(userId) {
     return {
       online,
       simulatedOffline: simulatedOfflineMode,
+      connectionType: networkConnectivityState.type,
+      isConnected: networkConnectivityState.isConnected,
+      isInternetReachable: networkConnectivityState.isInternetReachable,
+      connectivityReason: simulatedOfflineMode
+        ? 'simulated_offline'
+        : networkConnectivityState.reason,
       isSyncing: false,
       totalQueued: 0,
       pendingCount: 0,
@@ -980,6 +1734,12 @@ export async function getProjectSyncStatus(userId) {
   return {
     online,
     simulatedOffline: simulatedOfflineMode,
+    connectionType: networkConnectivityState.type,
+    isConnected: networkConnectivityState.isConnected,
+    isInternetReachable: networkConnectivityState.isInternetReachable,
+    connectivityReason: simulatedOfflineMode
+      ? 'simulated_offline'
+      : networkConnectivityState.reason,
     isSyncing: isSyncing || syncingCount > 0,
     totalQueued: ops.length,
     pendingCount,
@@ -1050,6 +1810,22 @@ export async function processProjectSyncQueue(userId, options = {}) {
       conflicts: 0,
       skipped: true,
       reason: 'missing_user_id',
+      updatedProjects: [],
+    };
+  }
+
+  // Enforce strict user isolation: never sync User A's queue while User B is authenticated
+  if (
+    !options.allowInactiveUser &&
+    activeAuthenticatedUserId !== null &&
+    targetUserId !== activeAuthenticatedUserId
+  ) {
+    return {
+      synced: 0,
+      failed: 0,
+      conflicts: 0,
+      skipped: true,
+      reason: 'user_mismatch',
       updatedProjects: [],
     };
   }
@@ -1135,6 +1911,14 @@ export async function processProjectSyncQueue(userId, options = {}) {
         break;
       }
 
+      if (
+        !options.allowInactiveUser &&
+        activeAuthenticatedUserId !== null &&
+        targetUserId !== activeAuthenticatedUserId
+      ) {
+        break;
+      }
+
       const stillOwnsLock = await verifySyncLockOwnership(targetUserId, lock);
       if (!stillOwnsLock) {
         break;
@@ -1158,12 +1942,20 @@ export async function processProjectSyncQueue(userId, options = {}) {
         options.apiOptions || {}
       );
 
-      // Verify lock ownership again after async network request
+      // Verify lock ownership and active user isolation again after async network request
       const lockValidAfterCall = await verifySyncLockOwnership(
         targetUserId,
         lock
       );
       if (!lockValidAfterCall) {
+        break;
+      }
+
+      if (
+        !options.allowInactiveUser &&
+        activeAuthenticatedUserId !== null &&
+        targetUserId !== activeAuthenticatedUserId
+      ) {
         break;
       }
 
@@ -1676,6 +2468,20 @@ export async function discardProjectOperation(opId, userId) {
 
 export const offlineSyncService = {
   setOfflineSyncStorageAdapter,
+  setNetInfoAdapterForTesting,
+  setAppStateAdapterForTesting,
+  setReconnectDebounceMsForTesting,
+  resetConnectivityStateForTesting,
+  setActiveSyncUser,
+  getActiveSyncUser,
+  getNetworkConnectivityState,
+  evaluateNetInfoState,
+  handleConnectivityStateChange,
+  checkInitialConnectivity,
+  startConnectivityMonitoring,
+  stopAllConnectivityMonitoring,
+  triggerReconnectSyncForUser,
+  subscribeToReconnectSyncResults,
   setSimulatedOfflineMode,
   setOfflineModeForTesting,
   isClientOffline,

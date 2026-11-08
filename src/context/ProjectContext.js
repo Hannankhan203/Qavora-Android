@@ -40,6 +40,11 @@ import {
 import {
   isClientOffline,
   setSimulatedOfflineMode,
+  setActiveSyncUser,
+  checkInitialConnectivity,
+  startConnectivityMonitoring,
+  triggerReconnectSyncForUser,
+  subscribeToReconnectSyncResults,
   subscribeToSyncEvents,
   cacheProjectOffline,
   cacheProjectsListOffline,
@@ -152,6 +157,10 @@ export function ProjectProvider({ children }) {
 
   const selectedProjectIdRef = useRef(selectedProjectId);
   selectedProjectIdRef.current = selectedProjectId;
+
+  // Keep offlineSyncService informed of the currently authenticated user synchronously
+  // so User A's queue is never synced while User B is authenticated
+  setActiveSyncUser(isAuthenticated && activeUserId ? activeUserId : null);
 
   const clearProjectError = useCallback(() => {
     setProjectError(null);
@@ -432,68 +441,42 @@ export function ProjectProvider({ children }) {
     [isAuthenticated, activeUserId, refreshSyncStatus, refreshProjects]
   );
 
-  // Subscribe to offlineSyncService events and browser online/offline transitions
+  // Subscribe to native NetInfo + web window + AppState connectivity monitoring
+  // and automatic reconnection sync events
   useEffect(() => {
+    const stopMonitoring = startConnectivityMonitoring();
+
     if (!isAuthenticated || !activeUserId) {
+      setActiveSyncUser(null);
       setSyncStatus(INITIAL_SYNC_STATUS);
-      return undefined;
+      return () => {
+        stopMonitoring();
+      };
     }
 
+    setActiveSyncUser(activeUserId);
     refreshSyncStatus();
 
-    const unsubscribe = subscribeToSyncEvents((evt) => {
+    const unsubscribeSyncEvents = subscribeToSyncEvents(() => {
       refreshSyncStatus();
-      if (evt && evt.type === 'online') {
-        processProjectSyncQueue(activeUserId, { ignoreBackoff: true })
-          .then((res) => {
-            refreshSyncStatus();
-            if (res && res.synced > 0) {
-              refreshProjects({ silent: true });
-            }
-          })
-          .catch(() => {});
-      }
     });
 
-    let handleWindowOnline = null;
-    let handleWindowOffline = null;
-    if (
-      typeof window !== 'undefined' &&
-      typeof window.addEventListener === 'function'
-    ) {
-      handleWindowOnline = () => {
-        refreshSyncStatus();
-        if (!isClientOffline()) {
-          processProjectSyncQueue(activeUserId, { ignoreBackoff: true })
-            .then((res) => {
-              refreshSyncStatus();
-              if (res && res.synced > 0) {
-                refreshProjects({ silent: true });
-              }
-            })
-            .catch(() => {});
+    const unsubscribeReconnectResults = subscribeToReconnectSyncResults(
+      ({ userId: syncedUserId, result }) => {
+        if (syncedUserId !== activeUserId) {
+          return;
         }
-      };
-      handleWindowOffline = () => {
         refreshSyncStatus();
-      };
-      window.addEventListener('online', handleWindowOnline);
-      window.addEventListener('offline', handleWindowOffline);
-    }
-
-    return () => {
-      unsubscribe();
-      if (
-        typeof window !== 'undefined' &&
-        typeof window.removeEventListener === 'function'
-      ) {
-        if (handleWindowOnline) {
-          window.removeEventListener('online', handleWindowOnline);
-        }
-        if (handleWindowOffline) {
-          window.removeEventListener('offline', handleWindowOffline);
+        if (result && result.synced > 0 && !isClientOffline()) {
+          refreshProjects({ silent: true });
         }
       }
+    );
+
+    return () => {
+      unsubscribeSyncEvents();
+      unsubscribeReconnectResults();
+      stopMonitoring();
     };
   }, [isAuthenticated, activeUserId, refreshSyncStatus, refreshProjects]);
 
@@ -503,6 +486,7 @@ export function ProjectProvider({ children }) {
     let mounted = true;
 
     if (!isAuthenticated || !activeUserId) {
+      setActiveSyncUser(null);
       setProjects([]);
       selectedProjectIdRef.current = null;
       setSelectedProjectIdState(null);
@@ -518,21 +502,29 @@ export function ProjectProvider({ children }) {
       };
     }
 
+    setActiveSyncUser(activeUserId);
     selectedProjectIdRef.current = null;
     setSelectedProjectIdState(null);
     setHasLoadedInitialProjects(false);
 
     (async () => {
       if (!mounted) return;
-      // Hydrate immediately from offline cache if available so startup is fast
+      // 1. Hydrate immediately from offline cache if available so startup is fast
       const cached = await getCachedProjectsForUser(activeUserId, true);
       if (mounted && cached.length > 0) {
         setProjects(cached);
         await reconcileSelectedProjectWithList(cached, false);
       }
-      // If online and there are pending operations, sync them first
+
+      // 2. Perform an explicit initial connectivity check (NetInfo.fetch + navigator fallback)
+      await checkInitialConnectivity('project_context_startup');
+      if (!mounted) return;
+
+      // 3. If online and there are pending operations for this user, sync them via single-flight coordinator
       if (!isClientOffline()) {
-        await processProjectSyncQueue(activeUserId, { ignoreBackoff: true });
+        await triggerReconnectSyncForUser(activeUserId, {
+          source: 'project_context_startup',
+        });
       }
       if (!mounted) return;
       await refreshProjects();
@@ -1327,17 +1319,17 @@ export function ProjectProvider({ children }) {
         typeof nextOffline === 'boolean'
           ? nextOffline
           : !syncStatus.simulatedOffline;
-      setSimulatedOfflineMode(targetOffline);
+      setSimulatedOfflineMode(targetOffline, { skipAutoReconnect: true });
       await refreshSyncStatus();
-      if (!targetOffline && activeUserId) {
-        const syncRes = await processProjectSyncQueue(activeUserId, {
-          ignoreBackoff: true,
+      if (!targetOffline && activeUserId && !isClientOffline()) {
+        const syncRes = await triggerReconnectSyncForUser(activeUserId, {
+          source: 'simulated_toggle',
         });
         await refreshSyncStatus();
         await refreshProjects({ silent: true });
         return { online: true, syncResult: syncRes };
       }
-      return { online: !targetOffline };
+      return { online: !isClientOffline() };
     },
     [
       syncStatus.simulatedOffline,

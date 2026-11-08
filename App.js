@@ -22,6 +22,7 @@ import TestRunsScreen from './src/components/TestRunsScreen';
 import DefectsScreen from './src/components/DefectsScreen';
 import ProfileSettingsScreen from './src/components/ProfileSettingsScreen';
 import VectorIcon from './src/components/VectorIcon';
+import { startConnectivityMonitoring } from './src/services/offlineSyncService';
 
 const BOTTOM_TABS = [
   { id: 'dashboard', label: 'Dashboard' },
@@ -456,6 +457,13 @@ function AuthRootGate() {
 }
 
 export default function App() {
+  useEffect(() => {
+    const stopMonitoring = startConnectivityMonitoring();
+    return () => {
+      stopMonitoring();
+    };
+  }, []);
+
   return (
     <SafeAreaProvider>
       <ThemeProvider>
