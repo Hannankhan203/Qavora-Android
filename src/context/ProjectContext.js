@@ -1,22 +1,16 @@
 /**
- * Qavora Android — Dedicated Multi-Project State Architecture (Phase 2A + 2B)
+ * Qavora Android — Dedicated Multi-Project State & Offline Sync Architecture (Phases 2A–2F)
  *
  * Manages multiple projects belonging to the authenticated user against the
- * Qavora Web Express 5 + MongoDB 7 backend (`/api/projects*`):
+ * Qavora Web Express 5 + MongoDB 7 backend (`/api/projects*`) with full
+ * offline-first caching and background synchronization (`offlineSyncService.js`):
  * - Project list (`projects`) & status filtering
  * - Currently selected project (`selectedProjectId`, `selectedProject`), persisted
  *   per user across app restarts in AsyncStorage (`@qavora_selected_project_id_v1:<userId>`)
+ * - Per-user offline project cache (`@qavora_offline_projects_cache_v1:<userId>`)
+ * - Durable per-user offline mutation queue (`@qavora_pending_project_ops_v1:<userId>`)
+ * - Automatic synchronization when connectivity is restored
  * - Loading, mutation, error, and HTTP 409 optimistic concurrency conflict states
- * - Creating a project (`POST /api/projects`) + refreshing project list
- * - Updating project metadata (`PATCH /api/projects/:id` with `expectedUpdatedAt`,
- *   and `PUT /api/projects/:id`) + refreshing project list
- * - Updating project status (`PATCH /api/projects/:id/status`) + refreshing project list
- * - Deleting a project (`DELETE /api/projects/:id`), clearing `selectedProject`
- *   when the currently selected project is deleted + refreshing project list
- * - Refreshing project list and individual project records from the backend
- *
- * Kept strictly separate from authentication logic (`AuthContext.js`) and
- * existing workspace UI state (`WorkspaceContext.js`).
  */
 
 import React, {
@@ -40,7 +34,26 @@ import {
   updateProjectStatus as updateProjectStatusApi,
   updateProjectData as updateProjectDataApi,
   deleteProject as deleteProjectApi,
+  normalizeProjectRecord,
+  buildDefaultTestPlan,
 } from '../services/projectService.js';
+import {
+  isClientOffline,
+  setSimulatedOfflineMode,
+  subscribeToSyncEvents,
+  cacheProjectOffline,
+  cacheProjectsListOffline,
+  removeCachedProjectOffline,
+  getCachedProjectsForUser,
+  getCachedProjectById,
+  queueProjectMutation,
+  getProjectSyncStatus,
+  processProjectSyncQueue,
+  resolveProjectConflict,
+  retryProjectOperation,
+  retryFailedProjectOperations,
+  discardProjectOperation,
+} from '../services/offlineSyncService.js';
 
 export const SELECTED_PROJECT_STORAGE_PREFIX = '@qavora_selected_project_id_v1:';
 
@@ -106,6 +119,18 @@ export async function savePersistedSelectedProjectId(userId, projectId) {
   }
 }
 
+const INITIAL_SYNC_STATUS = {
+  online: true,
+  simulatedOffline: false,
+  isSyncing: false,
+  totalQueued: 0,
+  pendingCount: 0,
+  syncingCount: 0,
+  conflictCount: 0,
+  failedCount: 0,
+  operations: [],
+};
+
 const ProjectContext = createContext(null);
 
 export function ProjectProvider({ children }) {
@@ -120,6 +145,7 @@ export function ProjectProvider({ children }) {
   const [isMutating, setIsMutating] = useState(false);
   const [projectError, setProjectError] = useState(null);
   const [conflictState, setConflictState] = useState(null);
+  const [syncStatus, setSyncStatus] = useState(INITIAL_SYNC_STATUS);
 
   const projectsRef = useRef(projects);
   projectsRef.current = projects;
@@ -131,6 +157,22 @@ export function ProjectProvider({ children }) {
     setProjectError(null);
     setConflictState(null);
   }, []);
+
+  /**
+   * Refreshes the in-memory `syncStatus` snapshot for the active user.
+   */
+  const refreshSyncStatus = useCallback(async () => {
+    if (!activeUserId) {
+      setSyncStatus({
+        ...INITIAL_SYNC_STATUS,
+        online: !isClientOffline(),
+      });
+      return INITIAL_SYNC_STATUS;
+    }
+    const status = await getProjectSyncStatus(activeUserId);
+    setSyncStatus(status);
+    return status;
+  }, [activeUserId]);
 
   /**
    * Persists the selected project ID for the active user in AsyncStorage.
@@ -169,30 +211,79 @@ export function ProjectProvider({ children }) {
   }, [persistSelectedProjectId]);
 
   /**
-   * Synchronizes a single updated or hydrated project into the `projects` list.
+   * Synchronizes a single updated or hydrated project into the `projects` list
+   * and updates the user's offline project cache.
    */
-  const upsertProjectInState = useCallback((projectRecord) => {
-    if (!projectRecord || typeof projectRecord !== 'object') return;
-    const recordId = projectRecord.id || projectRecord._id;
-    if (!recordId) return;
+  const upsertProjectInState = useCallback(
+    (projectRecord, cacheOptions = {}) => {
+      if (!projectRecord || typeof projectRecord !== 'object') return;
+      const recordId = projectRecord.id || projectRecord._id;
+      if (!recordId) return;
 
-    setProjects((prev) => {
-      const index = prev.findIndex(
-        (item) => item.id === recordId || item._id === recordId
-      );
-      if (index === -1) {
-        return [projectRecord, ...prev];
+      setProjects((prev) => {
+        const index = prev.findIndex(
+          (item) => item.id === recordId || item._id === recordId
+        );
+        if (index === -1) {
+          return [projectRecord, ...prev];
+        }
+        const next = [...prev];
+        next[index] = projectRecord;
+        return next;
+      });
+
+      if (activeUserId) {
+        cacheProjectOffline(projectRecord, activeUserId, cacheOptions).catch(
+          () => {}
+        );
       }
-      const next = [...prev];
-      next[index] = projectRecord;
-      return next;
-    });
-  }, []);
+    },
+    [activeUserId]
+  );
+
+  /**
+   * Reconciles `selectedProjectId` against a loaded list of projects.
+   */
+  const reconcileSelectedProjectWithList = useCallback(
+    async (loadedProjects, autoSelectFirst = false) => {
+      if (!activeUserId) return;
+      const storedSelection = await loadPersistedSelectedProjectId(activeUserId);
+      const currentSelectedId = selectedProjectIdRef.current;
+      const candidateId = currentSelectedId || storedSelection;
+
+      const matchedProject = candidateId
+        ? loadedProjects.find(
+            (p) => p.id === candidateId || p._id === candidateId
+          )
+        : null;
+
+      if (matchedProject) {
+        const resolvedId = matchedProject.id || matchedProject._id;
+        selectedProjectIdRef.current = resolvedId;
+        setSelectedProjectIdState(resolvedId);
+        if (storedSelection !== resolvedId) {
+          await persistSelectedProjectId(resolvedId);
+        }
+      } else if (autoSelectFirst && loadedProjects.length > 0) {
+        const firstId = loadedProjects[0].id || loadedProjects[0]._id;
+        selectedProjectIdRef.current = firstId;
+        setSelectedProjectIdState(firstId);
+        await persistSelectedProjectId(firstId);
+      } else {
+        selectedProjectIdRef.current = null;
+        setSelectedProjectIdState(null);
+        if (storedSelection) {
+          await persistSelectedProjectId(null);
+        }
+      }
+    },
+    [activeUserId, persistSelectedProjectId]
+  );
 
   /**
    * Fetches all projects belonging to the authenticated user (`GET /api/projects`).
-   * Restores the persisted `selectedProjectId` if it exists in the fetched list;
-   * clears `selectedProjectId` if the stored project no longer exists on the backend.
+   * If offline or a network error occurs, seamlessly falls back to the user's
+   * isolated offline project cache (`@qavora_offline_projects_cache_v1:<userId>`).
    */
   const refreshProjects = useCallback(
     async (options = {}) => {
@@ -211,6 +302,7 @@ export function ProjectProvider({ children }) {
 
       const isSilent = Boolean(options && options.silent);
       const isPullRefresh = Boolean(options && options.pullToRefresh);
+      const autoSelectFirst = Boolean(options && options.autoSelectFirst);
 
       if (!isSilent) {
         if (isPullRefresh) {
@@ -222,54 +314,84 @@ export function ProjectProvider({ children }) {
       }
 
       try {
-        const { silent: _s, pullToRefresh: _p, autoSelectFirst, ...apiOptions } =
-          options || {};
+        // If explicitly in offline mode, read directly from user's offline project cache
+        if (isClientOffline()) {
+          const cachedProjects = await getCachedProjectsForUser(
+            activeUserId,
+            true
+          );
+          setProjects(cachedProjects);
+          await reconcileSelectedProjectWithList(
+            cachedProjects,
+            autoSelectFirst
+          );
+          await refreshSyncStatus();
+          return {
+            ok: true,
+            status: 200,
+            offlineFallback: true,
+            projects: cachedProjects,
+            error: null,
+          };
+        }
+
+        const {
+          silent: _s,
+          pullToRefresh: _p,
+          autoSelectFirst: _a,
+          ...apiOptions
+        } = options || {};
         const result = await fetchProjects(apiOptions);
 
         if (!result.ok) {
+          // If network failure (not 401/403), fall back to user's cached projects
+          if (result.isNetworkError || result.status === 0) {
+            const cachedProjects = await getCachedProjectsForUser(
+              activeUserId,
+              true
+            );
+            setProjects(cachedProjects);
+            await reconcileSelectedProjectWithList(
+              cachedProjects,
+              autoSelectFirst
+            );
+            await refreshSyncStatus();
+            return {
+              ok: true,
+              status: 200,
+              offlineFallback: true,
+              projects: cachedProjects,
+              error: null,
+            };
+          }
+
           if (!isSilent) {
             setProjectError(result.error || 'Failed to load projects.');
           }
           return result;
         }
 
-        const loadedProjects = Array.isArray(result.projects)
+        const serverProjects = Array.isArray(result.projects)
           ? result.projects
           : [];
-        setProjects(loadedProjects);
+        const mergedCachedList = await cacheProjectsListOffline(
+          serverProjects,
+          activeUserId
+        );
+        const resolvedProjects =
+          mergedCachedList.length > 0 ? mergedCachedList : serverProjects;
 
-        // Reconcile selectedProjectId with in-memory or persisted selection
-        const storedSelection = await loadPersistedSelectedProjectId(activeUserId);
-        const currentSelectedId = selectedProjectIdRef.current;
-        const candidateId = currentSelectedId || storedSelection;
+        setProjects(resolvedProjects);
+        await reconcileSelectedProjectWithList(
+          resolvedProjects,
+          autoSelectFirst
+        );
+        await refreshSyncStatus();
 
-        const matchedProject = candidateId
-          ? loadedProjects.find(
-              (p) => p.id === candidateId || p._id === candidateId
-            )
-          : null;
-
-        if (matchedProject) {
-          const resolvedId = matchedProject.id || matchedProject._id;
-          selectedProjectIdRef.current = resolvedId;
-          setSelectedProjectIdState(resolvedId);
-          if (storedSelection !== resolvedId) {
-            await persistSelectedProjectId(resolvedId);
-          }
-        } else if (autoSelectFirst && loadedProjects.length > 0) {
-          const firstId = loadedProjects[0].id || loadedProjects[0]._id;
-          selectedProjectIdRef.current = firstId;
-          setSelectedProjectIdState(firstId);
-          await persistSelectedProjectId(firstId);
-        } else {
-          selectedProjectIdRef.current = null;
-          setSelectedProjectIdState(null);
-          if (storedSelection) {
-            await persistSelectedProjectId(null);
-          }
-        }
-
-        return result;
+        return {
+          ...result,
+          projects: resolvedProjects,
+        };
       } finally {
         setHasLoadedInitialProjects(true);
         if (!isSilent) {
@@ -278,11 +400,105 @@ export function ProjectProvider({ children }) {
         }
       }
     },
-    [isAuthenticated, activeUserId, persistSelectedProjectId]
+    [
+      isAuthenticated,
+      activeUserId,
+      reconcileSelectedProjectWithList,
+      refreshSyncStatus,
+    ]
   );
 
+  /**
+   * Synchronizes all pending offline mutations for the authenticated user.
+   */
+  const syncOfflineQueue = useCallback(
+    async (options = {}) => {
+      if (!isAuthenticated || !activeUserId) {
+        return {
+          synced: 0,
+          failed: 0,
+          conflicts: 0,
+          skipped: true,
+          reason: 'unauthenticated',
+        };
+      }
+      const res = await processProjectSyncQueue(activeUserId, options);
+      await refreshSyncStatus();
+      if (res.synced > 0 && !isClientOffline()) {
+        await refreshProjects({ silent: true });
+      }
+      return res;
+    },
+    [isAuthenticated, activeUserId, refreshSyncStatus, refreshProjects]
+  );
+
+  // Subscribe to offlineSyncService events and browser online/offline transitions
+  useEffect(() => {
+    if (!isAuthenticated || !activeUserId) {
+      setSyncStatus(INITIAL_SYNC_STATUS);
+      return undefined;
+    }
+
+    refreshSyncStatus();
+
+    const unsubscribe = subscribeToSyncEvents((evt) => {
+      refreshSyncStatus();
+      if (evt && evt.type === 'online') {
+        processProjectSyncQueue(activeUserId, { ignoreBackoff: true })
+          .then((res) => {
+            refreshSyncStatus();
+            if (res && res.synced > 0) {
+              refreshProjects({ silent: true });
+            }
+          })
+          .catch(() => {});
+      }
+    });
+
+    let handleWindowOnline = null;
+    let handleWindowOffline = null;
+    if (
+      typeof window !== 'undefined' &&
+      typeof window.addEventListener === 'function'
+    ) {
+      handleWindowOnline = () => {
+        refreshSyncStatus();
+        if (!isClientOffline()) {
+          processProjectSyncQueue(activeUserId, { ignoreBackoff: true })
+            .then((res) => {
+              refreshSyncStatus();
+              if (res && res.synced > 0) {
+                refreshProjects({ silent: true });
+              }
+            })
+            .catch(() => {});
+        }
+      };
+      handleWindowOffline = () => {
+        refreshSyncStatus();
+      };
+      window.addEventListener('online', handleWindowOnline);
+      window.addEventListener('offline', handleWindowOffline);
+    }
+
+    return () => {
+      unsubscribe();
+      if (
+        typeof window !== 'undefined' &&
+        typeof window.removeEventListener === 'function'
+      ) {
+        if (handleWindowOnline) {
+          window.removeEventListener('online', handleWindowOnline);
+        }
+        if (handleWindowOffline) {
+          window.removeEventListener('offline', handleWindowOffline);
+        }
+      }
+    };
+  }, [isAuthenticated, activeUserId, refreshSyncStatus, refreshProjects]);
+
   // Automatically load user projects when authenticated user session becomes active;
-  // clear project state when logged out or when user changes.
+  // clear in-memory project state when logged out (preserving offline cache & queue on disk).
   useEffect(() => {
     let mounted = true;
 
@@ -296,17 +512,28 @@ export function ProjectProvider({ children }) {
       setIsMutating(false);
       setProjectError(null);
       setConflictState(null);
+      setSyncStatus(INITIAL_SYNC_STATUS);
       return () => {
         mounted = false;
       };
     }
 
-    // Reset in-memory selection before loading the active user's persisted selection
     selectedProjectIdRef.current = null;
     setSelectedProjectIdState(null);
     setHasLoadedInitialProjects(false);
 
     (async () => {
+      if (!mounted) return;
+      // Hydrate immediately from offline cache if available so startup is fast
+      const cached = await getCachedProjectsForUser(activeUserId, true);
+      if (mounted && cached.length > 0) {
+        setProjects(cached);
+        await reconcileSelectedProjectWithList(cached, false);
+      }
+      // If online and there are pending operations, sync them first
+      if (!isClientOffline()) {
+        await processProjectSyncQueue(activeUserId, { ignoreBackoff: true });
+      }
       if (!mounted) return;
       await refreshProjects();
     })();
@@ -314,10 +541,15 @@ export function ProjectProvider({ children }) {
     return () => {
       mounted = false;
     };
-  }, [isAuthenticated, activeUserId, refreshProjects]);
+  }, [
+    isAuthenticated,
+    activeUserId,
+    reconcileSelectedProjectWithList,
+    refreshProjects,
+  ]);
 
   /**
-   * Fetches an individual project by ID (`GET /api/projects/:id`) and updates state.
+   * Fetches an individual project by ID (`GET /api/projects/:id`) with offline cache fallback.
    */
   const getProject = useCallback(
     async (projectId, options = {}) => {
@@ -325,24 +557,64 @@ export function ProjectProvider({ children }) {
       setProjectError(null);
 
       try {
+        if (isClientOffline() && activeUserId) {
+          const cached = await getCachedProjectById(
+            projectId,
+            activeUserId,
+            true
+          );
+          if (cached) {
+            upsertProjectInState(cached);
+            return {
+              ok: true,
+              status: 200,
+              offlineFallback: true,
+              project: cached,
+              error: null,
+            };
+          }
+        }
+
         const result = await fetchProjectById(projectId, options);
         if (result.ok && result.project) {
           upsertProjectInState(result.project);
-        } else if (!result.ok) {
-          setProjectError(result.error || 'Failed to load project.');
+          return result;
         }
+
+        if (
+          activeUserId &&
+          (result.isNetworkError || result.status === 0)
+        ) {
+          const cached = await getCachedProjectById(
+            projectId,
+            activeUserId,
+            true
+          );
+          if (cached) {
+            upsertProjectInState(cached);
+            return {
+              ok: true,
+              status: 200,
+              offlineFallback: true,
+              project: cached,
+              error: null,
+            };
+          }
+        }
+
+        setProjectError(result.error || 'Failed to load project.');
         return result;
       } finally {
         setIsLoading(false);
       }
     },
-    [upsertProjectInState]
+    [activeUserId, upsertProjectInState]
   );
 
   /**
-   * Creates a new project (`POST /api/projects`), prepends it to state,
-   * selects it by default unless `options.selectCreated === false`,
-   * and refreshes the project list from the backend.
+   * Creates a new project (`POST /api/projects`).
+   * If offline or a network error occurs, queues a durable `CREATE` operation
+   * and caches the new project locally so the user can work on it immediately.
    */
   const createProject = useCallback(
     async (payload, options = {}) => {
@@ -356,19 +628,107 @@ export function ProjectProvider({ children }) {
           skipRefreshAfterMutation = false,
           ...apiOptions
         } = options || {};
+
+        const trimmedName =
+          payload && typeof payload.name === 'string'
+            ? payload.name.trim()
+            : '';
+        if (!trimmedName) {
+          const errMsg = 'Project name is required.';
+          setProjectError(errMsg);
+          return { ok: false, status: 400, project: null, error: errMsg };
+        }
+
+        const queueOfflineCreate = async () => {
+          const nowIso = new Date().toISOString();
+          const newId =
+            payload && typeof payload.id === 'string' && payload.id.trim()
+              ? payload.id.trim()
+              : `proj_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+          const optimisticProject = normalizeProjectRecord({
+            ...(payload || {}),
+            id: newId,
+            userId: activeUserId,
+            name: trimmedName,
+            description:
+              typeof payload.description === 'string'
+                ? payload.description.trim()
+                : '',
+            version:
+              typeof payload.version === 'string' && payload.version.trim()
+                ? payload.version.trim()
+                : '1.0.0',
+            type:
+              typeof payload.type === 'string' && payload.type.trim()
+                ? payload.type.trim()
+                : 'Web Application',
+            environment:
+              typeof payload.environment === 'string' &&
+              payload.environment.trim()
+                ? payload.environment.trim()
+                : 'Staging',
+            status: 'Active',
+            testPlan: buildDefaultTestPlan({
+              ...(payload || {}),
+              id: newId,
+              name: trimmedName,
+            }),
+            testSuites: Array.isArray(payload.testSuites)
+              ? payload.testSuites
+              : [],
+            executionRuns: [],
+            executions: [],
+            defects: [],
+            createdAt: nowIso,
+            updatedAt: nowIso,
+            _pendingSync: true,
+            _pendingCreation: true,
+          });
+
+          const queuedOp = await queueProjectMutation({
+            userId: activeUserId,
+            projectId: newId,
+            entityType: 'project',
+            operationType: 'CREATE',
+            payload: optimisticProject,
+            expectedUpdatedAt: null,
+            description: `Create project "${optimisticProject.name}"`,
+          });
+
+          setProjects((prev) => [
+            optimisticProject,
+            ...prev.filter((p) => p.id !== newId && p._id !== newId),
+          ]);
+
+          if (selectCreated !== false) {
+            selectedProjectIdRef.current = newId;
+            setSelectedProjectIdState(newId);
+            await persistSelectedProjectId(newId);
+          }
+
+          await refreshSyncStatus();
+          return {
+            ok: true,
+            status: 202,
+            queuedOffline: true,
+            project: optimisticProject,
+            operation: queuedOp,
+            error: null,
+          };
+        };
+
+        if (isClientOffline() && activeUserId) {
+          return await queueOfflineCreate();
+        }
+
         const result = await createProjectApi(payload, apiOptions);
 
         if (result.ok && result.project) {
           const created = result.project;
-          setProjects((prev) => {
-            const exists = prev.some(
-              (p) => p.id === created.id || p._id === created._id
-            );
-            return exists
-              ? prev.map((p) =>
-                  p.id === created.id || p._id === created._id ? created : p
-                )
-              : [created, ...prev];
+          upsertProjectInState(created, {
+            pendingSync: false,
+            pendingCreation: false,
           });
 
           if (selectCreated !== false) {
@@ -383,6 +743,13 @@ export function ProjectProvider({ children }) {
           }
 
           return result;
+        }
+
+        if (
+          activeUserId &&
+          (result.isNetworkError || result.status === 0)
+        ) {
+          return await queueOfflineCreate();
         }
 
         if (result.isConflict) {
@@ -400,12 +767,18 @@ export function ProjectProvider({ children }) {
         setIsMutating(false);
       }
     },
-    [persistSelectedProjectId, refreshProjects]
+    [
+      activeUserId,
+      upsertProjectInState,
+      persistSelectedProjectId,
+      refreshProjects,
+      refreshSyncStatus,
+    ]
   );
 
   /**
    * Updates project metadata via `PATCH /api/projects/:id` with optimistic
-   * concurrency (`expectedUpdatedAt`) and refreshes the project list.
+   * concurrency (`expectedUpdatedAt`) and offline queue fallback.
    */
   const updateProject = useCallback(
     async (projectId, updates = {}, options = {}) => {
@@ -424,21 +797,59 @@ export function ProjectProvider({ children }) {
           ...resolvedOptions
         } = options || {};
 
-        const hasExplicitExpected =
+        const baselineUpdatedAt =
           (updates &&
             typeof updates.expectedUpdatedAt === 'string' &&
             updates.expectedUpdatedAt.trim()) ||
           (resolvedOptions &&
             typeof resolvedOptions.expectedUpdatedAt === 'string' &&
-            resolvedOptions.expectedUpdatedAt.trim());
+            resolvedOptions.expectedUpdatedAt.trim()) ||
+          (existingProject &&
+            (existingProject._serverUpdatedAt || existingProject.updatedAt)) ||
+          null;
 
-        if (
-          !hasExplicitExpected &&
-          !skipOptimisticConcurrency &&
-          existingProject &&
-          existingProject.updatedAt
-        ) {
-          resolvedOptions.expectedUpdatedAt = existingProject.updatedAt;
+        if (!skipOptimisticConcurrency && baselineUpdatedAt) {
+          resolvedOptions.expectedUpdatedAt = baselineUpdatedAt;
+        }
+
+        const queueOfflineUpdate = async () => {
+          const optimisticProject = normalizeProjectRecord({
+            ...(existingProject || { id: projectId }),
+            ...(updates || {}),
+            id: projectId,
+            userId: activeUserId,
+            updatedAt: baselineUpdatedAt || new Date().toISOString(),
+            _serverUpdatedAt: baselineUpdatedAt,
+            _pendingSync: true,
+          });
+
+          const queuedOp = await queueProjectMutation({
+            userId: activeUserId,
+            projectId,
+            entityType: 'project',
+            operationType: 'UPDATE',
+            payload: updates,
+            expectedUpdatedAt: baselineUpdatedAt,
+            description: `Update project "${optimisticProject.name}" metadata`,
+          });
+
+          upsertProjectInState(optimisticProject, {
+            pendingSync: true,
+          });
+          await refreshSyncStatus();
+
+          return {
+            ok: true,
+            status: 202,
+            queuedOffline: true,
+            project: optimisticProject,
+            operation: queuedOp,
+            error: null,
+          };
+        };
+
+        if (isClientOffline() && activeUserId) {
+          return await queueOfflineUpdate();
         }
 
         const result = await updateProjectMetadataApi(
@@ -448,11 +859,21 @@ export function ProjectProvider({ children }) {
         );
 
         if (result.ok && result.project) {
-          upsertProjectInState(result.project);
+          upsertProjectInState(result.project, {
+            pendingSync: false,
+            pendingCreation: false,
+          });
           if (!skipRefreshAfterMutation) {
             await refreshProjects({ silent: true });
           }
           return result;
+        }
+
+        if (
+          activeUserId &&
+          (result.isNetworkError || result.status === 0)
+        ) {
+          return await queueOfflineUpdate();
         }
 
         if (result.isConflict) {
@@ -471,11 +892,11 @@ export function ProjectProvider({ children }) {
         setIsMutating(false);
       }
     },
-    [upsertProjectInState, refreshProjects]
+    [activeUserId, upsertProjectInState, refreshProjects, refreshSyncStatus]
   );
 
   /**
-   * Updates project metadata via `PUT /api/projects/:id` and refreshes the project list.
+   * Updates project metadata via `PUT /api/projects/:id`.
    */
   const updateProjectPut = useCallback(
     async (projectId, updates = {}, options = {}) => {
@@ -484,15 +905,29 @@ export function ProjectProvider({ children }) {
       setConflictState(null);
 
       try {
+        if (isClientOffline() && activeUserId) {
+          return await updateProject(projectId, updates, options);
+        }
+
         const { skipRefreshAfterMutation = false, ...apiOptions } =
           options || {};
         const result = await updateProjectPutApi(projectId, updates, apiOptions);
         if (result.ok && result.project) {
-          upsertProjectInState(result.project);
+          upsertProjectInState(result.project, {
+            pendingSync: false,
+            pendingCreation: false,
+          });
           if (!skipRefreshAfterMutation) {
             await refreshProjects({ silent: true });
           }
           return result;
+        }
+
+        if (
+          activeUserId &&
+          (result.isNetworkError || result.status === 0)
+        ) {
+          return await updateProject(projectId, updates, options);
         }
 
         setProjectError(result.error || 'Failed to update project.');
@@ -501,12 +936,12 @@ export function ProjectProvider({ children }) {
         setIsMutating(false);
       }
     },
-    [upsertProjectInState, refreshProjects]
+    [activeUserId, updateProject, upsertProjectInState, refreshProjects]
   );
 
   /**
    * Updates a project's status (`Active` | `Completed` | `Archived`) via
-   * `PATCH /api/projects/:id/status` and refreshes the project list.
+   * `PATCH /api/projects/:id/status` with offline queue fallback.
    */
   const updateProjectStatus = useCallback(
     async (projectId, status, options = {}) => {
@@ -515,6 +950,42 @@ export function ProjectProvider({ children }) {
       setConflictState(null);
 
       try {
+        const existingProject = projectsRef.current.find(
+          (p) => p.id === projectId || p._id === projectId
+        );
+
+        const queueOfflineStatus = async () => {
+          const optimisticProject = normalizeProjectRecord({
+            ...(existingProject || { id: projectId, name: 'Project' }),
+            status,
+            _pendingSync: true,
+          });
+          const queuedOp = await queueProjectMutation({
+            userId: activeUserId,
+            projectId,
+            entityType: 'project',
+            operationType: 'STATUS_CHANGE',
+            payload: { status },
+            expectedUpdatedAt:
+              (existingProject && existingProject.updatedAt) || null,
+            description: `Change project status to ${status}`,
+          });
+          upsertProjectInState(optimisticProject, { pendingSync: true });
+          await refreshSyncStatus();
+          return {
+            ok: true,
+            status: 202,
+            queuedOffline: true,
+            project: optimisticProject,
+            operation: queuedOp,
+            error: null,
+          };
+        };
+
+        if (isClientOffline() && activeUserId) {
+          return await queueOfflineStatus();
+        }
+
         const { skipRefreshAfterMutation = false, ...apiOptions } =
           options || {};
         const result = await updateProjectStatusApi(
@@ -523,11 +994,21 @@ export function ProjectProvider({ children }) {
           apiOptions
         );
         if (result.ok && result.project) {
-          upsertProjectInState(result.project);
+          upsertProjectInState(result.project, {
+            pendingSync: false,
+            pendingCreation: false,
+          });
           if (!skipRefreshAfterMutation) {
             await refreshProjects({ silent: true });
           }
           return result;
+        }
+
+        if (
+          activeUserId &&
+          (result.isNetworkError || result.status === 0)
+        ) {
+          return await queueOfflineStatus();
         }
 
         setProjectError(result.error || 'Failed to update project status.');
@@ -536,13 +1017,13 @@ export function ProjectProvider({ children }) {
         setIsMutating(false);
       }
     },
-    [upsertProjectInState, refreshProjects]
+    [activeUserId, upsertProjectInState, refreshProjects, refreshSyncStatus]
   );
 
   /**
-   * Updates nested project QA data (`testPlan`, `testSuites`, summary counts) via
-   * `PATCH /api/projects/:id/data` with optimistic concurrency (`expectedUpdatedAt`)
-   * and updates the hydrated project in state.
+   * Updates nested project QA data (`testPlan`, `testSuites`, `executionRuns`,
+   * `executions`, `defects`, summary counts) via `PATCH /api/projects/:id/data`
+   * with optimistic concurrency (`expectedUpdatedAt`) and durable offline queueing.
    */
   const updateProjectData = useCallback(
     async (projectId, dataUpdates = {}, options = {}) => {
@@ -558,24 +1039,68 @@ export function ProjectProvider({ children }) {
         const {
           skipOptimisticConcurrency = false,
           skipRefreshAfterMutation = true,
+          entityType = 'data',
+          description = '',
           ...resolvedOptions
         } = options || {};
 
-        const hasExplicitExpected =
+        const baselineUpdatedAt =
           (dataUpdates &&
             typeof dataUpdates.expectedUpdatedAt === 'string' &&
             dataUpdates.expectedUpdatedAt.trim()) ||
           (resolvedOptions &&
             typeof resolvedOptions.expectedUpdatedAt === 'string' &&
-            resolvedOptions.expectedUpdatedAt.trim());
+            resolvedOptions.expectedUpdatedAt.trim()) ||
+          (existingProject &&
+            (existingProject._serverUpdatedAt || existingProject.updatedAt)) ||
+          null;
 
-        if (
-          !hasExplicitExpected &&
-          !skipOptimisticConcurrency &&
-          existingProject &&
-          existingProject.updatedAt
-        ) {
-          resolvedOptions.expectedUpdatedAt = existingProject.updatedAt;
+        if (!skipOptimisticConcurrency && baselineUpdatedAt) {
+          resolvedOptions.expectedUpdatedAt = baselineUpdatedAt;
+        }
+
+        const queueOfflineDataUpdate = async () => {
+          const optimisticProject = normalizeProjectRecord({
+            ...(existingProject || { id: projectId, name: 'Project' }),
+            ...(dataUpdates || {}),
+            id: projectId,
+            userId: activeUserId,
+            updatedAt: baselineUpdatedAt || new Date().toISOString(),
+            _serverUpdatedAt: baselineUpdatedAt,
+            _pendingSync: true,
+          });
+
+          const queuedOp = await queueProjectMutation({
+            userId: activeUserId,
+            projectId,
+            entityType: entityType || 'data',
+            operationType: 'UPDATE',
+            payload: dataUpdates,
+            expectedUpdatedAt: baselineUpdatedAt,
+            description:
+              description ||
+              `Update QA workspace data (${Object.keys(dataUpdates || {})
+                .slice(0, 3)
+                .join(', ')})`,
+          });
+
+          upsertProjectInState(optimisticProject, {
+            pendingSync: true,
+          });
+          await refreshSyncStatus();
+
+          return {
+            ok: true,
+            status: 202,
+            queuedOffline: true,
+            project: optimisticProject,
+            operation: queuedOp,
+            error: null,
+          };
+        };
+
+        if (isClientOffline() && activeUserId) {
+          return await queueOfflineDataUpdate();
         }
 
         const result = await updateProjectDataApi(
@@ -585,11 +1110,21 @@ export function ProjectProvider({ children }) {
         );
 
         if (result.ok && result.project) {
-          upsertProjectInState(result.project);
+          upsertProjectInState(result.project, {
+            pendingSync: false,
+            pendingCreation: false,
+          });
           if (!skipRefreshAfterMutation) {
             await refreshProjects({ silent: true });
           }
           return result;
+        }
+
+        if (
+          activeUserId &&
+          (result.isNetworkError || result.status === 0)
+        ) {
+          return await queueOfflineDataUpdate();
         }
 
         if (result.isConflict) {
@@ -608,13 +1143,13 @@ export function ProjectProvider({ children }) {
         setIsMutating(false);
       }
     },
-    [upsertProjectInState, refreshProjects]
+    [activeUserId, upsertProjectInState, refreshProjects, refreshSyncStatus]
   );
 
   /**
    * Deletes a project via `DELETE /api/projects/:id`.
-   * Explicitly clears `selectedProjectId` if the deleted project was selected,
-   * and refreshes the project list.
+   * If offline or a network error occurs, queues a durable `DELETE` operation
+   * (or cancels out an unsynced offline `CREATE`) and removes the project from state.
    */
   const deleteProject = useCallback(
     async (projectId, options = {}) => {
@@ -623,33 +1158,71 @@ export function ProjectProvider({ children }) {
       setConflictState(null);
 
       try {
+        const removeProjectFromLocalState = async () => {
+          const currentSelected = selectedProjectIdRef.current;
+          const targetWasSelected =
+            currentSelected === projectId ||
+            projectsRef.current.some(
+              (p) =>
+                (p.id === projectId || p._id === projectId) &&
+                (p.id === currentSelected || p._id === currentSelected)
+            );
+
+          const remaining = projectsRef.current.filter(
+            (p) => p.id !== projectId && p._id !== projectId
+          );
+          setProjects(remaining);
+          if (activeUserId) {
+            await removeCachedProjectOffline(projectId, activeUserId);
+          }
+
+          if (targetWasSelected) {
+            selectedProjectIdRef.current = null;
+            setSelectedProjectIdState(null);
+            await persistSelectedProjectId(null);
+          }
+        };
+
+        const queueOfflineDelete = async () => {
+          const queuedOp = await queueProjectMutation({
+            userId: activeUserId,
+            projectId,
+            entityType: 'project',
+            operationType: 'DELETE',
+            payload: { id: projectId },
+            description: `Delete project (${projectId})`,
+          });
+          await removeProjectFromLocalState();
+          await refreshSyncStatus();
+          return {
+            ok: true,
+            status: 202,
+            queuedOffline: true,
+            deletedProjectId: projectId,
+            operation: queuedOp,
+            error: null,
+          };
+        };
+
+        if (isClientOffline() && activeUserId) {
+          return await queueOfflineDelete();
+        }
+
         const { skipRefreshAfterMutation = false, ...apiOptions } =
           options || {};
         const result = await deleteProjectApi(projectId, apiOptions);
         if (!result.ok) {
+          if (
+            activeUserId &&
+            (result.isNetworkError || result.status === 0)
+          ) {
+            return await queueOfflineDelete();
+          }
           setProjectError(result.error || 'Failed to delete project.');
           return result;
         }
 
-        const currentSelected = selectedProjectIdRef.current;
-        const targetWasSelected =
-          currentSelected === projectId ||
-          projectsRef.current.some(
-            (p) =>
-              (p.id === projectId || p._id === projectId) &&
-              (p.id === currentSelected || p._id === currentSelected)
-          );
-
-        const remaining = projectsRef.current.filter(
-          (p) => p.id !== projectId && p._id !== projectId
-        );
-        setProjects(remaining);
-
-        if (targetWasSelected) {
-          selectedProjectIdRef.current = null;
-          setSelectedProjectIdState(null);
-          await persistSelectedProjectId(null);
-        }
+        await removeProjectFromLocalState();
 
         if (!skipRefreshAfterMutation) {
           await refreshProjects({ silent: true });
@@ -660,7 +1233,118 @@ export function ProjectProvider({ children }) {
         setIsMutating(false);
       }
     },
-    [persistSelectedProjectId, refreshProjects]
+    [activeUserId, persistSelectedProjectId, refreshProjects, refreshSyncStatus]
+  );
+
+  /**
+   * Resolves a queued HTTP 409 conflict (`'merge'`, `'keep_local'`, `'keep_server'`, `'discard_local'`)
+   * and refreshes project state.
+   */
+  const resolveSyncConflict = useCallback(
+    async (opId, resolution, options = {}) => {
+      if (!activeUserId) {
+        return { ok: false, error: 'Authentication required.' };
+      }
+      const res = await resolveProjectConflict(
+        opId,
+        resolution,
+        activeUserId,
+        options
+      );
+      if (res.ok && res.project) {
+        upsertProjectInState(res.project, {
+          pendingSync: false,
+          pendingCreation: false,
+        });
+      }
+      await refreshSyncStatus();
+      if (!isClientOffline()) {
+        await refreshProjects({ silent: true });
+      }
+      return res;
+    },
+    [activeUserId, upsertProjectInState, refreshSyncStatus, refreshProjects]
+  );
+
+  /**
+   * Retries a single queued or failed operation.
+   */
+  const retrySyncOperation = useCallback(
+    async (opId, options = {}) => {
+      if (!activeUserId) {
+        return { ok: false, error: 'Authentication required.' };
+      }
+      const res = await retryProjectOperation(opId, activeUserId, options);
+      await refreshSyncStatus();
+      if (res.ok && !isClientOffline()) {
+        await refreshProjects({ silent: true });
+      }
+      return res;
+    },
+    [activeUserId, refreshSyncStatus, refreshProjects]
+  );
+
+  /**
+   * Retries all failed operations in the user's sync queue.
+   */
+  const retryAllFailedOperations = useCallback(
+    async (options = {}) => {
+      if (!activeUserId) {
+        return { ok: false, error: 'Authentication required.' };
+      }
+      const res = await retryFailedProjectOperations(activeUserId, options);
+      await refreshSyncStatus();
+      if (res.ok && !isClientOffline()) {
+        await refreshProjects({ silent: true });
+      }
+      return res;
+    },
+    [activeUserId, refreshSyncStatus, refreshProjects]
+  );
+
+  /**
+   * Discards a single operation from the user's sync queue.
+   */
+  const discardSyncOperation = useCallback(
+    async (opId) => {
+      if (!activeUserId) {
+        return { ok: false, error: 'Authentication required.' };
+      }
+      const res = await discardProjectOperation(opId, activeUserId);
+      await refreshSyncStatus();
+      return res;
+    },
+    [activeUserId, refreshSyncStatus]
+  );
+
+  /**
+   * Toggles simulated offline mode on/off and automatically synchronizes queued
+   * operations when switching back online.
+   */
+  const toggleSimulatedOfflineMode = useCallback(
+    async (nextOffline) => {
+      const targetOffline =
+        typeof nextOffline === 'boolean'
+          ? nextOffline
+          : !syncStatus.simulatedOffline;
+      setSimulatedOfflineMode(targetOffline);
+      await refreshSyncStatus();
+      if (!targetOffline && activeUserId) {
+        const syncRes = await processProjectSyncQueue(activeUserId, {
+          ignoreBackoff: true,
+        });
+        await refreshSyncStatus();
+        await refreshProjects({ silent: true });
+        return { online: true, syncResult: syncRes };
+      }
+      return { online: !targetOffline };
+    },
+    [
+      syncStatus.simulatedOffline,
+      activeUserId,
+      refreshSyncStatus,
+      refreshProjects,
+    ]
   );
 
   const selectedProject = useMemo(() => {
@@ -686,6 +1370,8 @@ export function ProjectProvider({ children }) {
       isMutating,
       projectError,
       conflictState,
+      syncStatus,
+      isOffline: !syncStatus.online,
       selectProject,
       clearSelectedProject,
       refreshProjects,
@@ -697,6 +1383,13 @@ export function ProjectProvider({ children }) {
       updateProjectData,
       deleteProject,
       clearProjectError,
+      refreshSyncStatus,
+      syncOfflineQueue,
+      resolveSyncConflict,
+      retrySyncOperation,
+      retryAllFailedOperations,
+      discardSyncOperation,
+      toggleSimulatedOfflineMode,
     }),
     [
       projects,
@@ -707,6 +1400,7 @@ export function ProjectProvider({ children }) {
       isMutating,
       projectError,
       conflictState,
+      syncStatus,
       selectProject,
       clearSelectedProject,
       refreshProjects,
@@ -718,6 +1412,13 @@ export function ProjectProvider({ children }) {
       updateProjectData,
       deleteProject,
       clearProjectError,
+      refreshSyncStatus,
+      syncOfflineQueue,
+      resolveSyncConflict,
+      retrySyncOperation,
+      retryAllFailedOperations,
+      discardSyncOperation,
+      toggleSimulatedOfflineMode,
     ]
   );
 

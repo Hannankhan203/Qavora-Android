@@ -41,7 +41,7 @@ const SCREEN_TITLES = {
 
 function QavoraQAShell() {
   const { colors, isDark, toggleTheme } = useTheme();
-  const { selectedProject } = useProjects();
+  const { selectedProject, syncStatus, isOffline } = useProjects();
   const {
     activeTab,
     setActiveTab,
@@ -217,6 +217,63 @@ function QavoraQAShell() {
               >
                 {metrics.passRate}% Pass
               </Text>
+            ) : null}
+
+            {(isOffline ||
+              (syncStatus &&
+                (syncStatus.totalQueued > 0 ||
+                  syncStatus.conflictCount > 0 ||
+                  syncStatus.isSyncing))) ? (
+              <Pressable
+                onPress={() => {
+                  setProjectViewMode('workspace');
+                  setActiveTab('profile');
+                }}
+                style={[
+                  styles.syncPillBtn,
+                  {
+                    backgroundColor:
+                      syncStatus && syncStatus.conflictCount > 0
+                        ? colors.dangerSoft
+                        : isOffline
+                        ? colors.surfaceAccent
+                        : colors.surfaceAccent,
+                    borderColor:
+                      syncStatus && syncStatus.conflictCount > 0
+                        ? colors.danger
+                        : isOffline
+                        ? colors.warning
+                        : colors.primary,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.syncPillText,
+                    {
+                      color:
+                        syncStatus && syncStatus.conflictCount > 0
+                          ? colors.danger
+                          : isOffline
+                          ? colors.warning
+                          : colors.primary,
+                      fontFamily: monoFontFamily,
+                    },
+                  ]}
+                >
+                  {syncStatus && syncStatus.conflictCount > 0
+                    ? `Conflict (${syncStatus.conflictCount})`
+                    : isOffline
+                    ? `Offline${
+                        syncStatus && syncStatus.pendingCount > 0
+                          ? ` (${syncStatus.pendingCount})`
+                          : ''
+                      }`
+                    : syncStatus && syncStatus.isSyncing
+                    ? 'Syncing...'
+                    : `Sync (${syncStatus.pendingCount})`}
+                </Text>
+              </Pressable>
             ) : null}
 
             <Pressable
@@ -503,6 +560,18 @@ const styles = StyleSheet.create({
   },
   passRatePill: {
     fontSize: 12,
+    fontWeight: '700',
+  },
+  syncPillBtn: {
+    minHeight: 34,
+    paddingHorizontal: 9,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  syncPillText: {
+    fontSize: 11,
     fontWeight: '700',
   },
   themeBtn: {

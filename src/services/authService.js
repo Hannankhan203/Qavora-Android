@@ -506,6 +506,25 @@ export async function restoreAuthenticatedSession(options = {}) {
     };
   }
 
+  // Offline-first fallback: if the device is offline or the backend is unreachable
+  // (network error, not 401) and both a valid auth cookie and cached user profile exist,
+  // restore the cached user profile so offline project data and sync queues remain accessible.
+  if (
+    cachedUser &&
+    hasAuthCookie() &&
+    (meResult.isNetworkError || meResult.status === 0)
+  ) {
+    return {
+      ok: true,
+      status: 0,
+      user: cachedUser,
+      isExpired: false,
+      offlineRestored: true,
+      isNetworkError: true,
+      error: null,
+    };
+  }
+
   return {
     ok: false,
     status: meResult.status,

@@ -306,6 +306,8 @@ export function normalizeProject(rawProject) {
   };
 }
 
+export const normalizeProjectRecord = normalizeProject;
+
 /**
  * Formats an error thrown by `apiClient` into a structured service response,
  * including HTTP 409 optimistic concurrency conflict metadata (`currentUpdatedAt`, `expectedUpdatedAt`).

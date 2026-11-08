@@ -14,6 +14,7 @@ import { useAuth } from '../context/AuthContext';
 import { useProjects } from '../context/ProjectContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
+import DataManagementSection from './DataManagementSection';
 
 export default function ProfileSettingsScreen() {
   const { colors, themePreference, setThemePreference } = useTheme();
@@ -304,6 +305,9 @@ export default function ProfileSettingsScreen() {
             </View>
           </View>
         </View>
+
+        {/* Phase 2F: Data Management, Backup, Restore & Offline Synchronization */}
+        <DataManagementSection />
 
         {/* Adaptive Theme Toggle */}
         <View

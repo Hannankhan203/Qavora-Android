@@ -59,8 +59,10 @@ function formatTimestamp() {
   )} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
 
-export function getProjectWorkspaceStorageKey(projectId) {
-  return `${WORKSPACE_STORAGE_PREFIX}${projectId}`;
+export function getProjectWorkspaceStorageKey(projectId, userId = null) {
+  const userScope =
+    userId && String(userId).trim() ? `${String(userId).trim()}:` : '';
+  return `${WORKSPACE_STORAGE_PREFIX}${userScope}${projectId}`;
 }
 
 /**
@@ -1095,6 +1097,11 @@ export function WorkspaceProvider({ children }) {
     setDashboardSubTab('reports');
   }, []);
 
+  const openDataManagementView = useCallback(() => {
+    setProjectViewMode('workspace');
+    setActiveTab('profile');
+  }, []);
+
   // Switch workspace data cleanly whenever the selected project changes
   useEffect(() => {
     let mounted = true;
@@ -1141,7 +1148,10 @@ export function WorkspaceProvider({ children }) {
     setDefects(immediateState.defects);
     setActivityLog(immediateState.activityLog);
 
-    const storageKey = getProjectWorkspaceStorageKey(selectedProjectId);
+    const storageKey = getProjectWorkspaceStorageKey(
+      selectedProjectId,
+      user && user.userId
+    );
     AsyncStorage.getItem(storageKey)
       .then((raw) => {
         if (!mounted) return;
@@ -1232,7 +1242,7 @@ export function WorkspaceProvider({ children }) {
       savedAt,
     });
     AsyncStorage.setItem(
-      getProjectWorkspaceStorageKey(selectedProjectId),
+      getProjectWorkspaceStorageKey(selectedProjectId, user && user.userId),
       payload
     )
       .then(() => {
@@ -3738,6 +3748,7 @@ export function WorkspaceProvider({ children }) {
     openWorkspace,
     openDashboardOverview,
     openReportsView,
+    openDataManagementView,
     selectedTestCaseId,
     setSelectedTestCaseId,
     selectedTestRunId,
