@@ -1,4 +1,4 @@
-import { Platform, Share } from 'react-native';
+import { shareOrDownloadFile } from './dataManagementService.js';
 
 /**
  * Supported Report Types in Qavora Android Phase 2E,
@@ -1688,7 +1688,9 @@ export function formatReportAsMarkdown(report) {
 
 /**
  * Generates and exports a report in the requested format (`json`, `csv`, or `markdown`).
- * Handles empty states and share/download fallbacks gracefully without external native dependencies.
+ * Uses `shareOrDownloadFile` so native Android/iOS generates actual `.json`, `.csv`, or `.md`
+ * files and shares their `file://` URI via the system share sheet (`expo-sharing`), while Web
+ * preserves browser Blob downloads.
  */
 export async function exportGeneratedReport(report, format = 'json', options = {}) {
   try {
@@ -1729,53 +1731,40 @@ export async function exportGeneratedReport(report, format = 'json', options = {
     );
     const filename = `${safeProjectSlug}-${report.reportType || 'report'}-${dateStamp}.${formatMeta.extension}`;
 
-    let shared = false;
-    if (!options.skipPlatformShare) {
-      if (
-        Platform.OS === 'web' &&
-        typeof window !== 'undefined' &&
-        typeof document !== 'undefined' &&
-        typeof Blob !== 'undefined' &&
-        typeof URL !== 'undefined' &&
-        typeof URL.createObjectURL === 'function'
-      ) {
-        try {
-          const blob = new Blob([content], {
-            type: `${formatMeta.mimeType};charset=utf-8;`,
-          });
-          const url = URL.createObjectURL(blob);
-          const anchor = document.createElement('a');
-          anchor.href = url;
-          anchor.setAttribute('download', filename);
-          document.body.appendChild(anchor);
-          anchor.click();
-          document.body.removeChild(anchor);
-          URL.revokeObjectURL(url);
-          shared = true;
-        } catch {
-          shared = false;
-        }
-      } else if (Share && typeof Share.share === 'function') {
-        try {
-          await Share.share({
-            title: `${report.project.name} — ${report.reportTitle}`,
-            message: content,
-          });
-          shared = true;
-        } catch {
-          shared = false;
-        }
-      }
+    const fileRes = await shareOrDownloadFile({
+      filename,
+      mimeType: formatMeta.mimeType,
+      content,
+      title: `${report.project.name} — ${report.reportTitle}`,
+      skipPlatformShare: Boolean(options.skipPlatformShare),
+      existingFileUri: options.existingFileUri || null,
+    });
+
+    if (!fileRes || !fileRes.ok) {
+      return {
+        ok: false,
+        format: formatMeta.id,
+        filename,
+        content,
+        fileUri: null,
+        shared: false,
+        error:
+          (fileRes && fileRes.error) ||
+          'Failed to generate or save report export file.',
+      };
     }
 
     return {
       ok: true,
       format: formatMeta.id,
       formatLabel: formatMeta.label,
-      filename,
-      mimeType: formatMeta.mimeType,
+      filename: fileRes.filename || filename,
+      mimeType: fileRes.mimeType || formatMeta.mimeType,
       content,
-      shared,
+      sizeBytes: fileRes.sizeBytes,
+      fileUri: fileRes.fileUri || null,
+      shared: Boolean(fileRes.shared),
+      shareMethod: fileRes.shareMethod || null,
       isEmpty: Boolean(report.isEmpty),
       error: null,
     };
@@ -1785,6 +1774,7 @@ export async function exportGeneratedReport(report, format = 'json', options = {
       format: String(format || 'json'),
       filename: null,
       content: '',
+      fileUri: null,
       shared: false,
       error:
         (err && err.message) || 'Failed to generate or export QA report.',

@@ -24,6 +24,9 @@
 
 import { Platform, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { File as ExpoFile, Paths as ExpoPaths } from 'expo-file-system';
+import * as ExpoSharing from 'expo-sharing';
+import * as ExpoDocumentPicker from 'expo-document-picker';
 import {
   apiGet,
   apiPost,
@@ -54,7 +57,17 @@ const PROHIBITED_OBJECT_KEYS = new Set([
   'prototype',
 ]);
 
+const ALLOWED_JSON_MIME_TYPES = new Set([
+  '',
+  'application/json',
+  'text/json',
+  'application/x-json',
+  'text/plain',
+  'application/octet-stream',
+]);
+
 let customDataStorageAdapter = null;
+let customNativeFileAdapters = null;
 
 function getStorage() {
   if (customDataStorageAdapter) {
@@ -72,10 +85,69 @@ export function setDataManagementStorageAdapter(adapter) {
   customDataStorageAdapter = adapter;
 }
 
+/**
+ * Allows injecting custom platform/file-system/sharing/document-picker adapters
+ * for deterministic automated testing of native Android and Web workflows.
+ *
+ * @param {object | null} adapters
+ */
+export function setNativeFileAdaptersForTesting(adapters = null) {
+  customNativeFileAdapters = adapters;
+}
+
+export function resetNativeFileAdaptersForTesting() {
+  customNativeFileAdapters = null;
+}
+
+function getEffectivePlatformOS() {
+  if (
+    customNativeFileAdapters &&
+    typeof customNativeFileAdapters.platformOS === 'string'
+  ) {
+    return customNativeFileAdapters.platformOS;
+  }
+  return Platform && Platform.OS ? Platform.OS : 'android';
+}
+
+function getSharingAdapter() {
+  if (customNativeFileAdapters && customNativeFileAdapters.sharing) {
+    return customNativeFileAdapters.sharing;
+  }
+  return ExpoSharing;
+}
+
+function getDocumentPickerAdapter() {
+  if (customNativeFileAdapters && customNativeFileAdapters.documentPicker) {
+    return customNativeFileAdapters.documentPicker;
+  }
+  return ExpoDocumentPicker;
+}
+
+function getRnShareAdapter() {
+  if (customNativeFileAdapters && customNativeFileAdapters.rnShare) {
+    return customNativeFileAdapters.rnShare;
+  }
+  return Share;
+}
+
 export function getLocalSnapshotsStorageKey(userId) {
   const cleanUser = userId ? String(userId).trim() : '';
   if (!cleanUser) return null;
   return `${LOCAL_SNAPSHOTS_STORAGE_PREFIX}${cleanUser}`;
+}
+
+export function computeUtf8ByteLength(input) {
+  const str = typeof input === 'string' ? input : String(input ?? '');
+  if (typeof TextEncoder !== 'undefined') {
+    return new TextEncoder().encode(str).byteLength;
+  }
+  if (typeof Blob !== 'undefined') {
+    return new Blob([str]).size;
+  }
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.byteLength(str, 'utf8');
+  }
+  return str.length;
 }
 
 function escapeCSVCell(val) {
@@ -96,6 +168,45 @@ function sanitizeFilenameSegment(raw) {
   return cleaned || 'Project';
 }
 
+function sanitizeExportFilename(rawFilename, fallback = 'Qavora_Export.json') {
+  const base = String(rawFilename || fallback)
+    .trim()
+    .replace(/[/\\?%*:|"<>]/g, '_')
+    .replace(/\.\.+/g, '_');
+  return base || fallback;
+}
+
+export function normalizeShareMimeType(mimeType = 'application/json', filename = '') {
+  const rawMime = String(mimeType || '')
+    .split(';')[0]
+    .trim()
+    .toLowerCase();
+  const lowerName = String(filename || '').trim().toLowerCase();
+
+  if (lowerName.endsWith('.json') || rawMime === 'application/json' || rawMime === 'text/json') {
+    return 'application/json';
+  }
+  if (lowerName.endsWith('.csv') || rawMime === 'text/csv') {
+    return 'text/csv';
+  }
+  if (
+    lowerName.endsWith('.md') ||
+    lowerName.endsWith('.markdown') ||
+    rawMime === 'text/markdown'
+  ) {
+    return 'text/markdown';
+  }
+  return rawMime || 'application/octet-stream';
+}
+
+export function resolveShareUTI(cleanMimeType = 'application/json', filename = '') {
+  const mime = normalizeShareMimeType(cleanMimeType, filename);
+  if (mime === 'application/json') return 'public.json';
+  if (mime === 'text/csv') return 'public.comma-separated-values-text';
+  if (mime === 'text/markdown') return 'net.daringfireball.markdown';
+  return 'public.data';
+}
+
 function dateStamp(now = new Date()) {
   return now.toISOString().split('T')[0];
 }
@@ -105,8 +216,84 @@ function fullTimestamp(now = new Date()) {
 }
 
 /**
- * Triggers a cross-platform download (Web Blob) or native share sheet (Android/iOS)
- * and always returns the generated file content and metadata.
+ * Generates and writes an export or backup file into native device cache/document
+ * storage using Expo SDK 58 `expo-file-system` (`File`, `Paths.cache`), returning
+ * a `file://` URI ready for native Android system share-sheet sharing.
+ *
+ * @param {object} params
+ * @param {string} params.filename
+ * @param {string} params.content
+ * @param {string} [params.mimeType='application/json']
+ */
+export async function writeExportFileToNativeStorage({
+  filename,
+  content = '',
+  mimeType = 'application/json',
+} = {}) {
+  const safeFilename = sanitizeExportFilename(filename, 'Qavora_Export.json');
+  const stringContent = typeof content === 'string' ? content : String(content ?? '');
+  const cleanMimeType = normalizeShareMimeType(mimeType, safeFilename);
+  const sizeBytes = computeUtf8ByteLength(stringContent);
+
+  const fsOverride =
+    customNativeFileAdapters && customNativeFileAdapters.fileSystem
+      ? customNativeFileAdapters.fileSystem
+      : null;
+
+  if (fsOverride && typeof fsOverride.writeFile === 'function') {
+    const written = await fsOverride.writeFile({
+      filename: safeFilename,
+      content: stringContent,
+      mimeType: cleanMimeType,
+      sizeBytes,
+    });
+    const fileUri =
+      written && typeof written.uri === 'string'
+        ? written.uri
+        : `file:///cache/${safeFilename}`;
+    return {
+      ok: true,
+      fileUri,
+      filename: safeFilename,
+      mimeType: cleanMimeType,
+      sizeBytes,
+    };
+  }
+
+  const baseDir =
+    fsOverride && fsOverride.cacheDirectory
+      ? fsOverride.cacheDirectory
+      : ExpoPaths.cache || ExpoPaths.document;
+
+  const FileCtor =
+    fsOverride && fsOverride.File ? fsOverride.File : ExpoFile;
+
+  const fileHandle = new FileCtor(baseDir, safeFilename);
+  if (typeof fileHandle.create === 'function') {
+    fileHandle.create({ overwrite: true, intermediates: true });
+  }
+  if (typeof fileHandle.write === 'function') {
+    await fileHandle.write(stringContent);
+  }
+
+  const fileUri =
+    fileHandle && typeof fileHandle.uri === 'string' && fileHandle.uri
+      ? fileHandle.uri
+      : `file:///cache/${safeFilename}`;
+
+  return {
+    ok: true,
+    fileUri,
+    filename: safeFilename,
+    mimeType: cleanMimeType,
+    sizeBytes,
+  };
+}
+
+/**
+ * Triggers a cross-platform download (Web Blob) or native file generation +
+ * Android/iOS system share sheet (`expo-sharing` with file URI) and returns
+ * the generated file metadata, content, and `fileUri`.
  */
 export async function shareOrDownloadFile({
   filename,
@@ -114,55 +301,146 @@ export async function shareOrDownloadFile({
   content = '',
   title = 'Qavora Data Export',
   skipPlatformShare = false,
+  existingFileUri = null,
 } = {}) {
-  const sizeBytes =
-    typeof Blob !== 'undefined'
-      ? new Blob([content]).size
-      : Buffer.byteLength(String(content || ''), 'utf8');
+  const safeFilename = sanitizeExportFilename(filename, 'Qavora_Export.json');
+  const stringContent = typeof content === 'string' ? content : String(content ?? '');
+  const cleanMimeType = normalizeShareMimeType(mimeType, safeFilename);
+  const uti = resolveShareUTI(cleanMimeType, safeFilename);
+  const sizeBytes = computeUtf8ByteLength(stringContent);
+  const platformOS = getEffectivePlatformOS();
 
+  let fileUri = existingFileUri || null;
   let shared = false;
+  let shareMethod = null;
+  let shareError = null;
+
+  if (platformOS === 'web') {
+    if (!skipPlatformShare) {
+      try {
+        const webDom =
+          customNativeFileAdapters && customNativeFileAdapters.webDom
+            ? customNativeFileAdapters.webDom
+            : typeof document !== 'undefined' &&
+              typeof Blob !== 'undefined' &&
+              typeof URL !== 'undefined' &&
+              typeof URL.createObjectURL === 'function'
+            ? { document, Blob, URL }
+            : null;
+
+        if (webDom) {
+          const blobMime =
+            String(mimeType || '').includes('charset')
+              ? mimeType
+              : `${cleanMimeType};charset=utf-8;`;
+          const blob = new webDom.Blob([stringContent], { type: blobMime });
+          const url = webDom.URL.createObjectURL(blob);
+          const anchor = webDom.document.createElement('a');
+          anchor.href = url;
+          anchor.download = safeFilename;
+          if (typeof anchor.setAttribute === 'function') {
+            anchor.setAttribute('download', safeFilename);
+          }
+          webDom.document.body.appendChild(anchor);
+          anchor.click();
+          webDom.document.body.removeChild(anchor);
+          webDom.URL.revokeObjectURL(url);
+          shared = true;
+          shareMethod = 'web_download';
+        }
+      } catch (err) {
+        shared = false;
+        shareError = (err && err.message) || 'Browser download failed.';
+      }
+    }
+
+    return {
+      ok: true,
+      filename: safeFilename,
+      mimeType: cleanMimeType,
+      content: stringContent,
+      sizeBytes,
+      fileUri: null,
+      shared,
+      shareMethod,
+      error: shareError,
+    };
+  }
+
+  // Native Android / iOS: always write the actual file to native cache/document storage first
+  if (!fileUri) {
+    try {
+      const writeRes = await writeExportFileToNativeStorage({
+        filename: safeFilename,
+        content: stringContent,
+        mimeType: cleanMimeType,
+      });
+      if (writeRes && writeRes.ok && writeRes.fileUri) {
+        fileUri = writeRes.fileUri;
+      }
+    } catch (writeErr) {
+      return {
+        ok: false,
+        filename: safeFilename,
+        mimeType: cleanMimeType,
+        content: stringContent,
+        sizeBytes,
+        fileUri: null,
+        shared: false,
+        shareMethod: null,
+        error:
+          (writeErr && writeErr.message) ||
+          'Failed to write export file to device storage.',
+      };
+    }
+  }
+
   if (!skipPlatformShare) {
     try {
-      if (
-        Platform.OS === 'web' &&
-        typeof document !== 'undefined' &&
-        typeof Blob !== 'undefined' &&
-        typeof URL !== 'undefined' &&
-        typeof URL.createObjectURL === 'function'
-      ) {
-        const blob = new Blob([content], { type: mimeType });
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = filename;
-        document.body.appendChild(anchor);
-        anchor.click();
-        document.body.removeChild(anchor);
-        URL.revokeObjectURL(url);
-        shared = true;
-      } else if (
-        Platform.OS !== 'web' &&
-        Share &&
-        typeof Share.share === 'function'
-      ) {
-        await Share.share({
-          title: `${title} (${filename})`,
-          message: content,
+      const sharing = getSharingAdapter();
+      const canUseNativeSharing =
+        sharing &&
+        typeof sharing.isAvailableAsync === 'function' &&
+        typeof sharing.shareAsync === 'function'
+          ? await sharing.isAvailableAsync()
+          : false;
+
+      if (canUseNativeSharing && fileUri) {
+        await sharing.shareAsync(fileUri, {
+          mimeType: cleanMimeType,
+          dialogTitle: title,
+          UTI: uti,
         });
         shared = true;
+        shareMethod = 'expo_sharing';
+      } else {
+        const rnShare = getRnShareAdapter();
+        if (rnShare && typeof rnShare.share === 'function') {
+          await rnShare.share({
+            title: `${title} (${safeFilename})`,
+            url: fileUri || undefined,
+            message: stringContent,
+          });
+          shared = true;
+          shareMethod = 'rn_share_fallback';
+        }
       }
-    } catch {
+    } catch (err) {
       shared = false;
+      shareError = (err && err.message) || 'Share sheet was dismissed or unavailable.';
     }
   }
 
   return {
     ok: true,
-    filename,
-    mimeType,
-    content,
+    filename: safeFilename,
+    mimeType: cleanMimeType,
+    content: stringContent,
     sizeBytes,
+    fileUri,
     shared,
+    shareMethod,
+    error: shareError,
   };
 }
 
@@ -762,7 +1040,8 @@ export function parseAndValidateImportPayload(jsonInput, options = {}) {
         error: 'Import payload is empty. Provide a valid Qavora JSON backup.',
       };
     }
-    if (trimmed.length > MAX_IMPORT_SIZE_BYTES) {
+    const payloadBytes = computeUtf8ByteLength(trimmed);
+    if (payloadBytes > MAX_IMPORT_SIZE_BYTES || trimmed.length > MAX_IMPORT_SIZE_BYTES) {
       return {
         ok: false,
         error: 'Import payload exceeds the maximum allowed size of 15 MB.',
@@ -1275,6 +1554,365 @@ export function parseAndValidateImportPayload(jsonInput, options = {}) {
     warnings,
     projects: sanitizedProjects,
     checklists: sanitizedChecklists,
+  };
+}
+
+/**
+ * Validates the file metadata (name/extension, MIME type, and pre-read byte size)
+ * of a selected backup file before reading its full content.
+ *
+ * @param {object} meta
+ * @param {string} [meta.fileName]
+ * @param {string} [meta.mimeType]
+ * @param {number | null} [meta.fileSize]
+ */
+export function validateBackupFileMetadata({
+  fileName = '',
+  mimeType = '',
+  fileSize = null,
+} = {}) {
+  const cleanName = String(fileName || '').trim();
+  const cleanMime = String(mimeType || '')
+    .split(';')[0]
+    .trim()
+    .toLowerCase();
+
+  if (!cleanName) {
+    return {
+      ok: false,
+      code: 'INVALID_FILE',
+      error: 'Selected file has no valid filename. Please choose a .json Qavora backup file.',
+    };
+  }
+
+  if (!/\.json$/i.test(cleanName)) {
+    return {
+      ok: false,
+      code: 'UNSUPPORTED_FILE_EXTENSION',
+      error: `Unsupported file extension in "${cleanName}". Please select a valid .json Qavora backup file.`,
+    };
+  }
+
+  if (
+    cleanMime &&
+    !ALLOWED_JSON_MIME_TYPES.has(cleanMime) &&
+    !cleanMime.endsWith('+json')
+  ) {
+    return {
+      ok: false,
+      code: 'UNSUPPORTED_MIME_TYPE',
+      error: `Unsupported file MIME type "${cleanMime}". Please select a valid JSON backup file (.json).`,
+    };
+  }
+
+  if (typeof fileSize === 'number' && Number.isFinite(fileSize)) {
+    if (fileSize <= 0) {
+      return {
+        ok: false,
+        code: 'EMPTY_FILE',
+        error: 'The selected backup file is empty (0 bytes).',
+      };
+    }
+    if (fileSize > MAX_IMPORT_SIZE_BYTES) {
+      return {
+        ok: false,
+        code: 'FILE_TOO_LARGE',
+        error: 'Import file exceeds the maximum allowed size of 15 MB.',
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    fileName: cleanName,
+    mimeType: cleanMime || 'application/json',
+    fileSize:
+      typeof fileSize === 'number' && Number.isFinite(fileSize) ? fileSize : null,
+  };
+}
+
+/**
+ * Opens the system document picker (`expo-document-picker`) to select a `.json`
+ * backup file, validates extension/MIME/size (enforcing the 15 MB limit before
+ * and after reading), reads the complete UTF-8 file contents without silent
+ * truncation, and passes the content through `parseAndValidateImportPayload`
+ * for the Import Preview & Confirmation workflow.
+ *
+ * Never automatically imports or mutates workspace data.
+ *
+ * @param {object} [options]
+ * @param {Array<object>} [options.existingProjects=[]]
+ */
+export async function pickAndValidateBackupFile({
+  existingProjects = [],
+} = {}) {
+  const picker = getDocumentPickerAdapter();
+  if (!picker || typeof picker.getDocumentAsync !== 'function') {
+    return {
+      ok: false,
+      canceled: false,
+      code: 'PICKER_UNAVAILABLE',
+      error: 'Document picker is not available in this environment.',
+    };
+  }
+
+  let pickResult;
+  try {
+    pickResult = await picker.getDocumentAsync({
+      type: ['application/json', 'text/json', '*/*'],
+      copyToCacheDirectory: true,
+      multiple: false,
+      base64: false,
+    });
+  } catch (pickerErr) {
+    return {
+      ok: false,
+      canceled: false,
+      code: 'PICKER_ERROR',
+      error:
+        (pickerErr && pickerErr.message) ||
+        'Failed to open system document picker.',
+    };
+  }
+
+  if (
+    !pickResult ||
+    pickResult.canceled === true ||
+    !Array.isArray(pickResult.assets) ||
+    pickResult.assets.length === 0
+  ) {
+    return {
+      ok: false,
+      canceled: true,
+      code: 'CANCELED',
+      error: null,
+    };
+  }
+
+  const asset = pickResult.assets[0];
+  if (!asset || typeof asset !== 'object') {
+    return {
+      ok: false,
+      canceled: false,
+      code: 'INVALID_ASSET',
+      error: 'No valid file was returned by the document picker.',
+    };
+  }
+
+  const fileName = String(asset.name || '').trim();
+  const mimeType = String(asset.mimeType || '').trim();
+  const uri = typeof asset.uri === 'string' ? asset.uri.trim() : '';
+  const reportedSize =
+    typeof asset.size === 'number' && Number.isFinite(asset.size)
+      ? asset.size
+      : asset.file &&
+        typeof asset.file.size === 'number' &&
+        Number.isFinite(asset.file.size)
+      ? asset.file.size
+      : null;
+
+  // 1. Validate filename extension (.json), MIME type, and pre-read reported size (15 MB limit)
+  const metaCheck = validateBackupFileMetadata({
+    fileName,
+    mimeType,
+    fileSize: reportedSize,
+  });
+
+  if (!metaCheck.ok) {
+    return {
+      ok: false,
+      canceled: false,
+      code: metaCheck.code,
+      fileName: fileName || null,
+      fileSize: reportedSize,
+      fileUri: uri || null,
+      error: metaCheck.error,
+    };
+  }
+
+  // 2. Read complete UTF-8 file contents (checking native file size before reading where available)
+  const platformOS = getEffectivePlatformOS();
+  const fsOverride =
+    customNativeFileAdapters && customNativeFileAdapters.fileSystem
+      ? customNativeFileAdapters.fileSystem
+      : null;
+
+  let rawContent = null;
+  let detectedSizeBytes = reportedSize;
+
+  try {
+    if (fsOverride && typeof fsOverride.readFile === 'function') {
+      if (typeof fsOverride.getFileSize === 'function') {
+        const preReadBytes = await fsOverride.getFileSize(uri, asset);
+        if (typeof preReadBytes === 'number' && Number.isFinite(preReadBytes)) {
+          detectedSizeBytes = preReadBytes;
+          if (preReadBytes <= 0) {
+            return {
+              ok: false,
+              canceled: false,
+              code: 'EMPTY_FILE',
+              fileName,
+              fileSize: 0,
+              fileUri: uri || null,
+              error: 'The selected backup file is empty (0 bytes).',
+            };
+          }
+          if (preReadBytes > MAX_IMPORT_SIZE_BYTES) {
+            return {
+              ok: false,
+              canceled: false,
+              code: 'FILE_TOO_LARGE',
+              fileName,
+              fileSize: preReadBytes,
+              fileUri: uri || null,
+              error: 'Import file exceeds the maximum allowed size of 15 MB.',
+            };
+          }
+        }
+      }
+      rawContent = await fsOverride.readFile(uri, asset);
+    } else if (platformOS === 'web') {
+      if (asset.file && typeof asset.file.text === 'function') {
+        rawContent = await asset.file.text();
+      } else if (uri && typeof fetch === 'function') {
+        const res = await fetch(uri);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status} while reading selected file.`);
+        }
+        rawContent = await res.text();
+      } else {
+        throw new Error('Selected browser file could not be read.');
+      }
+    } else {
+      if (!uri) {
+        return {
+          ok: false,
+          canceled: false,
+          code: 'MISSING_URI',
+          fileName,
+          fileSize: reportedSize,
+          fileUri: null,
+          error: 'Selected backup file does not provide a readable file URI.',
+        };
+      }
+
+      const FileCtor =
+        fsOverride && fsOverride.File ? fsOverride.File : ExpoFile;
+      const nativeFile = new FileCtor(uri);
+
+      if (nativeFile.exists === false) {
+        return {
+          ok: false,
+          canceled: false,
+          code: 'FILE_NOT_FOUND',
+          fileName,
+          fileSize: reportedSize,
+          fileUri: uri,
+          error: 'Selected backup file could not be found in device storage.',
+        };
+      }
+
+      const nativeFileSize =
+        typeof nativeFile.size === 'number' && Number.isFinite(nativeFile.size) && nativeFile.size >= 0
+          ? nativeFile.size
+          : typeof nativeFile.info === 'function'
+          ? nativeFile.info()?.size
+          : null;
+
+      if (typeof nativeFileSize === 'number' && Number.isFinite(nativeFileSize)) {
+        detectedSizeBytes = nativeFileSize;
+        if (nativeFileSize === 0) {
+          return {
+            ok: false,
+            canceled: false,
+            code: 'EMPTY_FILE',
+            fileName,
+            fileSize: 0,
+            fileUri: uri,
+            error: 'The selected backup file is empty (0 bytes).',
+          };
+        }
+        if (nativeFileSize > MAX_IMPORT_SIZE_BYTES) {
+          return {
+            ok: false,
+            canceled: false,
+            code: 'FILE_TOO_LARGE',
+            fileName,
+            fileSize: nativeFileSize,
+            fileUri: uri,
+            error: 'Import file exceeds the maximum allowed size of 15 MB.',
+          };
+        }
+      }
+
+      rawContent = await nativeFile.text();
+    }
+  } catch {
+    // Avoid logging backup contents or sensitive paths; return clean user-facing error
+    return {
+      ok: false,
+      canceled: false,
+      code: 'FILE_READ_ERROR',
+      fileName,
+      fileSize: detectedSizeBytes,
+      fileUri: uri || null,
+      error:
+        'Failed to read the selected backup file. Ensure the file is accessible and not corrupted.',
+    };
+  }
+
+  if (typeof rawContent !== 'string') {
+    return {
+      ok: false,
+      canceled: false,
+      code: 'FILE_READ_ERROR',
+      fileName,
+      fileSize: detectedSizeBytes,
+      fileUri: uri || null,
+      error: 'Selected backup file did not return valid UTF-8 text content.',
+    };
+  }
+
+  const actualByteSize = computeUtf8ByteLength(rawContent);
+  const effectiveFileSize =
+    actualByteSize > 0 ? actualByteSize : detectedSizeBytes || 0;
+
+  if (effectiveFileSize > MAX_IMPORT_SIZE_BYTES) {
+    return {
+      ok: false,
+      canceled: false,
+      code: 'FILE_TOO_LARGE',
+      fileName,
+      fileSize: effectiveFileSize,
+      fileUri: uri || null,
+      error: 'Import file exceeds the maximum allowed size of 15 MB.',
+    };
+  }
+
+  const validation = parseAndValidateImportPayload(rawContent, {
+    fileName,
+    fileSize: effectiveFileSize,
+    existingProjects,
+  });
+
+  if (!validation.ok) {
+    return {
+      ...validation,
+      canceled: false,
+      code: 'VALIDATION_FAILED',
+      fileName,
+      fileSize: effectiveFileSize,
+      fileUri: uri || null,
+    };
+  }
+
+  return {
+    ...validation,
+    canceled: false,
+    code: 'VALIDATED',
+    fileUri: uri || null,
+    mimeType: metaCheck.mimeType,
+    rawContent,
   };
 }
 

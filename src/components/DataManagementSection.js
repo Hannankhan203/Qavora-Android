@@ -38,6 +38,9 @@ import {
   exportDefectsCSV,
   createFullBackupPayload,
   parseAndValidateImportPayload,
+  pickAndValidateBackupFile,
+  shareOrDownloadFile,
+  computeUtf8ByteLength,
   fetchStorageUsage,
   fetchRecoverySnapshot,
   clearRecoverySnapshot,
@@ -95,6 +98,8 @@ export default function DataManagementSection() {
   const [importPreview, setImportPreview] = useState(null);
   const [importMode, setImportMode] = useState('merge'); // 'merge' | 'replace'
   const [isImporting, setIsImporting] = useState(false);
+  const [isPickingFile, setIsPickingFile] = useState(false);
+  const [selectedBackupFileMeta, setSelectedBackupFileMeta] = useState(null);
 
   // Confirmation Modals for Rollback, Local Restore, and Workspace Reset
   const [confirmActionModal, setConfirmActionModal] = useState(null);
@@ -235,9 +240,16 @@ export default function DataManagementSection() {
           filename: res.filename,
           mimeType: res.mimeType,
           sizeBytes: res.sizeBytes,
+          fileUri: res.fileUri || null,
+          shareMethod: res.shareMethod || null,
           content: res.content,
         });
-        showToast(`Generated ${res.filename}`, 'success');
+        showToast(
+          res.shared
+            ? `Exported & shared ${res.filename}`
+            : `Generated ${res.filename}`,
+          'success'
+        );
       } else {
         showToast(res.error || 'Export failed', 'danger');
       }
@@ -262,9 +274,18 @@ export default function DataManagementSection() {
           filename: res.filename,
           mimeType: res.mimeType,
           sizeBytes: res.sizeBytes,
+          fileUri: res.fileUri || null,
+          shareMethod: res.shareMethod || null,
           content: res.content,
         });
-        showToast(`Generated ${res.filename}`, 'success');
+        showToast(
+          res.shared
+            ? `Exported & shared ${res.filename}`
+            : `Generated ${res.filename}`,
+          'success'
+        );
+      } else {
+        showToast(res.error || 'Full backup export failed', 'danger');
       }
     } finally {
       setIsExporting(false);
@@ -303,9 +324,45 @@ export default function DataManagementSection() {
           filename: res.filename,
           mimeType: res.mimeType,
           sizeBytes: res.sizeBytes,
+          fileUri: res.fileUri || null,
+          shareMethod: res.shareMethod || null,
           content: res.content,
         });
         showToast(`Exported ${res.filename} (${res.rowCount} rows)`, 'success');
+      } else if (res && res.error) {
+        showToast(res.error, 'danger');
+      }
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleShareFromExportPreview = async () => {
+    if (!exportPreview) return;
+    setIsExporting(true);
+    try {
+      const res = await shareOrDownloadFile({
+        filename: exportPreview.filename,
+        mimeType: exportPreview.mimeType,
+        content: exportPreview.content,
+        title: exportPreview.title,
+        skipPlatformShare: false,
+        existingFileUri: exportPreview.fileUri || null,
+      });
+      if (res && res.ok) {
+        if (res.fileUri && res.fileUri !== exportPreview.fileUri) {
+          setExportPreview((prev) =>
+            prev ? { ...prev, fileUri: res.fileUri } : prev
+          );
+        }
+        showToast(
+          res.shared
+            ? `Shared ${exportPreview.filename}`
+            : `Saved ${exportPreview.filename}`,
+          'success'
+        );
+      } else {
+        showToast((res && res.error) || 'Failed to share export file.', 'danger');
       }
     } finally {
       setIsExporting(false);
@@ -316,6 +373,58 @@ export default function DataManagementSection() {
   // 3. IMPORT VALIDATION, PREVIEW & EXECUTION HANDLERS
   // =========================================================================
 
+  const handlePickBackupFile = async () => {
+    if (isPickingFile || isImporting) return;
+    setIsPickingFile(true);
+    setImportValidationError(null);
+    try {
+      const res = await pickAndValidateBackupFile({
+        existingProjects: projects,
+      });
+
+      if (res.canceled) {
+        showToast('Backup file selection cancelled', 'info');
+        return;
+      }
+
+      if (!res.ok) {
+        setSelectedBackupFileMeta(
+          res.fileName
+            ? {
+                fileName: res.fileName,
+                fileSize: res.fileSize || 0,
+                fileUri: res.fileUri || null,
+                valid: false,
+              }
+            : null
+        );
+        const errMsg =
+          res.error || 'Selected file could not be validated as a Qavora backup.';
+        setImportValidationError(errMsg);
+        showToast(errMsg, 'danger');
+        return;
+      }
+
+      setSelectedBackupFileMeta({
+        fileName: res.fileName,
+        fileSize: res.fileSize || 0,
+        fileUri: res.fileUri || null,
+        formatType: res.formatType,
+        valid: true,
+      });
+      setImportJsonText(res.rawContent || '');
+      setImportValidationError(null);
+      setImportMode('merge');
+      setImportPreview(res);
+      showToast(
+        `Validated "${res.fileName}" (${res.projectsCount} project(s)) — review preview to confirm`,
+        'success'
+      );
+    } finally {
+      setIsPickingFile(false);
+    }
+  };
+
   const handleLoadSampleBackupIntoEditor = () => {
     const sourceProjects =
       projects.length > 0
@@ -324,7 +433,15 @@ export default function DataManagementSection() {
         ? [selectedProject]
         : [];
     const payload = createFullBackupPayload(sourceProjects, [], user);
-    setImportJsonText(JSON.stringify(payload, null, 2));
+    const serialized = JSON.stringify(payload, null, 2);
+    setImportJsonText(serialized);
+    setSelectedBackupFileMeta({
+      fileName: 'Qavora_Current_Workspace_Backup.json',
+      fileSize: computeUtf8ByteLength(serialized),
+      fileUri: null,
+      formatType: 'Full Application Backup',
+      valid: true,
+    });
     setImportValidationError(null);
     showToast(
       'Loaded current workspace backup JSON into import editor',
@@ -334,9 +451,13 @@ export default function DataManagementSection() {
 
   const handleValidateAndPreviewImport = () => {
     setImportValidationError(null);
+    const activeFileName =
+      (selectedBackupFileMeta && selectedBackupFileMeta.fileName) ||
+      'Qavora_Import.json';
+    const byteSize = computeUtf8ByteLength(importJsonText);
     const validation = parseAndValidateImportPayload(importJsonText, {
-      fileName: 'Qavora_Import.json',
-      fileSize: importJsonText.length,
+      fileName: activeFileName,
+      fileSize: byteSize,
       existingProjects: projects,
     });
 
@@ -395,6 +516,7 @@ export default function DataManagementSection() {
         await loadStorageAndSnapshots();
         setImportPreview(null);
         setImportJsonText('');
+        setSelectedBackupFileMeta(null);
         showToast(
           `Imported ${importPreview.projectsCount} project(s) into offline workspace (${importMode.toUpperCase()})`,
           'success'
@@ -417,6 +539,7 @@ export default function DataManagementSection() {
       await loadStorageAndSnapshots();
       setImportPreview(null);
       setImportJsonText('');
+      setSelectedBackupFileMeta(null);
       showToast(
         res.message ||
           `Imported ${importPreview.projectsCount} project(s) (${importMode})`,
@@ -1195,10 +1318,71 @@ export default function DataManagementSection() {
         </View>
 
         <Text style={[styles.sectionDesc, { color: colors.textSecondary }]}>
-          Supports Full Application Backups, Multi-Project Archives, and
-          Individual Project JSON exports. Malformed JSON, prohibited operator
-          keys, and incompatible schema versions are strictly rejected.
+          Select a .json Qavora backup file from device storage (up to 15 MB) or
+          paste JSON below. Supports Full Application Backups, Multi-Project
+          Archives, and Individual Project JSON exports. All imports require
+          validation and explicit preview confirmation before changes apply.
         </Text>
+
+        <View style={[styles.actionButtonsRow, { marginBottom: 10 }]}>
+          <Pressable
+            onPress={handlePickBackupFile}
+            disabled={isPickingFile || isImporting}
+            style={[
+              styles.primaryBtn,
+              {
+                backgroundColor: colors.primary,
+                opacity: isPickingFile || isImporting ? 0.65 : 1,
+              },
+            ]}
+          >
+            {isPickingFile ? (
+              <ActivityIndicator size="small" color={colors.textOnPrimary} />
+            ) : (
+              <VectorIcon name="folder" size={15} color={colors.textOnPrimary} />
+            )}
+            <Text
+              style={[styles.primaryBtnText, { color: colors.textOnPrimary }]}
+            >
+              {isPickingFile
+                ? 'Reading Backup File...'
+                : 'Select Backup JSON File (.json)'}
+            </Text>
+          </Pressable>
+        </View>
+
+        {selectedBackupFileMeta ? (
+          <View
+            style={[
+              styles.localStatsRow,
+              {
+                backgroundColor: colors.background,
+                borderColor: selectedBackupFileMeta.valid
+                  ? colors.primary
+                  : colors.danger,
+                marginBottom: 10,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.storageTextStrong,
+                {
+                  color: selectedBackupFileMeta.valid
+                    ? colors.primary
+                    : colors.danger,
+                  fontFamily: monoFontFamily,
+                },
+              ]}
+            >
+              File: {selectedBackupFileMeta.fileName} (
+              {((selectedBackupFileMeta.fileSize || 0) / 1024).toFixed(2)} KB)
+              {selectedBackupFileMeta.formatType
+                ? ` · ${selectedBackupFileMeta.formatType}`
+                : ''}
+            </Text>
+          </View>
+        ) : null}
 
         <TextInput
           value={importJsonText}
@@ -1206,7 +1390,7 @@ export default function DataManagementSection() {
             setImportJsonText(txt);
             if (importValidationError) setImportValidationError(null);
           }}
-          placeholder='Paste Qavora Full Backup or Project JSON here, or tap "Load Current Backup JSON" above...'
+          placeholder='Select a .json backup file above, paste Qavora Backup JSON here, or tap "Load Current Backup JSON"...'
           placeholderTextColor={colors.textMuted}
           multiline
           numberOfLines={5}
@@ -1260,10 +1444,11 @@ export default function DataManagementSection() {
             </Text>
           </Pressable>
 
-          {importJsonText ? (
+          {importJsonText || selectedBackupFileMeta ? (
             <Pressable
               onPress={() => {
                 setImportJsonText('');
+                setSelectedBackupFileMeta(null);
                 setImportValidationError(null);
               }}
               style={[
@@ -1625,6 +1810,7 @@ export default function DataManagementSection() {
                 >
                   {exportPreview?.filename} · {exportPreview?.sizeBytes || 0}{' '}
                   bytes
+                  {exportPreview?.fileUri ? ` · File URI ready` : ''}
                 </Text>
               </View>
               <Pressable
@@ -1664,6 +1850,31 @@ export default function DataManagementSection() {
                   : ''}
               </Text>
             </ScrollView>
+
+            <View style={styles.actionButtonsRow}>
+              <Pressable
+                onPress={handleShareFromExportPreview}
+                disabled={isExporting}
+                style={[
+                  styles.primaryBtn,
+                  { backgroundColor: colors.primary },
+                ]}
+              >
+                <VectorIcon
+                  name="share"
+                  size={15}
+                  color={colors.textOnPrimary}
+                />
+                <Text
+                  style={[
+                    styles.primaryBtnText,
+                    { color: colors.textOnPrimary },
+                  ]}
+                >
+                  {isExporting ? 'Sharing...' : 'Share / Save File'}
+                </Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1694,6 +1905,16 @@ export default function DataManagementSection() {
             </Text>
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               Confirm Workspace Restore ({importPreview?.formatType})
+            </Text>
+            <Text
+              style={[
+                styles.snapshotMeta,
+                { color: colors.textMuted, fontFamily: monoFontFamily },
+              ]}
+            >
+              Source: {importPreview?.fileName || 'Qavora_Import.json'} ·{' '}
+              {importPreview?.fileSize || 0} bytes · Schema v
+              {importPreview?.schemaVersion || 1}
             </Text>
 
             <View
