@@ -28,6 +28,7 @@ import { useProjects } from '../context/ProjectContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
 import ProjectFormModal from './ProjectFormModal';
+import { computeProjectTestCaseCount } from '../services/projectService';
 
 function formatReadableDate(isoString) {
   if (!isoString || typeof isoString !== 'string') return null;
@@ -40,20 +41,13 @@ function formatReadableDate(isoString) {
   });
 }
 
-function computeProjectCardStats(project) {
+export function computeProjectCardStats(project) {
   if (!project || typeof project !== 'object') return null;
 
   const suites = Array.isArray(project.testSuites) ? project.testSuites : null;
   const suiteCount = suites ? suites.length : null;
 
-  let testCaseCount =
-    typeof project.testCaseCount === 'number' ? project.testCaseCount : null;
-  if (testCaseCount === null && suites) {
-    testCaseCount = suites.reduce((sum, s) => {
-      const cases = Array.isArray(s && s.testCases) ? s.testCases.length : 0;
-      return sum + cases;
-    }, 0);
-  }
+  const testCaseCount = computeProjectTestCaseCount(project);
 
   const defects = Array.isArray(project.defects) ? project.defects : null;
   const defectCount =

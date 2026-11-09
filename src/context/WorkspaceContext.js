@@ -10,7 +10,11 @@ import React, {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from './AuthContext.js';
 import { useProjects } from './ProjectContext.js';
-import { buildDefaultTestPlan } from '../services/projectService.js';
+import {
+  buildDefaultTestPlan,
+  extractSuiteTestCases,
+  persistProfileProjectChanges,
+} from '../services/projectService.js';
 import {
   REPORT_TYPES,
   DATE_RANGE_FILTERS,
@@ -628,20 +632,18 @@ export function buildProjectWorkspaceState(
   }));
 
   const backendTestCases = [];
+  const seenBackendCaseIds = new Set();
   rawSuites.forEach((s, suiteIdx) => {
     const suiteId = String((s && (s.id || s._id)) || `suite-${suiteIdx + 1}`);
     const suiteName = (s && s.name) || `Suite ${suiteIdx + 1}`;
-    const rawCases =
-      s && Array.isArray(s.cases)
-        ? s.cases
-        : s && Array.isArray(s.testCases)
-        ? s.testCases
-        : [];
+    const rawCases = extractSuiteTestCases(s);
     rawCases.forEach((tc, tcIdx) => {
       if (!tc || typeof tc !== 'object') return;
       const caseId = String(
         tc.id || tc.testCaseId || `TC-${suiteIdx + 1}${tcIdx + 1}`
       );
+      if (seenBackendCaseIds.has(caseId)) return;
+      seenBackendCaseIds.add(caseId);
       const resolvedType =
         tc.testType || tc.category || tc.type || 'Functional';
       backendTestCases.push({
@@ -1002,6 +1004,7 @@ export function WorkspaceProvider({ children }) {
   const {
     selectedProject,
     selectedProjectId,
+    updateProject,
     updateProjectData,
     getProject,
   } = useProjects();
@@ -1012,9 +1015,14 @@ export function WorkspaceProvider({ children }) {
 
   // Backend Synchronization State for Phase 2C & 2D
   const [isSyncingProjectData, setIsSyncingProjectData] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isRestoringSampleData, setIsRestoringSampleData] = useState(false);
+  const [isClearingWorkspaceData, setIsClearingWorkspaceData] = useState(false);
   const [projectDataError, setProjectDataError] = useState(null);
   const [projectDataConflict, setProjectDataConflict] = useState(null);
   const syncLockRef = useRef(false);
+  const profileSaveLockRef = useRef(false);
+  const datasetResetLockRef = useRef(false);
 
   const initialWorkspace = useMemo(
     () => buildProjectWorkspaceState(selectedProject, null, user),
@@ -1116,17 +1124,19 @@ export function WorkspaceProvider({ children }) {
   // Hydrate user-owned checklists on login and clear on logout/user switch
   useEffect(() => {
     let mounted = true;
-    const uid =
-      user && (user.id || user._id) ? String(user.id || user._id).trim() : '';
+    const resolvedUserId =
+      user && (user.userId || user.id || user._id)
+        ? String(user.userId || user.id || user._id).trim()
+        : '';
 
-    if (!uid) {
+    if (!resolvedUserId) {
       setChecklists([]);
       return () => {
         mounted = false;
       };
     }
 
-    getCachedChecklistsForUser(uid)
+    getCachedChecklistsForUser(resolvedUserId)
       .then((cached) => {
         if (mounted && Array.isArray(cached) && cached.length > 0) {
           setChecklists(cached);
@@ -1134,7 +1144,7 @@ export function WorkspaceProvider({ children }) {
       })
       .catch(() => {});
 
-    fetchChecklists({ userId: uid })
+    fetchChecklists({ userId: resolvedUserId })
       .then((res) => {
         if (mounted && res && res.ok && Array.isArray(res.checklists)) {
           setChecklists(res.checklists);
@@ -1145,7 +1155,7 @@ export function WorkspaceProvider({ children }) {
     return () => {
       mounted = false;
     };
-  }, [user && (user.id || user._id)]);
+  }, [user && (user.userId || user.id || user._id)]);
 
   // Switch workspace data cleanly whenever the selected project changes
   useEffect(() => {
@@ -3594,109 +3604,357 @@ export function WorkspaceProvider({ children }) {
     [profile]
   );
 
-  // Profile & Storage Management
-  const updateProfile = (updates) => {
-    setProfile((prev) => ({ ...prev, ...updates }));
-    appendActivity(
-      'settings',
-      'Updated local QA profile & project settings',
-      updates.projectName || ''
-    );
-    showToast('Saved local QA settings', 'success');
-  };
+  // Profile & Storage Management (Phase 3D hardened)
+  const updateProfile = useCallback(
+    async (updates = {}, options = {}) => {
+      if (profileSaveLockRef.current) {
+        return {
+          ok: false,
+          skipped: true,
+          status: 409,
+          code: 'SAVE_IN_PROGRESS',
+          error: 'Profile save is already in progress.',
+        };
+      }
 
-  const resetToSampleData = async () => {
-    setProfile((prev) => ({
-      ...INITIAL_PROFILE,
+      profileSaveLockRef.current = true;
+      setIsSavingProfile(true);
+      setProjectDataError(null);
+      setProjectDataConflict(null);
+
+      try {
+        const result = await persistProfileProjectChanges({
+          updates,
+          currentProfile: profile,
+          selectedProject,
+          selectedProjectId,
+          updateProjectFn: updateProject,
+          getProjectFn: getProject,
+          apiOptions: options.apiOptions || {},
+        });
+
+        if (result.profile) {
+          setProfile(result.profile);
+        }
+
+        if (result.ok) {
+          appendActivity(
+            'settings',
+            result.persistedToBackend
+              ? `Updated profile & persisted project "${result.profile.projectName}"`
+              : result.queuedOffline
+              ? `Queued offline update for project "${result.profile.projectName}"`
+              : 'Updated local QA profile & device preferences',
+            result.profile.projectName || ''
+          );
+          if (!options.silentToast) {
+            if (result.queuedOffline) {
+              showToast(
+                'Profile saved & project update queued for offline sync',
+                'info'
+              );
+            } else if (result.persistedToBackend) {
+              showToast('Profile & active project saved to server', 'success');
+            } else {
+              showToast('Saved local QA settings', 'success');
+            }
+          }
+          return result;
+        }
+
+        if (result.isConflict) {
+          setProjectDataConflict({
+            isConflict: true,
+            projectId: selectedProjectId,
+            currentUpdatedAt: result.currentUpdatedAt || null,
+            expectedUpdatedAt: result.expectedUpdatedAt || null,
+            message: result.error,
+          });
+        }
+        setProjectDataError(result.error || 'Failed to save profile settings.');
+        if (!options.silentToast) {
+          showToast(
+            result.error || 'Failed to save profile & project settings',
+            'danger'
+          );
+        }
+        return result;
+      } finally {
+        profileSaveLockRef.current = false;
+        setIsSavingProfile(false);
+      }
+    },
+    [
+      profile,
+      selectedProject,
+      selectedProjectId,
+      updateProject,
+      getProject,
+      appendActivity,
+      showToast,
+    ]
+  );
+
+  const getSampleRestorePreview = useCallback(() => {
+    return {
+      projectId: selectedProjectId || null,
       projectName:
         (selectedProject && selectedProject.name) ||
-        prev.projectName ||
-        INITIAL_PROFILE.projectName,
-      targetVersion:
-        (selectedProject && selectedProject.version) ||
-        prev.targetVersion ||
-        INITIAL_PROFILE.targetVersion,
-    }));
-    setSuites(INITIAL_SUITES);
-    setTestCases(INITIAL_TEST_CASES);
-    setTestRuns(INITIAL_TEST_RUNS);
-    setExecutions([]);
-    setDefects(INITIAL_DEFECTS);
-    setActivityLog(INITIAL_ACTIVITY);
-    setSelectedTestCaseId(null);
-    setSelectedTestRunId(null);
-    setSelectedDefectId(null);
-
-    if (selectedProjectId) {
-      const { testSuites, summaryCounts } = buildBackendTestSuitesPayload(
-        INITIAL_SUITES,
-        INITIAL_TEST_CASES
-      );
-      const { executionRuns, activeRun, executions: serializedExecs } =
-        buildBackendExecutionsAndRunsPayload(INITIAL_TEST_RUNS, []);
-      const { defects: serializedDefects, defectSummaryCounts } =
-        buildBackendDefectsPayload(INITIAL_DEFECTS);
-
-      await persistProjectDataToBackend({
-        testSuites,
-        executionRuns,
-        activeRun,
-        executions: serializedExecs,
-        defects: serializedDefects,
-        ...summaryCounts,
-        ...defectSummaryCounts,
-      });
-    }
-    showToast('Restored sample QA dataset for active project', 'info');
-  };
-
-  const clearAllWorkspaceData = async () => {
-    const defaultSuites = [
-      {
-        id: 'suite-default',
-        name: 'General Suite',
-        category: 'Functional',
-        tags: [],
-        description: 'Default test suite',
+        profile.projectName ||
+        'Active Project',
+      willOverwriteBackend: Boolean(selectedProjectId),
+      currentCounts: {
+        suites: suitesRef.current.length,
+        testCases: testCasesRef.current.length,
+        testRuns: testRunsRef.current.length,
+        executions: executionsRef.current.length,
+        defects: defectsRef.current.length,
       },
-    ];
-    setSuites(defaultSuites);
-    setTestCases([]);
-    setTestRuns([]);
-    setExecutions([]);
-    setDefects([]);
-    setActivityLog([
-      {
-        id: `act-${Date.now()}`,
-        category: 'settings',
-        title: 'Cleared project local QA data',
-        detail: 'Project workspace reset to empty state.',
-        timestamp: formatTimestamp(),
+      sampleCounts: {
+        suites: INITIAL_SUITES.length,
+        testCases: INITIAL_TEST_CASES.length,
+        testRuns: INITIAL_TEST_RUNS.length,
+        executions: 0,
+        defects: INITIAL_DEFECTS.length,
       },
-    ]);
-    setSelectedTestCaseId(null);
-    setSelectedTestRunId(null);
-    setSelectedDefectId(null);
+    };
+  }, [selectedProjectId, selectedProject, profile.projectName]);
 
-    if (selectedProjectId) {
-      const { testSuites, summaryCounts } = buildBackendTestSuitesPayload(
-        defaultSuites,
-        []
-      );
-      const { defects: serializedDefects, defectSummaryCounts } =
-        buildBackendDefectsPayload([]);
-      await persistProjectDataToBackend({
-        testSuites,
-        executionRuns: [],
-        activeRun: null,
-        executions: [],
-        defects: serializedDefects,
-        ...summaryCounts,
-        ...defectSummaryCounts,
-      });
-    }
-    showToast('Cleared test cases, runs, and defects for this project', 'info');
-  };
+  const resetToSampleData = useCallback(
+    async (options = {}) => {
+      if (!options || options.confirmed !== true) {
+        return {
+          ok: false,
+          canceled: true,
+          status: 400,
+          code: 'CONFIRMATION_REQUIRED',
+          error:
+            'Explicit confirmation is required before restoring the sample QA dataset.',
+        };
+      }
+
+      if (datasetResetLockRef.current) {
+        return {
+          ok: false,
+          skipped: true,
+          status: 409,
+          code: 'ALREADY_IN_PROGRESS',
+          error: 'Sample dataset restoration is already in progress.',
+        };
+      }
+
+      datasetResetLockRef.current = true;
+      setIsRestoringSampleData(true);
+
+      const replacedCounts = {
+        suites: suitesRef.current.length,
+        testCases: testCasesRef.current.length,
+        testRuns: testRunsRef.current.length,
+        executions: executionsRef.current.length,
+        defects: defectsRef.current.length,
+      };
+
+      try {
+        setProfile((prev) => ({
+          ...INITIAL_PROFILE,
+          projectName:
+            (selectedProject && selectedProject.name) ||
+            prev.projectName ||
+            INITIAL_PROFILE.projectName,
+          targetVersion:
+            (selectedProject && selectedProject.version) ||
+            prev.targetVersion ||
+            INITIAL_PROFILE.targetVersion,
+        }));
+        setSuites(INITIAL_SUITES);
+        setTestCases(INITIAL_TEST_CASES);
+        setTestRuns(INITIAL_TEST_RUNS);
+        setExecutions([]);
+        setDefects(INITIAL_DEFECTS);
+        setActivityLog(INITIAL_ACTIVITY);
+        setSelectedTestCaseId(null);
+        setSelectedTestRunId(null);
+        setSelectedDefectId(null);
+
+        let backendRes = null;
+        if (selectedProjectId) {
+          const { testSuites, summaryCounts } = buildBackendTestSuitesPayload(
+            INITIAL_SUITES,
+            INITIAL_TEST_CASES
+          );
+          const {
+            executionRuns,
+            activeRun,
+            executions: serializedExecs,
+          } = buildBackendExecutionsAndRunsPayload(INITIAL_TEST_RUNS, []);
+          const { defects: serializedDefects, defectSummaryCounts } =
+            buildBackendDefectsPayload(INITIAL_DEFECTS);
+
+          backendRes = await persistProjectDataToBackend({
+            testSuites,
+            executionRuns,
+            activeRun,
+            executions: serializedExecs,
+            defects: serializedDefects,
+            ...summaryCounts,
+            ...defectSummaryCounts,
+          });
+
+          if (backendRes && !backendRes.ok) {
+            return {
+              ok: false,
+              status: backendRes.status || 0,
+              isConflict: Boolean(backendRes.isConflict),
+              replacedCounts,
+              error:
+                backendRes.error ||
+                'Failed to persist sample QA dataset to active project.',
+            };
+          }
+        }
+
+        if (!options.silentToast) {
+          showToast('Restored sample QA dataset for active project', 'info');
+        }
+
+        return {
+          ok: true,
+          status: (backendRes && backendRes.status) || 200,
+          queuedOffline: Boolean(backendRes && backendRes.queuedOffline),
+          project: (backendRes && backendRes.project) || selectedProject,
+          replacedCounts,
+          restoredCounts: {
+            suites: INITIAL_SUITES.length,
+            testCases: INITIAL_TEST_CASES.length,
+            testRuns: INITIAL_TEST_RUNS.length,
+            executions: 0,
+            defects: INITIAL_DEFECTS.length,
+          },
+          error: null,
+        };
+      } finally {
+        datasetResetLockRef.current = false;
+        setIsRestoringSampleData(false);
+      }
+    },
+    [selectedProject, selectedProjectId, persistProjectDataToBackend, showToast]
+  );
+
+  const clearAllWorkspaceData = useCallback(
+    async (options = {}) => {
+      if (!options || options.confirmed !== true) {
+        return {
+          ok: false,
+          canceled: true,
+          status: 400,
+          code: 'CONFIRMATION_REQUIRED',
+          error:
+            'Explicit confirmation is required before clearing project workspace data.',
+        };
+      }
+
+      if (datasetResetLockRef.current) {
+        return {
+          ok: false,
+          skipped: true,
+          status: 409,
+          code: 'ALREADY_IN_PROGRESS',
+          error: 'Workspace data reset is already in progress.',
+        };
+      }
+
+      datasetResetLockRef.current = true;
+      setIsClearingWorkspaceData(true);
+
+      const replacedCounts = {
+        suites: suitesRef.current.length,
+        testCases: testCasesRef.current.length,
+        testRuns: testRunsRef.current.length,
+        executions: executionsRef.current.length,
+        defects: defectsRef.current.length,
+      };
+
+      try {
+        const defaultSuites = [
+          {
+            id: 'suite-default',
+            name: 'General Suite',
+            category: 'Functional',
+            tags: [],
+            description: 'Default test suite',
+          },
+        ];
+        setSuites(defaultSuites);
+        setTestCases([]);
+        setTestRuns([]);
+        setExecutions([]);
+        setDefects([]);
+        setActivityLog([
+          {
+            id: `act-${Date.now()}`,
+            category: 'settings',
+            title: 'Cleared project local QA data',
+            detail: 'Project workspace reset to empty state.',
+            timestamp: formatTimestamp(),
+          },
+        ]);
+        setSelectedTestCaseId(null);
+        setSelectedTestRunId(null);
+        setSelectedDefectId(null);
+
+        let backendRes = null;
+        if (selectedProjectId) {
+          const { testSuites, summaryCounts } = buildBackendTestSuitesPayload(
+            defaultSuites,
+            []
+          );
+          const { defects: serializedDefects, defectSummaryCounts } =
+            buildBackendDefectsPayload([]);
+          backendRes = await persistProjectDataToBackend({
+            testSuites,
+            executionRuns: [],
+            activeRun: null,
+            executions: [],
+            defects: serializedDefects,
+            ...summaryCounts,
+            ...defectSummaryCounts,
+          });
+
+          if (backendRes && !backendRes.ok) {
+            return {
+              ok: false,
+              status: backendRes.status || 0,
+              isConflict: Boolean(backendRes.isConflict),
+              replacedCounts,
+              error:
+                backendRes.error ||
+                'Failed to persist cleared workspace state to active project.',
+            };
+          }
+        }
+
+        if (!options.silentToast) {
+          showToast(
+            'Cleared test cases, runs, and defects for this project',
+            'info'
+          );
+        }
+
+        return {
+          ok: true,
+          status: (backendRes && backendRes.status) || 200,
+          queuedOffline: Boolean(backendRes && backendRes.queuedOffline),
+          project: (backendRes && backendRes.project) || selectedProject,
+          replacedCounts,
+          error: null,
+        };
+      } finally {
+        datasetResetLockRef.current = false;
+        setIsClearingWorkspaceData(false);
+      }
+    },
+    [selectedProject, selectedProjectId, persistProjectDataToBackend, showToast]
+  );
 
   // --- Genuine Dynamic QA Metrics (Phase 2E parity with Qavora Web) ---
   const metrics = useMemo(() => {
@@ -3827,8 +4085,12 @@ export function WorkspaceProvider({ children }) {
     deleteDefect,
     startDefectFromFailedTest,
     updateProfile,
+    isSavingProfile,
+    getSampleRestorePreview,
     resetToSampleData,
+    isRestoringSampleData,
     clearAllWorkspaceData,
+    isClearingWorkspaceData,
     toast,
     showToast,
     dismissToast: () => setToast(null),

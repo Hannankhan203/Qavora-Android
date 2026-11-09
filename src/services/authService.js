@@ -61,7 +61,8 @@ export function sanitizeUserProfile(rawUser) {
     return null;
   }
 
-  const userId = rawUser.userId ? String(rawUser.userId).trim() : '';
+  const resolvedId = rawUser.userId || rawUser.id || rawUser._id;
+  const userId = resolvedId ? String(resolvedId).trim() : '';
   const email = rawUser.email ? String(rawUser.email).trim().toLowerCase() : '';
   const name = rawUser.name ? String(rawUser.name).trim() : '';
 
@@ -76,6 +77,7 @@ export function sanitizeUserProfile(rawUser) {
       : `${parts[0][0] || 'Q'}${parts[parts.length - 1][0] || 'A'}`.toUpperCase();
 
   return {
+    id: userId,
     userId,
     email,
     name,

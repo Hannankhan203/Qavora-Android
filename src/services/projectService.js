@@ -447,6 +447,15 @@ export async function createProject(projectInput, options = {}) {
       error: "Field 'name' is required and must be a non-empty string.",
     };
   }
+  if (trimmedName.length > 120) {
+    return {
+      ok: false,
+      status: 400,
+      project: null,
+      isConflict: false,
+      error: "Field 'name' cannot exceed 120 characters.",
+    };
+  }
 
   if (
     projectInput.status !== undefined &&
@@ -538,6 +547,12 @@ function buildWhitelistedMetadataPayload(updates, allowedSet) {
       return {
         valid: false,
         error: "Field 'name' must be a non-empty string.",
+      };
+    }
+    if (payload.name.trim().length > 120) {
+      return {
+        valid: false,
+        error: "Field 'name' cannot exceed 120 characters.",
       };
     }
     payload.name = payload.name.trim();
@@ -1040,6 +1055,453 @@ export async function updateProjectData(projectId, dataUpdates, options = {}) {
   }
 }
 
+/**
+ * Safely extracts and deduplicates test cases from a suite object that may
+ * store cases in `suite.cases`, `suite.testCases`, or both.
+ *
+ * - Supports suites with only `suite.cases`
+ * - Supports suites with only `suite.testCases`
+ * - Supports suites where one array is empty (`[]`) and the other is populated
+ * - Deduplicates when both `suite.cases` and `suite.testCases` are populated
+ *   so that identical cases present in both arrays are never double-counted
+ *
+ * @param {any} suite
+ * @returns {Array<object>}
+ */
+export function extractSuiteTestCases(suite) {
+  if (!suite || typeof suite !== 'object' || Array.isArray(suite)) {
+    return [];
+  }
+
+  const hasCases = Array.isArray(suite.cases) && suite.cases.length > 0;
+  const hasTestCases =
+    Array.isArray(suite.testCases) && suite.testCases.length > 0;
+
+  if (!hasCases && !hasTestCases) {
+    return [];
+  }
+
+  if (hasCases && hasTestCases && suite.cases === suite.testCases) {
+    return suite.cases.filter(
+      (tc) => tc && typeof tc === 'object' && !Array.isArray(tc)
+    );
+  }
+
+  const combined = [
+    ...(hasCases ? suite.cases : []),
+    ...(hasTestCases ? suite.testCases : []),
+  ];
+
+  const result = [];
+  const seenObjectRefs = new Set();
+  const seenKeys = new Set();
+
+  for (let i = 0; i < combined.length; i += 1) {
+    const tc = combined[i];
+    if (!tc || typeof tc !== 'object' || Array.isArray(tc)) {
+      continue;
+    }
+
+    if (seenObjectRefs.has(tc)) {
+      continue;
+    }
+    seenObjectRefs.add(tc);
+
+    const rawId =
+      (typeof tc.id === 'string' && tc.id.trim()) ||
+      (typeof tc.testCaseId === 'string' && tc.testCaseId.trim()) ||
+      (tc._id ? String(tc._id).trim() : '');
+
+    const titleKey =
+      typeof tc.title === 'string' && tc.title.trim()
+        ? `title:${tc.title.trim().toLowerCase()}`
+        : typeof tc.name === 'string' && tc.name.trim()
+        ? `title:${tc.name.trim().toLowerCase()}`
+        : null;
+
+    const dedupeKey = rawId ? `id:${rawId}` : titleKey;
+    if (dedupeKey) {
+      if (seenKeys.has(dedupeKey)) {
+        continue;
+      }
+      seenKeys.add(dedupeKey);
+    }
+
+    result.push(tc);
+  }
+
+  return result;
+}
+
+/**
+ * Safely counts unique test cases in a suite across `suite.cases` and `suite.testCases`.
+ *
+ * @param {any} suite
+ * @returns {number}
+ */
+export function countSuiteTestCases(suite) {
+  return extractSuiteTestCases(suite).length;
+}
+
+/**
+ * Computes the accurate total test case count for a project across all suites
+ * (`suite.cases` and `suite.testCases` with deduplication), falling back to
+ * `project.testCaseCount` when suites are not populated.
+ *
+ * @param {any} project
+ * @returns {number | null}
+ */
+export function computeProjectTestCaseCount(project) {
+  if (!project || typeof project !== 'object') {
+    return null;
+  }
+
+  const suites = Array.isArray(project.testSuites) ? project.testSuites : null;
+  const derivedSuiteCaseCount = suites
+    ? suites.reduce((sum, s) => sum + countSuiteTestCases(s), 0)
+    : null;
+
+  if (derivedSuiteCaseCount !== null && derivedSuiteCaseCount > 0) {
+    return derivedSuiteCaseCount;
+  }
+
+  if (typeof project.testCaseCount === 'number') {
+    return project.testCaseCount;
+  }
+
+  if (derivedSuiteCaseCount !== null) {
+    return derivedSuiteCaseCount;
+  }
+
+  return null;
+}
+
+/**
+ * Coordinates profile editor updates with authoritative active project persistence
+ * (`PATCH /api/projects/:id`).
+ *
+ * - Validates `projectName` (non-empty, max 120 characters, no prohibited keys)
+ * - Persists `name` (and `version` when `targetVersion` changes) to the backend
+ *   when an active project is selected
+ * - Properly handles validation errors (HTTP 400), authentication expiry (HTTP 401),
+ *   network failures (offline queue 202 fallback), and HTTP 409 optimistic
+ *   concurrency conflicts
+ * - Keeps the returned `profile` state synchronized with authoritative server data
+ *
+ * @param {object} params
+ * @param {object} params.updates
+ * @param {object} [params.currentProfile]
+ * @param {object | null} [params.selectedProject]
+ * @param {string | null} [params.selectedProjectId]
+ * @param {Function} [params.updateProjectFn]
+ * @param {Function} [params.getProjectFn]
+ * @param {object} [params.apiOptions]
+ */
+export async function persistProfileProjectChanges({
+  updates,
+  currentProfile = {},
+  selectedProject = null,
+  selectedProjectId = null,
+  updateProjectFn = null,
+  getProjectFn = null,
+  apiOptions = {},
+} = {}) {
+  if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_PAYLOAD',
+      profile: { ...currentProfile },
+      project: selectedProject,
+      persistedToBackend: false,
+      error: 'Profile update payload must be a valid object.',
+    };
+  }
+
+  if (containsProhibitedKeys(updates)) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'PROHIBITED_KEYS',
+      profile: { ...currentProfile },
+      project: selectedProject,
+      persistedToBackend: false,
+      error: 'Profile update contains prohibited object keys.',
+    };
+  }
+
+  const activeId =
+    (typeof selectedProjectId === 'string' && selectedProjectId.trim()) ||
+    (selectedProject &&
+      typeof selectedProject.id === 'string' &&
+      selectedProject.id.trim()) ||
+    (selectedProject && selectedProject._id
+      ? String(selectedProject._id).trim()
+      : '');
+
+  const hasProjectNameField = Object.prototype.hasOwnProperty.call(
+    updates,
+    'projectName'
+  );
+  const hasTargetVersionField = Object.prototype.hasOwnProperty.call(
+    updates,
+    'targetVersion'
+  );
+
+  const rawProjectName = hasProjectNameField
+    ? typeof updates.projectName === 'string'
+      ? updates.projectName.trim()
+      : ''
+    : selectedProject && typeof selectedProject.name === 'string'
+    ? selectedProject.name.trim()
+    : typeof currentProfile.projectName === 'string'
+    ? currentProfile.projectName.trim()
+    : '';
+
+  if (hasProjectNameField) {
+    if (!rawProjectName) {
+      return {
+        ok: false,
+        status: 400,
+        code: 'VALIDATION_ERROR',
+        profile: {
+          ...currentProfile,
+          projectName:
+            (selectedProject && selectedProject.name) ||
+            currentProfile.projectName ||
+            '',
+        },
+        project: selectedProject,
+        persistedToBackend: false,
+        error: 'Project name is required and cannot be empty.',
+      };
+    }
+
+    if (rawProjectName.length > 120) {
+      return {
+        ok: false,
+        status: 400,
+        code: 'VALIDATION_ERROR',
+        profile: {
+          ...currentProfile,
+          projectName:
+            (selectedProject && selectedProject.name) ||
+            currentProfile.projectName ||
+            '',
+        },
+        project: selectedProject,
+        persistedToBackend: false,
+        error: 'Project name cannot exceed 120 characters.',
+      };
+    }
+  }
+
+  const nextLocalPrefs = {
+    ...currentProfile,
+    testerName:
+      typeof updates.testerName === 'string' && updates.testerName.trim()
+        ? updates.testerName.trim()
+        : currentProfile.testerName || 'QA Engineer',
+    role:
+      typeof updates.role === 'string' && updates.role.trim()
+        ? updates.role.trim()
+        : currentProfile.role || 'QA Analyst',
+    defaultDevice:
+      typeof updates.defaultDevice === 'string' && updates.defaultDevice.trim()
+        ? updates.defaultDevice.trim()
+        : currentProfile.defaultDevice || 'Android Device',
+    defaultBuild:
+      typeof updates.defaultBuild === 'string' && updates.defaultBuild.trim()
+        ? updates.defaultBuild.trim()
+        : currentProfile.defaultBuild || '1.0.0',
+  };
+
+  if (typeof updates.defaultEnvironment === 'string' && updates.defaultEnvironment.trim()) {
+    nextLocalPrefs.defaultEnvironment = updates.defaultEnvironment.trim();
+  }
+
+  const nextTargetVersion = hasTargetVersionField
+    ? typeof updates.targetVersion === 'string' && updates.targetVersion.trim()
+      ? updates.targetVersion.trim()
+      : (selectedProject && selectedProject.version) ||
+        currentProfile.targetVersion ||
+        'v1.0.0'
+    : (selectedProject && selectedProject.version) ||
+      currentProfile.targetVersion ||
+      'v1.0.0';
+
+  // If no active project is selected, update local profile preferences only
+  if (!activeId) {
+    const localOnlyProfile = {
+      ...nextLocalPrefs,
+      projectName: rawProjectName || currentProfile.projectName || 'No Project Selected',
+      targetVersion: nextTargetVersion,
+    };
+    return {
+      ok: true,
+      status: 200,
+      persistedToBackend: false,
+      queuedOffline: false,
+      isConflict: false,
+      profile: localOnlyProfile,
+      project: null,
+      error: null,
+    };
+  }
+
+  const currentServerName =
+    selectedProject && typeof selectedProject.name === 'string'
+      ? selectedProject.name.trim()
+      : '';
+  const currentServerVersion =
+    selectedProject && typeof selectedProject.version === 'string'
+      ? selectedProject.version.trim()
+      : '';
+
+  const metadataPatch = {};
+  if (
+    hasProjectNameField &&
+    rawProjectName &&
+    rawProjectName !== currentServerName
+  ) {
+    metadataPatch.name = rawProjectName;
+  }
+  if (
+    hasTargetVersionField &&
+    nextTargetVersion &&
+    nextTargetVersion !== currentServerVersion
+  ) {
+    metadataPatch.version = nextTargetVersion;
+  }
+
+  // If project metadata did not change (only local tester/device preferences changed)
+  if (Object.keys(metadataPatch).length === 0) {
+    const syncedProfile = {
+      ...nextLocalPrefs,
+      projectName: currentServerName || rawProjectName,
+      targetVersion: currentServerVersion || nextTargetVersion,
+    };
+    return {
+      ok: true,
+      status: 200,
+      persistedToBackend: false,
+      queuedOffline: false,
+      isConflict: false,
+      profile: syncedProfile,
+      project: selectedProject,
+      error: null,
+    };
+  }
+
+  const effectiveUpdateFn =
+    typeof updateProjectFn === 'function'
+      ? updateProjectFn
+      : (projId, patchPayload, opts) =>
+          updateProjectMetadata(projId, patchPayload, opts);
+
+  const baselineUpdatedAt =
+    (selectedProject &&
+      (selectedProject._serverUpdatedAt || selectedProject.updatedAt)) ||
+    undefined;
+
+  const patchResult = await effectiveUpdateFn(activeId, metadataPatch, {
+    ...apiOptions,
+    ...(baselineUpdatedAt ? { expectedUpdatedAt: baselineUpdatedAt } : {}),
+  });
+
+  if (patchResult && patchResult.ok) {
+    const updatedProj = patchResult.project || {
+      ...(selectedProject || {}),
+      id: activeId,
+      ...metadataPatch,
+    };
+    const authoritativeProfile = {
+      ...nextLocalPrefs,
+      projectName: updatedProj.name || rawProjectName,
+      targetVersion: updatedProj.version || nextTargetVersion,
+    };
+
+    return {
+      ok: true,
+      status: patchResult.status || 200,
+      persistedToBackend: !patchResult.queuedOffline,
+      queuedOffline: Boolean(patchResult.queuedOffline),
+      isConflict: false,
+      profile: authoritativeProfile,
+      project: updatedProj,
+      operation: patchResult.operation || null,
+      error: null,
+    };
+  }
+
+  const status = (patchResult && patchResult.status) || 0;
+  const isConflict = Boolean(
+    (patchResult && patchResult.isConflict) || status === 409
+  );
+  const isAuthExpired = status === 401;
+  const isNetworkError = Boolean(
+    (patchResult && patchResult.isNetworkError) || status === 0
+  );
+
+  // On HTTP 409 conflict, fetch or use the authoritative server project so local UI stays in sync
+  let authoritativeServerProject = selectedProject;
+  if (isConflict && typeof getProjectFn === 'function') {
+    try {
+      const refreshed = await getProjectFn(activeId);
+      if (refreshed && refreshed.ok && refreshed.project) {
+        authoritativeServerProject = refreshed.project;
+      }
+    } catch {
+      // Preserve existing selectedProject if secondary refresh fails
+    }
+  }
+
+  const revertedProfile = {
+    ...nextLocalPrefs,
+    projectName:
+      (authoritativeServerProject && authoritativeServerProject.name) ||
+      currentServerName ||
+      currentProfile.projectName ||
+      '',
+    targetVersion:
+      (authoritativeServerProject && authoritativeServerProject.version) ||
+      currentServerVersion ||
+      currentProfile.targetVersion ||
+      'v1.0.0',
+  };
+
+  return {
+    ok: false,
+    status,
+    code: isConflict
+      ? 'CONFLICT'
+      : isAuthExpired
+      ? 'AUTH_EXPIRED'
+      : isNetworkError
+      ? 'NETWORK_ERROR'
+      : 'UPDATE_FAILED',
+    persistedToBackend: false,
+    queuedOffline: false,
+    isConflict,
+    isAuthExpired,
+    isNetworkError,
+    currentUpdatedAt: (patchResult && patchResult.currentUpdatedAt) || null,
+    expectedUpdatedAt:
+      (patchResult && patchResult.expectedUpdatedAt) ||
+      baselineUpdatedAt ||
+      null,
+    profile: revertedProfile,
+    project: authoritativeServerProject,
+    error:
+      (patchResult && patchResult.error) ||
+      (isConflict
+        ? 'Conflict detected: This project was modified on the server. Reloaded latest server project state.'
+        : isAuthExpired
+        ? 'Your session has expired. Please sign in again to save project changes.'
+        : 'Failed to persist project settings to the server.'),
+  };
+}
+
 export const projectService = {
   fetchProjects,
   fetchProjectById,
@@ -1052,6 +1514,10 @@ export const projectService = {
   normalizeProject,
   buildDefaultTestPlan,
   containsProhibitedKeys,
+  extractSuiteTestCases,
+  countSuiteTestCases,
+  computeProjectTestCaseCount,
+  persistProfileProjectChanges,
   PROJECT_STATUSES,
 };
 

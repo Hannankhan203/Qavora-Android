@@ -36,6 +36,7 @@ import {
 import {
   normalizeProjectRecord,
   buildDefaultTestPlan,
+  extractSuiteTestCases,
 } from './projectService.js';
 import {
   getCachedProjectsForUser,
@@ -468,11 +469,7 @@ export function buildStandardizedProjectExportObject(project) {
   const testSuites = (
     Array.isArray(normalized.testSuites) ? normalized.testSuites : []
   ).map((suite, sIdx) => {
-    const rawCases = Array.isArray(suite.cases)
-      ? suite.cases
-      : Array.isArray(suite.testCases)
-      ? suite.testCases
-      : [];
+    const rawCases = extractSuiteTestCases(suite);
     const cases = rawCases.map((tc, cIdx) => ({
       ...tc,
       id: String((tc && (tc.id || tc.testCaseId)) || `TC-${sIdx + 1}${cIdx + 1}`),
@@ -583,11 +580,7 @@ export function createFullBackupPayload(
     const suites = Array.isArray(p.testSuites) ? p.testSuites : [];
     totalSuites += suites.length;
     suites.forEach((s) => {
-      const cases = Array.isArray(s.cases)
-        ? s.cases
-        : Array.isArray(s.testCases)
-        ? s.testCases
-        : [];
+      const cases = extractSuiteTestCases(s);
       totalTestCases += cases.length;
     });
     if (Array.isArray(p.executions)) totalExecutions += p.executions.length;
@@ -1262,11 +1255,7 @@ export function parseAndValidateImportPayload(jsonInput, options = {}) {
             ? s.name.trim()
             : `Suite ${sIdx + 1}`;
 
-        const rawCases = Array.isArray(s.cases)
-          ? s.cases
-          : Array.isArray(s.testCases)
-          ? s.testCases
-          : [];
+        const rawCases = extractSuiteTestCases(s);
 
         const cleanCases = rawCases
           .filter((tc) => tc && typeof tc === 'object' && !Array.isArray(tc))

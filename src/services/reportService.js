@@ -1,4 +1,5 @@
 import { shareOrDownloadFile } from './dataManagementService.js';
+import { extractSuiteTestCases } from './projectService.js';
 
 /**
  * Supported Report Types in Qavora Android Phase 2E,
@@ -236,11 +237,7 @@ export function resolveWorkspaceCollections(source = {}) {
       category: s.category || s.module || 'Functional',
       phaseId: s.phaseId || null,
       phaseName: getPhaseName(s.phaseId, s.phaseName),
-      cases: Array.isArray(s.cases)
-        ? s.cases
-        : Array.isArray(s.testCases)
-        ? s.testCases
-        : [],
+      cases: extractSuiteTestCases(s),
     }));
   }
 
@@ -268,11 +265,7 @@ export function resolveWorkspaceCollections(source = {}) {
       if (!su) return;
       const suiteName = su.name || su.title || 'Untitled Suite';
       const phaseName = getPhaseName(su.phaseId, su.phaseName);
-      const rawCases = Array.isArray(su.cases)
-        ? su.cases
-        : Array.isArray(su.testCases)
-        ? su.testCases
-        : [];
+      const rawCases = extractSuiteTestCases(su);
       rawCases.forEach((tc, idx) => {
         if (!tc) return;
         const caseId = tc.id || tc.testCaseId || `TC-${idx + 1}`;

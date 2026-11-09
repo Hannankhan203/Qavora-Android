@@ -28,6 +28,7 @@ import {
   updateProjectData as updateProjectDataApi,
   deleteProject as deleteProjectApi,
   normalizeProjectRecord,
+  extractSuiteTestCases,
 } from './projectService.js';
 
 export const OFFLINE_PROJECTS_CACHE_PREFIX = '@qavora_offline_projects_cache_v1:';
@@ -2148,24 +2149,57 @@ function buildMergedPayloadForConflict(serverProject, op) {
   // where local items take precedence for edited IDs and server-only IDs are preserved
   const merged = { ...localPayload };
 
-  const mergeArrayById = (serverArr, localArr) => {
+  const mergeArrayById = (serverArr, localArr, getItemId = (it) => it && it.id) => {
     if (!Array.isArray(localArr)) return undefined;
     if (!Array.isArray(serverArr) || serverArr.length === 0) return localArr;
     const map = new Map();
     serverArr.forEach((item) => {
-      if (item && item.id) map.set(String(item.id), item);
+      const id = getItemId(item);
+      if (id) map.set(String(id), item);
     });
     localArr.forEach((item) => {
-      if (item && item.id) map.set(String(item.id), item);
+      const id = getItemId(item);
+      if (id) map.set(String(id), item);
     });
     return Array.from(map.values());
   };
 
   if (Array.isArray(localPayload.testSuites)) {
-    merged.testSuites = mergeArrayById(
-      serverProject.testSuites,
-      localPayload.testSuites
-    );
+    const serverSuites = Array.isArray(serverProject.testSuites)
+      ? serverProject.testSuites
+      : [];
+    if (serverSuites.length === 0) {
+      merged.testSuites = localPayload.testSuites;
+    } else {
+      const suiteMap = new Map();
+      serverSuites.forEach((s) => {
+        if (s && s.id) suiteMap.set(String(s.id), s);
+      });
+      localPayload.testSuites.forEach((localSuite) => {
+        if (!localSuite || !localSuite.id) return;
+        const suiteId = String(localSuite.id);
+        const existingServerSuite = suiteMap.get(suiteId);
+        if (!existingServerSuite) {
+          suiteMap.set(suiteId, localSuite);
+          return;
+        }
+        const serverCases = extractSuiteTestCases(existingServerSuite);
+        const localCases = extractSuiteTestCases(localSuite);
+        const mergedCases =
+          mergeArrayById(
+            serverCases,
+            localCases,
+            (tc) => tc && (tc.id || tc.testCaseId)
+          ) || localCases;
+        suiteMap.set(suiteId, {
+          ...existingServerSuite,
+          ...localSuite,
+          cases: mergedCases,
+          testCases: mergedCases,
+        });
+      });
+      merged.testSuites = Array.from(suiteMap.values());
+    }
   }
   if (Array.isArray(localPayload.executionRuns)) {
     merged.executionRuns = mergeArrayById(
@@ -2182,13 +2216,22 @@ function buildMergedPayloadForConflict(serverProject, op) {
   if (Array.isArray(localPayload.defects)) {
     merged.defects = mergeArrayById(
       serverProject.defects,
-      localPayload.defects
+      localPayload.defects,
+      (d) => d && (d.id || d.defectId)
     );
   }
   if (localPayload.testPlan && typeof localPayload.testPlan === 'object') {
+    const serverPlan =
+      serverProject.testPlan && typeof serverProject.testPlan === 'object'
+        ? serverProject.testPlan
+        : {};
+    const mergedPhases = Array.isArray(localPayload.testPlan.phases)
+      ? mergeArrayById(serverPlan.phases, localPayload.testPlan.phases)
+      : serverPlan.phases;
     merged.testPlan = {
-      ...(serverProject.testPlan || {}),
+      ...serverPlan,
       ...localPayload.testPlan,
+      ...(Array.isArray(mergedPhases) ? { phases: mergedPhases } : {}),
     };
   }
 

@@ -50,7 +50,10 @@ export default function ChecklistsScreen({ onBackToOverview }) {
   } = useWorkspace();
 
   const currentUserId = useMemo(
-    () => (user && (user.id || user._id) ? String(user.id || user._id).trim() : ''),
+    () =>
+      user && (user.userId || user.id || user._id)
+        ? String(user.userId || user.id || user._id).trim()
+        : '',
     [user]
   );
   const selectedProjectId = useMemo(

@@ -8,6 +8,8 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useAuth } from '../context/AuthContext';
@@ -27,6 +29,11 @@ export default function ProfileSettingsScreen() {
   const { selectedProject, projects } = useProjects();
   const {
     profile,
+    suites,
+    testCases,
+    testRuns,
+    executions,
+    defects,
     metrics,
     lastPersistedAt,
     openProjectSelection,
@@ -34,38 +41,137 @@ export default function ProfileSettingsScreen() {
     openReportsView,
     openChecklistsView,
     updateProfile,
+    isSavingProfile,
+    getSampleRestorePreview,
     resetToSampleData,
+    isRestoringSampleData,
     clearAllWorkspaceData,
+    isClearingWorkspaceData,
     showToast,
   } = useWorkspace();
 
   const [testerName, setTesterName] = useState(profile.testerName || '');
   const [role, setRole] = useState(profile.role || '');
-  const [projectName, setProjectName] = useState(profile.projectName || '');
-  const [targetVersion, setTargetVersion] = useState(profile.targetVersion || '');
+  const [projectName, setProjectName] = useState(
+    (selectedProject && selectedProject.name) || profile.projectName || ''
+  );
+  const [targetVersion, setTargetVersion] = useState(
+    (selectedProject && selectedProject.version) || profile.targetVersion || ''
+  );
   const [defaultDevice, setDefaultDevice] = useState(profile.defaultDevice || '');
   const [defaultBuild, setDefaultBuild] = useState(profile.defaultBuild || '');
   const [verifyingSession, setVerifyingSession] = useState(false);
+  const [profileFeedback, setProfileFeedback] = useState(null);
+  const [confirmDatasetAction, setConfirmDatasetAction] = useState(null); // 'restore_sample' | 'clear_all' | null
 
   useEffect(() => {
     setTesterName(profile.testerName || '');
     setRole(profile.role || '');
-    setProjectName(profile.projectName || '');
-    setTargetVersion(profile.targetVersion || '');
+    setProjectName(
+      (selectedProject && selectedProject.name) || profile.projectName || ''
+    );
+    setTargetVersion(
+      (selectedProject && selectedProject.version) || profile.targetVersion || ''
+    );
     setDefaultDevice(profile.defaultDevice || '');
     setDefaultBuild(profile.defaultBuild || '');
-  }, [profile]);
+  }, [
+    profile,
+    selectedProject && selectedProject.id,
+    selectedProject && selectedProject.name,
+    selectedProject && selectedProject.version,
+    selectedProject && selectedProject.updatedAt,
+  ]);
 
-  const handleSaveSettings = () => {
-    updateProfile({
+  const handleSaveSettings = async () => {
+    if (isSavingProfile) return;
+    setProfileFeedback(null);
+
+    const res = await updateProfile({
       testerName: testerName.trim() || 'QA Engineer',
       role: role.trim() || 'QA Analyst',
-      projectName: projectName.trim() || 'Qavora Mobile App',
+      projectName: projectName.trim(),
       targetVersion: targetVersion.trim() || 'v1.0.0',
       defaultDevice: defaultDevice.trim() || 'Android Device',
       defaultBuild: defaultBuild.trim() || '1.0.0',
     });
+
+    if (res && res.profile) {
+      setProjectName(res.profile.projectName || '');
+      setTargetVersion(res.profile.targetVersion || '');
+    }
+
+    if (res && res.ok) {
+      setProfileFeedback({
+        tone: res.queuedOffline ? 'warning' : 'success',
+        message: res.queuedOffline
+          ? 'Saved locally and queued active project metadata update for offline sync.'
+          : res.persistedToBackend
+          ? `Active project "${res.profile.projectName}" and local defaults saved.`
+          : 'Local tester profile and device defaults saved.',
+      });
+    } else if (res) {
+      setProfileFeedback({
+        tone: 'danger',
+        message:
+          res.error || 'Failed to save profile and active project settings.',
+      });
+    }
   };
+
+  const handleOpenRestoreSampleModal = () => {
+    if (isRestoringSampleData || isClearingWorkspaceData) return;
+    setConfirmDatasetAction('restore_sample');
+  };
+
+  const handleOpenClearDataModal = () => {
+    if (isRestoringSampleData || isClearingWorkspaceData) return;
+    setConfirmDatasetAction('clear_all');
+  };
+
+  const handleConfirmDatasetAction = async () => {
+    if (!confirmDatasetAction) return;
+    if (isRestoringSampleData || isClearingWorkspaceData) return;
+
+    if (confirmDatasetAction === 'restore_sample') {
+      const res = await resetToSampleData({ confirmed: true });
+      if (res && (res.ok || !res.skipped)) {
+        setConfirmDatasetAction(null);
+      }
+      return;
+    }
+
+    if (confirmDatasetAction === 'clear_all') {
+      const res = await clearAllWorkspaceData({ confirmed: true });
+      if (res && (res.ok || !res.skipped)) {
+        setConfirmDatasetAction(null);
+      }
+    }
+  };
+
+  const restorePreview = getSampleRestorePreview
+    ? getSampleRestorePreview()
+    : {
+        projectName:
+          (selectedProject && selectedProject.name) ||
+          profile.projectName ||
+          'Active Project',
+        willOverwriteBackend: Boolean(selectedProject),
+        currentCounts: {
+          suites: Array.isArray(suites) ? suites.length : 0,
+          testCases: Array.isArray(testCases) ? testCases.length : 0,
+          testRuns: Array.isArray(testRuns) ? testRuns.length : 0,
+          executions: Array.isArray(executions) ? executions.length : 0,
+          defects: Array.isArray(defects) ? defects.length : 0,
+        },
+        sampleCounts: {
+          suites: 4,
+          testCases: 10,
+          testRuns: 2,
+          executions: 0,
+          defects: 4,
+        },
+      };
 
   const handleVerifySession = async () => {
     setVerifyingSession(true);
@@ -442,13 +548,19 @@ export default function ProfileSettingsScreen() {
           />
 
           <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-            Project Name
+            {selectedProject
+              ? 'Active Project Name (Persisted to Server)'
+              : 'Default Project Name'}
           </Text>
           <TextInput
             value={projectName}
-            onChangeText={setProjectName}
-            placeholder="Qavora Mobile App"
+            onChangeText={(val) => {
+              setProjectName(val);
+              if (profileFeedback) setProfileFeedback(null);
+            }}
+            placeholder="Enter project name"
             placeholderTextColor={colors.textMuted}
+            maxLength={120}
             style={[
               styles.input,
               {
@@ -521,17 +633,64 @@ export default function ProfileSettingsScreen() {
             ]}
           />
 
+          {profileFeedback ? (
+            <View
+              style={[
+                styles.feedbackBanner,
+                {
+                  backgroundColor:
+                    profileFeedback.tone === 'danger'
+                      ? colors.dangerSoft
+                      : profileFeedback.tone === 'warning'
+                      ? colors.warningSoft
+                      : colors.successSoft,
+                  borderColor:
+                    profileFeedback.tone === 'danger'
+                      ? colors.danger
+                      : profileFeedback.tone === 'warning'
+                      ? colors.warning
+                      : colors.success,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.feedbackBannerText,
+                  {
+                    color:
+                      profileFeedback.tone === 'danger'
+                        ? colors.danger
+                        : profileFeedback.tone === 'warning'
+                        ? colors.warning
+                        : colors.success,
+                  },
+                ]}
+              >
+                {profileFeedback.message}
+              </Text>
+            </View>
+          ) : null}
+
           <Pressable
             onPress={handleSaveSettings}
-            style={[styles.saveBtn, { backgroundColor: colors.primary }]}
+            disabled={isSavingProfile}
+            style={[
+              styles.saveBtn,
+              {
+                backgroundColor: colors.primary,
+                opacity: isSavingProfile ? 0.7 : 1,
+              },
+            ]}
           >
             <Text style={[styles.saveBtnText, { color: colors.textOnPrimary }]}>
-              Save Profile & Project Settings
+              {isSavingProfile
+                ? 'Saving Profile & Project...'
+                : 'Save Profile & Project Settings'}
             </Text>
           </Pressable>
         </View>
 
-        {/* Local AsyncStorage Persistence Management */}
+        {/* Local & Active Project Dataset Reset Controls */}
         <View
           style={[
             styles.card,
@@ -544,43 +703,232 @@ export default function ProfileSettingsScreen() {
               { color: colors.textMuted, fontFamily: monoFontFamily },
             ]}
           >
-            LOCAL ASYNCSTORAGE DATA MANAGEMENT
+            PROJECT DATASET & RESET CONTROLS
           </Text>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            Local Dataset Controls
+            Sample QA Dataset & Project Reset
           </Text>
           <Text style={[styles.sectionDesc, { color: colors.textSecondary }]}>
-            All QA suites, test cases, test runs, and defects are stored locally on your device via @react-native-async-storage/async-storage.
+            Restoring the sample QA dataset or clearing project data will replace all test suites, test cases, test runs, executions, and defects for the active project ({activeProjectTitle}). Explicit confirmation is required.
             {lastPersistedAt ? ` Last saved: ${lastPersistedAt}.` : ''}
           </Text>
 
           <View style={styles.dataButtonsRow}>
             <Pressable
-              onPress={resetToSampleData}
+              onPress={handleOpenRestoreSampleModal}
+              disabled={isRestoringSampleData || isClearingWorkspaceData}
               style={[
                 styles.secondaryBtn,
-                { backgroundColor: colors.background, borderColor: colors.borderStrong },
+                {
+                  backgroundColor: colors.background,
+                  borderColor: colors.borderStrong,
+                  opacity:
+                    isRestoringSampleData || isClearingWorkspaceData ? 0.6 : 1,
+                },
               ]}
             >
               <Text style={[styles.secondaryBtnText, { color: colors.text }]}>
-                Restore Sample QA Dataset
+                {isRestoringSampleData
+                  ? 'Restoring Sample Dataset...'
+                  : 'Restore Sample QA Dataset'}
               </Text>
             </Pressable>
 
             <Pressable
-              onPress={clearAllWorkspaceData}
+              onPress={handleOpenClearDataModal}
+              disabled={isRestoringSampleData || isClearingWorkspaceData}
               style={[
                 styles.dangerBtn,
-                { backgroundColor: colors.dangerSoft, borderColor: colors.danger },
+                {
+                  backgroundColor: colors.dangerSoft,
+                  borderColor: colors.danger,
+                  opacity:
+                    isRestoringSampleData || isClearingWorkspaceData ? 0.6 : 1,
+                },
               ]}
             >
               <Text style={[styles.dangerBtnText, { color: colors.danger }]}>
-                Clear All Local Data
+                {isClearingWorkspaceData
+                  ? 'Clearing Data...'
+                  : 'Clear All Local Data'}
               </Text>
             </Pressable>
           </View>
         </View>
       </ScrollView>
+
+      {/* Explicit Confirmation Modal for Sample Dataset Restoration & Clear All Data */}
+      <Modal
+        visible={Boolean(confirmDatasetAction)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!isRestoringSampleData && !isClearingWorkspaceData) {
+            setConfirmDatasetAction(null);
+          }
+        }}
+      >
+        <View style={styles.modalBackdrop}>
+          <View
+            style={[
+              styles.modalCard,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.modalHeaderRow}>
+              <VectorIcon
+                name="alert-triangle"
+                size={20}
+                color={
+                  confirmDatasetAction === 'clear_all'
+                    ? colors.danger
+                    : colors.warning
+                }
+              />
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
+                {confirmDatasetAction === 'restore_sample'
+                  ? 'Confirm Sample QA Dataset Restore'
+                  : 'Confirm Clear Project QA Data'}
+              </Text>
+            </View>
+
+            <Text
+              style={[styles.modalDescription, { color: colors.textSecondary }]}
+            >
+              {confirmDatasetAction === 'restore_sample'
+                ? `You are about to overwrite the active project "${restorePreview.projectName}" with the Qavora Sample QA Dataset. Existing suites, test cases, test runs, execution logs, and defects in this project will be replaced on the backend and local cache.`
+                : `You are about to permanently clear all test suites, test cases, test runs, execution logs, and defects from the active project "${restorePreview.projectName}".`}
+            </Text>
+
+            <View
+              style={[
+                styles.previewBox,
+                {
+                  backgroundColor: colors.background,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.previewBoxTitle,
+                  { color: colors.text, fontFamily: monoFontFamily },
+                ]}
+              >
+                DATA REPLACEMENT SUMMARY ({restorePreview.projectName})
+              </Text>
+              <Text
+                style={[
+                  styles.previewLine,
+                  { color: colors.textSecondary, fontFamily: monoFontFamily },
+                ]}
+              >
+                • Test Suites: {restorePreview.currentCounts.suites} current →{' '}
+                {confirmDatasetAction === 'restore_sample'
+                  ? `${restorePreview.sampleCounts.suites} sample suites`
+                  : '1 empty default suite'}
+              </Text>
+              <Text
+                style={[
+                  styles.previewLine,
+                  { color: colors.textSecondary, fontFamily: monoFontFamily },
+                ]}
+              >
+                • Test Cases: {restorePreview.currentCounts.testCases} current →{' '}
+                {confirmDatasetAction === 'restore_sample'
+                  ? `${restorePreview.sampleCounts.testCases} sample cases`
+                  : '0 cases'}
+              </Text>
+              <Text
+                style={[
+                  styles.previewLine,
+                  { color: colors.textSecondary, fontFamily: monoFontFamily },
+                ]}
+              >
+                • Test Runs: {restorePreview.currentCounts.testRuns} current →{' '}
+                {confirmDatasetAction === 'restore_sample'
+                  ? `${restorePreview.sampleCounts.testRuns} sample runs`
+                  : '0 runs'}
+              </Text>
+              <Text
+                style={[
+                  styles.previewLine,
+                  { color: colors.textSecondary, fontFamily: monoFontFamily },
+                ]}
+              >
+                • Executions: {restorePreview.currentCounts.executions} current
+                → 0 execution logs
+              </Text>
+              <Text
+                style={[
+                  styles.previewLine,
+                  { color: colors.textSecondary, fontFamily: monoFontFamily },
+                ]}
+              >
+                • Defects: {restorePreview.currentCounts.defects} current →{' '}
+                {confirmDatasetAction === 'restore_sample'
+                  ? `${restorePreview.sampleCounts.defects} sample defects`
+                  : '0 defects'}
+              </Text>
+            </View>
+
+            <View style={styles.modalActionsRow}>
+              <Pressable
+                onPress={() => setConfirmDatasetAction(null)}
+                disabled={isRestoringSampleData || isClearingWorkspaceData}
+                style={[
+                  styles.secondaryBtn,
+                  {
+                    backgroundColor: colors.background,
+                    borderColor: colors.borderStrong,
+                  },
+                ]}
+              >
+                <Text style={[styles.secondaryBtnText, { color: colors.text }]}>
+                  Cancel
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={handleConfirmDatasetAction}
+                disabled={isRestoringSampleData || isClearingWorkspaceData}
+                style={[
+                  styles.dangerBtn,
+                  {
+                    backgroundColor:
+                      confirmDatasetAction === 'restore_sample'
+                        ? colors.primary
+                        : colors.danger,
+                    borderColor:
+                      confirmDatasetAction === 'restore_sample'
+                        ? colors.primary
+                        : colors.danger,
+                    flexDirection: 'row',
+                    gap: 8,
+                    opacity:
+                      isRestoringSampleData || isClearingWorkspaceData
+                        ? 0.7
+                        : 1,
+                  },
+                ]}
+              >
+                {isRestoringSampleData || isClearingWorkspaceData ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : null}
+                <Text style={[styles.dangerBtnText, { color: '#FFFFFF' }]}>
+                  {confirmDatasetAction === 'restore_sample'
+                    ? isRestoringSampleData
+                      ? 'Restoring...'
+                      : 'Confirm & Overwrite Project Data'
+                    : isClearingWorkspaceData
+                    ? 'Clearing...'
+                    : 'Confirm & Clear Project Data'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -756,5 +1104,67 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     textAlign: 'center',
+  },
+  feedbackBanner: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  feedbackBannerText: {
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.68)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 18,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 480,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 18,
+    gap: 12,
+  },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    flex: 1,
+  },
+  modalDescription: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  previewBox: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    gap: 5,
+  },
+  previewBoxTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  previewLine: {
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  modalActionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 4,
   },
 });

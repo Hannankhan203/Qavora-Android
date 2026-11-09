@@ -25,6 +25,7 @@ import { useProjects } from '../context/ProjectContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
 import ProjectFormModal from './ProjectFormModal';
+import { computeProjectTestCaseCount } from '../services/projectService';
 
 function formatTimestampDetail(isoString) {
   if (!isoString || typeof isoString !== 'string') return 'Not available';
@@ -67,19 +68,7 @@ export function deriveActualProjectStatistics(project) {
   }
 
   const suiteCount = hasSuitesArray ? project.testSuites.length : 0;
-
-  let testCaseCount =
-    typeof project.testCaseCount === 'number' ? project.testCaseCount : null;
-  if (testCaseCount === null && hasSuitesArray) {
-    testCaseCount = project.testSuites.reduce((acc, suite) => {
-      const cases = Array.isArray(suite && suite.cases)
-        ? suite.cases.length
-        : Array.isArray(suite && suite.testCases)
-        ? suite.testCases.length
-        : 0;
-      return acc + cases;
-    }, 0);
-  }
+  const testCaseCount = computeProjectTestCaseCount(project);
 
   const executionCount = hasExecutionRunsArray
     ? project.executionRuns.length
