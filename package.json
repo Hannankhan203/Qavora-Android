@@ -20,12 +20,12 @@
   },
   "scripts": {
     "dev": "expo start --web --port 3000",
-    "start": "expo start",
+    "start": "expo start --web --port 3000",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web --port 3000",
     "build": "expo export --platform web",
-    "lint": "node --check index.js && node --check App.js && node --check src/services/cookieManager.js && node --check src/services/apiClient.js && node --check src/services/authService.js && node --check src/services/projectService.js && node --check src/services/reportService.js && node --check src/services/offlineSyncService.js && node --check src/services/dataManagementService.js && node --check src/context/AuthContext.js && node --check src/context/ProjectContext.js && node --check src/theme/theme.js && node --check src/data/initialData.js && node --check src/context/WorkspaceContext.js && node --check src/components/VectorIcon.js && node --check src/components/ProjectFormModal.js && node --check src/components/ProjectSelectionScreen.js && node --check src/components/ProjectDetailsScreen.js && node --check src/components/AuthScreen.js && node --check src/components/DashboardScreen.js && node --check src/components/ReportsView.js && node --check src/components/TestCasesScreen.js && node --check src/components/TestRunsScreen.js && node --check src/components/DefectsScreen.js && node --check src/components/DataManagementSection.js && node --check src/components/ProfileSettingsScreen.js"
+    "lint": "node --check index.js && node --check App.js && node --check src/services/cookieManager.js && node --check src/services/apiClient.js && node --check src/services/authService.js && node --check src/services/projectService.js && node --check src/services/reportService.js && node --check src/services/offlineSyncService.js && node --check src/services/dataManagementService.js && node --check src/services/checklistService.js && node --check src/context/AuthContext.js && node --check src/context/ProjectContext.js && node --check src/theme/theme.js && node --check src/data/initialData.js && node --check src/context/WorkspaceContext.js && node --check src/components/VectorIcon.js && node --check src/components/ProjectFormModal.js && node --check src/components/ProjectSelectionScreen.js && node --check src/components/ProjectDetailsScreen.js && node --check src/components/AuthScreen.js && node --check src/components/DashboardScreen.js && node --check src/components/ReportsView.js && node --check src/components/ChecklistsScreen.js && node --check src/components/TestCasesScreen.js && node --check src/components/TestRunsScreen.js && node --check src/components/DefectsScreen.js && node --check src/components/DataManagementSection.js && node --check src/components/ProfileSettingsScreen.js"
   },
   "private": true
 }

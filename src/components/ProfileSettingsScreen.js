@@ -32,6 +32,7 @@ export default function ProfileSettingsScreen() {
     openProjectSelection,
     openProjectDetails,
     openReportsView,
+    openChecklistsView,
     updateProfile,
     resetToSampleData,
     clearAllWorkspaceData,
@@ -149,6 +150,24 @@ export default function ProfileSettingsScreen() {
           </View>
 
           <View style={[styles.dataButtonsRow, { marginBottom: 12 }]}>
+            <Pressable
+              onPress={openChecklistsView}
+              style={[
+                styles.secondaryBtn,
+                {
+                  backgroundColor: colors.surfaceAccent,
+                  borderColor: colors.primary,
+                  flexDirection: 'row',
+                  gap: 6,
+                },
+              ]}
+            >
+              <VectorIcon name="clipboard" size={15} color={colors.primary} />
+              <Text style={[styles.secondaryBtnText, { color: colors.primary }]}>
+                QA Checklists
+              </Text>
+            </Pressable>
+
             <Pressable
               onPress={openReportsView}
               style={[

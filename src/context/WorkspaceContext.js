@@ -20,6 +20,10 @@ import {
   exportGeneratedReport,
 } from '../services/reportService.js';
 import {
+  getCachedChecklistsForUser,
+  fetchChecklists,
+} from '../services/checklistService.js';
+import {
   INITIAL_SUITES,
   INITIAL_TEST_CASES,
   INITIAL_TEST_RUNS,
@@ -1046,11 +1050,12 @@ export function WorkspaceProvider({ children }) {
 
   // Navigation & Active Selection State
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'testcases' | 'testruns' | 'defects' | 'profile'
-  const [dashboardSubTab, setDashboardSubTab] = useState('overview'); // 'overview' | 'reports'
+  const [dashboardSubTab, setDashboardSubTab] = useState('overview'); // 'overview' | 'reports' | 'checklists'
   const [projectViewMode, setProjectViewMode] = useState('workspace'); // 'workspace' | 'selection' | 'details'
   const [selectedTestCaseId, setSelectedTestCaseId] = useState(null);
   const [selectedTestRunId, setSelectedTestRunId] = useState(null);
   const [selectedDefectId, setSelectedDefectId] = useState(null);
+  const [checklists, setChecklists] = useState([]);
 
   // Cross-module prefill state for creating a defect directly from a failed test case execution
   const [draftDefectFromExecution, setDraftDefectFromExecution] = useState(null);
@@ -1097,10 +1102,50 @@ export function WorkspaceProvider({ children }) {
     setDashboardSubTab('reports');
   }, []);
 
+  const openChecklistsView = useCallback(() => {
+    setProjectViewMode('workspace');
+    setActiveTab('dashboard');
+    setDashboardSubTab('checklists');
+  }, []);
+
   const openDataManagementView = useCallback(() => {
     setProjectViewMode('workspace');
     setActiveTab('profile');
   }, []);
+
+  // Hydrate user-owned checklists on login and clear on logout/user switch
+  useEffect(() => {
+    let mounted = true;
+    const uid =
+      user && (user.id || user._id) ? String(user.id || user._id).trim() : '';
+
+    if (!uid) {
+      setChecklists([]);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    getCachedChecklistsForUser(uid)
+      .then((cached) => {
+        if (mounted && Array.isArray(cached) && cached.length > 0) {
+          setChecklists(cached);
+        }
+      })
+      .catch(() => {});
+
+    fetchChecklists({ userId: uid })
+      .then((res) => {
+        if (mounted && res && res.ok && Array.isArray(res.checklists)) {
+          setChecklists(res.checklists);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      mounted = false;
+    };
+  }, [user && (user.id || user._id)]);
 
   // Switch workspace data cleanly whenever the selected project changes
   useEffect(() => {
@@ -3723,6 +3768,8 @@ export function WorkspaceProvider({ children }) {
     testRuns,
     executions,
     defects,
+    checklists,
+    setChecklists,
     activityLog,
     metrics,
     reportTypes: REPORT_TYPES,
@@ -3748,6 +3795,7 @@ export function WorkspaceProvider({ children }) {
     openWorkspace,
     openDashboardOverview,
     openReportsView,
+    openChecklistsView,
     openDataManagementView,
     selectedTestCaseId,
     setSelectedTestCaseId,

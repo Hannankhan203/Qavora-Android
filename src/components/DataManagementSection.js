@@ -76,6 +76,8 @@ export default function DataManagementSection() {
     reloadProjectDataFromBackend,
     projectDataConflict,
     clearProjectDataError,
+    checklists,
+    setChecklists,
   } = useWorkspace();
 
   const activeUserId = user && user.userId ? String(user.userId) : null;
@@ -267,7 +269,10 @@ export default function DataManagementSection() {
           : selectedProject
           ? [selectedProject]
           : [];
-      const res = await exportFullBackup(sourceProjects, [], { user });
+      const sourceChecklists = Array.isArray(checklists) ? checklists : [];
+      const res = await exportFullBackup(sourceProjects, sourceChecklists, {
+        user,
+      });
       if (res.ok) {
         setExportPreview({
           title: 'Full Workspace Backup (JSON)',
@@ -432,7 +437,12 @@ export default function DataManagementSection() {
         : selectedProject
         ? [selectedProject]
         : [];
-    const payload = createFullBackupPayload(sourceProjects, [], user);
+    const sourceChecklists = Array.isArray(checklists) ? checklists : [];
+    const payload = createFullBackupPayload(
+      sourceProjects,
+      sourceChecklists,
+      user
+    );
     const serialized = JSON.stringify(payload, null, 2);
     setImportJsonText(serialized);
     setSelectedBackupFileMeta({
@@ -650,6 +660,9 @@ export default function DataManagementSection() {
         const res = await resetWorkspaceData();
         if (res.ok) {
           await cacheProjectsListOffline([], activeUserId);
+          if (typeof setChecklists === 'function') {
+            setChecklists([]);
+          }
           await refreshProjects();
           await loadStorageAndSnapshots();
           setConfirmActionModal(null);

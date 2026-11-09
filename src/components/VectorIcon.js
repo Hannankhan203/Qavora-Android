@@ -598,6 +598,109 @@ export default function VectorIcon({
       );
     }
 
+    case 'file-text': {
+      const w = size * 0.66;
+      const h = size * 0.78;
+      const lineW = w * 0.56;
+      return (
+        <View style={boxStyle}>
+          <View
+            style={{
+              width: w,
+              height: h,
+              borderRadius: 3,
+              borderWidth: stroke,
+              borderColor: color,
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: size * 0.11,
+            }}
+          >
+            <View
+              style={{
+                width: lineW,
+                height: stroke * 0.9,
+                backgroundColor: color,
+                borderRadius: stroke,
+              }}
+            />
+            <View
+              style={{
+                width: lineW,
+                height: stroke * 0.9,
+                backgroundColor: color,
+                borderRadius: stroke,
+              }}
+            />
+            <View
+              style={{
+                width: lineW * 0.7,
+                height: stroke * 0.9,
+                backgroundColor: color,
+                borderRadius: stroke,
+                alignSelf: 'flex-start',
+                marginLeft: w * 0.16,
+              }}
+            />
+          </View>
+        </View>
+      );
+    }
+
+    case 'clipboard':
+    case 'list': {
+      const w = size * 0.68;
+      const h = size * 0.76;
+      const clipW = size * 0.34;
+      const clipH = size * 0.14;
+      const rowW = w * 0.58;
+      return (
+        <View style={boxStyle}>
+          <View
+            style={{
+              width: clipW,
+              height: clipH,
+              borderWidth: stroke * 0.9,
+              borderColor: color,
+              borderRadius: 2,
+              marginBottom: -stroke * 0.6,
+              zIndex: 1,
+            }}
+          />
+          <View
+            style={{
+              width: w,
+              height: h,
+              borderRadius: 3,
+              borderWidth: stroke,
+              borderColor: color,
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingTop: size * 0.06,
+              gap: size * 0.11,
+            }}
+          >
+            <View
+              style={{
+                width: rowW,
+                height: stroke * 0.9,
+                backgroundColor: color,
+                borderRadius: stroke,
+              }}
+            />
+            <View
+              style={{
+                width: rowW,
+                height: stroke * 0.9,
+                backgroundColor: color,
+                borderRadius: stroke,
+              }}
+            />
+          </View>
+        </View>
+      );
+    }
+
     default: {
       const ring = size * 0.6;
       return (

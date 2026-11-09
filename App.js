@@ -81,7 +81,10 @@ function QavoraQAShell() {
         setSelectedDefectId(null);
         return true;
       }
-      if (activeTab === 'dashboard' && dashboardSubTab === 'reports') {
+      if (
+        activeTab === 'dashboard' &&
+        (dashboardSubTab === 'reports' || dashboardSubTab === 'checklists')
+      ) {
         setDashboardSubTab('overview');
         return true;
       }
@@ -114,6 +117,8 @@ function QavoraQAShell() {
     ? `${selectedProject.name} · Project Details`
     : activeTab === 'dashboard' && dashboardSubTab === 'reports'
     ? `${selectedProject.name} · Reports & Analytics`
+    : activeTab === 'dashboard' && dashboardSubTab === 'checklists'
+    ? `${selectedProject.name} · QA Checklists`
     : `${selectedProject.name} · ${SCREEN_TITLES[activeTab] || 'QA Manager'}`;
 
   return (
@@ -166,6 +171,63 @@ function QavoraQAShell() {
           </Pressable>
 
           <View style={styles.topRightUtilities}>
+            {selectedProject ? (
+              <Pressable
+                onPress={() => {
+                  if (
+                    effectiveViewMode === 'workspace' &&
+                    activeTab === 'dashboard' &&
+                    dashboardSubTab === 'checklists'
+                  ) {
+                    setDashboardSubTab('overview');
+                  } else {
+                    setProjectViewMode('workspace');
+                    setActiveTab('dashboard');
+                    setDashboardSubTab('checklists');
+                  }
+                }}
+                style={[
+                  styles.projectSwitchBtn,
+                  {
+                    backgroundColor:
+                      effectiveViewMode === 'workspace' &&
+                      activeTab === 'dashboard' &&
+                      dashboardSubTab === 'checklists'
+                        ? colors.primary
+                        : colors.surfaceAccent,
+                    borderColor: colors.primary,
+                  },
+                ]}
+              >
+                <VectorIcon
+                  name="clipboard"
+                  size={14}
+                  color={
+                    effectiveViewMode === 'workspace' &&
+                    activeTab === 'dashboard' &&
+                    dashboardSubTab === 'checklists'
+                      ? colors.textOnPrimary
+                      : colors.primary
+                  }
+                />
+                <Text
+                  style={[
+                    styles.projectSwitchBtnText,
+                    {
+                      color:
+                        effectiveViewMode === 'workspace' &&
+                        activeTab === 'dashboard' &&
+                        dashboardSubTab === 'checklists'
+                          ? colors.textOnPrimary
+                          : colors.primary,
+                    },
+                  ]}
+                >
+                  Checklists
+                </Text>
+              </Pressable>
+            ) : null}
+
             {selectedProject ? (
               <Pressable
                 onPress={() =>

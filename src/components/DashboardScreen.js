@@ -13,6 +13,7 @@ import { useProjects } from '../context/ProjectContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
 import ReportsView from './ReportsView';
+import ChecklistsScreen from './ChecklistsScreen';
 
 export default function DashboardScreen() {
   const { colors } = useTheme();
@@ -177,6 +178,43 @@ export default function DashboardScreen() {
           </Pressable>
 
           <Pressable
+            onPress={() => setDashboardSubTab('checklists')}
+            style={[
+              styles.modeToggleBtn,
+              {
+                backgroundColor:
+                  dashboardSubTab === 'checklists'
+                    ? colors.primary
+                    : 'transparent',
+              },
+            ]}
+          >
+            <VectorIcon
+              name="clipboard"
+              size={14}
+              color={
+                dashboardSubTab === 'checklists'
+                  ? colors.textOnPrimary
+                  : colors.textSecondary
+              }
+            />
+            <Text
+              style={[
+                styles.modeToggleBtnText,
+                {
+                  color:
+                    dashboardSubTab === 'checklists'
+                      ? colors.textOnPrimary
+                      : colors.textSecondary,
+                  fontWeight: dashboardSubTab === 'checklists' ? '700' : '600',
+                },
+              ]}
+            >
+              QA Checklists
+            </Text>
+          </Pressable>
+
+          <Pressable
             onPress={() => setDashboardSubTab('reports')}
             style={[
               styles.modeToggleBtn,
@@ -216,6 +254,10 @@ export default function DashboardScreen() {
 
         {dashboardSubTab === 'reports' ? (
           <ReportsView />
+        ) : dashboardSubTab === 'checklists' ? (
+          <ChecklistsScreen
+            onBackToOverview={() => setDashboardSubTab('overview')}
+          />
         ) : (
           <>
             {/* 1. Active Project Overview Card */}
@@ -352,6 +394,31 @@ export default function DashboardScreen() {
                     style={[styles.projectActionText, { color: colors.text }]}
                   >
                     {isRefreshingAny ? 'Syncing...' : 'Refresh'}
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => setDashboardSubTab('checklists')}
+                  style={[
+                    styles.projectActionBtn,
+                    {
+                      backgroundColor: colors.surfaceAccent,
+                      borderColor: colors.primary,
+                    },
+                  ]}
+                >
+                  <VectorIcon
+                    name="clipboard"
+                    size={14}
+                    color={colors.primary}
+                  />
+                  <Text
+                    style={[
+                      styles.projectActionText,
+                      { color: colors.primary },
+                    ]}
+                  >
+                    QA Checklists
                   </Text>
                 </Pressable>
 
