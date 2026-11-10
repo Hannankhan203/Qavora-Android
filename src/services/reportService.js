@@ -197,7 +197,14 @@ export function normalizeCasePriorityLabel(priority) {
  * Extracts normalized workspace arrays from either explicit workspace state or a raw backend project document.
  */
 export function resolveWorkspaceCollections(source = {}) {
-  const project = source.project || source.activeProject || null;
+  const project =
+    source.project ||
+    source.activeProject ||
+    (source &&
+    typeof source === 'object' &&
+    (Array.isArray(source.testSuites) || Array.isArray(source.suites))
+      ? source
+      : null);
 
   const testPlan =
     source.testPlan ||
@@ -220,26 +227,26 @@ export function resolveWorkspaceCollections(source = {}) {
     return found ? found.name || found.title || 'General' : 'General';
   };
 
-  let suites = [];
-  if (Array.isArray(source.suites)) {
-    suites = source.suites.map((s) => ({
-      ...s,
-      name: s.name || s.title || 'Untitled Suite',
-      title: s.title || s.name || 'Untitled Suite',
-      phaseName: getPhaseName(s.phaseId, s.phaseName),
-    }));
-  } else if (project && Array.isArray(project.testSuites)) {
-    suites = project.testSuites.map((s) => ({
-      ...s,
-      id: s.id,
-      name: s.name || s.title || 'Untitled Suite',
-      title: s.title || s.name || 'Untitled Suite',
-      category: s.category || s.module || 'Functional',
-      phaseId: s.phaseId || null,
-      phaseName: getPhaseName(s.phaseId, s.phaseName),
-      cases: extractSuiteTestCases(s),
-    }));
-  }
+  const rawSuitesSource = Array.isArray(source.suites)
+    ? source.suites
+    : Array.isArray(source.testSuites)
+    ? source.testSuites
+    : project && Array.isArray(project.testSuites)
+    ? project.testSuites
+    : project && Array.isArray(project.suites)
+    ? project.suites
+    : [];
+
+  const suites = rawSuitesSource.map((s) => ({
+    ...s,
+    id: s.id,
+    name: s.name || s.title || 'Untitled Suite',
+    title: s.title || s.name || 'Untitled Suite',
+    category: s.category || s.module || 'Functional',
+    phaseId: s.phaseId || null,
+    phaseName: getPhaseName(s.phaseId, s.phaseName),
+    cases: extractSuiteTestCases(s),
+  }));
 
   let testCases = [];
   if (Array.isArray(source.testCases)) {
@@ -259,9 +266,9 @@ export function resolveWorkspaceCollections(source = {}) {
         lastStatus: normalizeCaseVerdict(tc),
       };
     });
-  } else if (project && Array.isArray(project.testSuites)) {
+  } else if (suites.length > 0) {
     const seenIds = new Set();
-    project.testSuites.forEach((su) => {
+    suites.forEach((su) => {
       if (!su) return;
       const suiteName = su.name || su.title || 'Untitled Suite';
       const phaseName = getPhaseName(su.phaseId, su.phaseName);

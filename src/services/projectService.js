@@ -148,7 +148,7 @@ export function containsProhibitedKeys(value) {
   if (Array.isArray(value)) {
     return value.some((item) => containsProhibitedKeys(item));
   }
-  const keys = Object.keys(value);
+  const keys = Object.getOwnPropertyNames(value);
   for (let i = 0; i < keys.length; i += 1) {
     const key = keys[i];
     if (
@@ -1156,7 +1156,11 @@ export function computeProjectTestCaseCount(project) {
     return null;
   }
 
-  const suites = Array.isArray(project.testSuites) ? project.testSuites : null;
+  const suites = Array.isArray(project.testSuites)
+    ? project.testSuites
+    : Array.isArray(project.suites)
+      ? project.suites
+      : null;
   const derivedSuiteCaseCount = suites
     ? suites.reduce((sum, s) => sum + countSuiteTestCases(s), 0)
     : null;
