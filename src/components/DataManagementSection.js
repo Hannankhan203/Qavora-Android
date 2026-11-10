@@ -522,7 +522,7 @@ export default function DataManagementSection() {
         }
 
         await cacheProjectsListOffline(nextProjects, activeUserId);
-        await refreshProjects();
+        await refreshProjects({ autoSelectFirst: true });
         await loadStorageAndSnapshots();
         setImportPreview(null);
         setImportJsonText('');
@@ -2580,6 +2580,7 @@ const styles = StyleSheet.create({
   },
   modalHeaderRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 10,
@@ -2587,6 +2588,8 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 16,
     fontWeight: '700',
+    flex: 1,
+    flexShrink: 1,
   },
   previewScrollBox: {
     maxHeight: 340,

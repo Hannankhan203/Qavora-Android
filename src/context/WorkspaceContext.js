@@ -1057,13 +1057,33 @@ export function WorkspaceProvider({ children }) {
   defectsRef.current = defects;
 
   // Navigation & Active Selection State
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'testcases' | 'testruns' | 'defects' | 'profile'
-  const [dashboardSubTab, setDashboardSubTab] = useState('overview'); // 'overview' | 'reports' | 'checklists'
-  const [projectViewMode, setProjectViewMode] = useState('workspace'); // 'workspace' | 'selection' | 'details'
+  const [activeTab, setActiveTabState] = useState('dashboard'); // 'dashboard' | 'testcases' | 'testruns' | 'defects' | 'profile'
+  const [dashboardSubTab, setDashboardSubTabState] = useState('overview'); // 'overview' | 'reports' | 'checklists'
+  const [projectViewMode, setProjectViewMode] = useState('workspace'); // 'workspace' | 'selection' | 'details' | 'checklists'
   const [selectedTestCaseId, setSelectedTestCaseId] = useState(null);
   const [selectedTestRunId, setSelectedTestRunId] = useState(null);
   const [selectedDefectId, setSelectedDefectId] = useState(null);
   const [checklists, setChecklists] = useState([]);
+
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+
+  const dashboardSubTabRef = useRef(dashboardSubTab);
+  dashboardSubTabRef.current = dashboardSubTab;
+
+  const selectedProjectIdRef = useRef(selectedProjectId);
+  selectedProjectIdRef.current = selectedProjectId;
+
+  const prevSelectedProjectIdRef = useRef(selectedProjectId);
+
+  const setDashboardSubTab = useCallback((nextSubTab) => {
+    const cleanSub =
+      typeof nextSubTab === 'string' && nextSubTab.trim()
+        ? nextSubTab.trim()
+        : 'overview';
+    dashboardSubTabRef.current = cleanSub;
+    setDashboardSubTabState(cleanSub);
+  }, []);
 
   // Cross-module prefill state for creating a defect directly from a failed test case execution
   const [draftDefectFromExecution, setDraftDefectFromExecution] = useState(null);
@@ -1074,6 +1094,33 @@ export function WorkspaceProvider({ children }) {
   const showToast = useCallback((message, tone = 'info') => {
     setToast({ id: Date.now(), message, tone });
   }, []);
+
+  const setActiveTab = useCallback(
+    (nextTab) => {
+      const cleanTab =
+        typeof nextTab === 'string' && nextTab.trim()
+          ? nextTab.trim()
+          : 'dashboard';
+      activeTabRef.current = cleanTab;
+      setActiveTabState(cleanTab);
+      setSelectedTestCaseId(null);
+      setSelectedDefectId(null);
+
+      if (cleanTab === 'dashboard') {
+        dashboardSubTabRef.current = 'overview';
+        setDashboardSubTabState('overview');
+      }
+
+      if (cleanTab === 'profile') {
+        setProjectViewMode('workspace');
+      } else if (selectedProjectIdRef.current) {
+        setProjectViewMode('workspace');
+      } else {
+        setProjectViewMode('selection');
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -1091,34 +1138,61 @@ export function WorkspaceProvider({ children }) {
   }, []);
 
   const openProjectDetails = useCallback(() => {
+    if (!selectedProjectIdRef.current) {
+      setProjectViewMode('selection');
+      showToast(
+        'Select or create a project first to view project details.',
+        'info'
+      );
+      return;
+    }
     setProjectViewMode('details');
-  }, []);
+  }, [showToast]);
 
   const openWorkspace = useCallback(() => {
+    if (!selectedProjectIdRef.current) {
+      setProjectViewMode('selection');
+      return;
+    }
     setProjectViewMode('workspace');
   }, []);
 
   const openDashboardOverview = useCallback(() => {
+    if (!selectedProjectIdRef.current) {
+      setProjectViewMode('selection');
+      return;
+    }
     setProjectViewMode('workspace');
-    setActiveTab('dashboard');
-    setDashboardSubTab('overview');
+    activeTabRef.current = 'dashboard';
+    setActiveTabState('dashboard');
+    dashboardSubTabRef.current = 'overview';
+    setDashboardSubTabState('overview');
   }, []);
 
   const openReportsView = useCallback(() => {
+    if (!selectedProjectIdRef.current) {
+      setProjectViewMode('selection');
+      showToast(
+        'Select or create a project first to view project reports.',
+        'info'
+      );
+      return;
+    }
     setProjectViewMode('workspace');
-    setActiveTab('dashboard');
-    setDashboardSubTab('reports');
-  }, []);
+    activeTabRef.current = 'dashboard';
+    setActiveTabState('dashboard');
+    dashboardSubTabRef.current = 'reports';
+    setDashboardSubTabState('reports');
+  }, [showToast]);
 
   const openChecklistsView = useCallback(() => {
-    setProjectViewMode('workspace');
-    setActiveTab('dashboard');
-    setDashboardSubTab('checklists');
+    setProjectViewMode('checklists');
   }, []);
 
   const openDataManagementView = useCallback(() => {
     setProjectViewMode('workspace');
-    setActiveTab('profile');
+    activeTabRef.current = 'profile';
+    setActiveTabState('profile');
   }, []);
 
   // Hydrate user-owned checklists on login and clear on logout/user switch
@@ -1169,6 +1243,7 @@ export function WorkspaceProvider({ children }) {
     setProjectDataConflict(null);
 
     if (!selectedProjectId || !selectedProject) {
+      prevSelectedProjectIdRef.current = null;
       const emptyState = buildProjectWorkspaceState(null, null, user);
       setProfile(emptyState.profile);
       setTestPlan(emptyState.testPlan);
@@ -1181,10 +1256,29 @@ export function WorkspaceProvider({ children }) {
       setHydratedProjectId(null);
       setLastPersistedAt(null);
       setIsStorageHydrated(true);
-      setProjectViewMode('selection');
+      setProjectViewMode((prevMode) => {
+        if (prevMode === 'checklists') return 'checklists';
+        if (
+          prevMode === 'workspace' &&
+          (activeTabRef.current === 'profile' ||
+            (activeTabRef.current === 'dashboard' &&
+              dashboardSubTabRef.current === 'checklists'))
+        ) {
+          return 'workspace';
+        }
+        return 'selection';
+      });
       return () => {
         mounted = false;
       };
+    }
+
+    const hadPreviousProject = Boolean(prevSelectedProjectIdRef.current);
+    prevSelectedProjectIdRef.current = selectedProjectId;
+    if (!hadPreviousProject) {
+      setProjectViewMode((prevMode) =>
+        prevMode === 'selection' ? 'workspace' : prevMode
+      );
     }
 
     setIsStorageHydrated(false);

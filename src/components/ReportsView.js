@@ -1993,12 +1993,14 @@ const styles = StyleSheet.create({
   },
   headerTopRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 10,
   },
   headerTitleCol: {
     flex: 1,
+    minWidth: 190,
     gap: 4,
   },
   badgeRow: {
@@ -2054,8 +2056,10 @@ const styles = StyleSheet.create({
   },
   filterLabelHeader: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 6,
   },
   filterSectionLabel: {
     fontSize: 10,
@@ -2103,10 +2107,12 @@ const styles = StyleSheet.create({
   },
   customDateInputsRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
   },
   customDateInputCol: {
     flex: 1,
+    minWidth: 130,
     gap: 4,
   },
   customDateLabel: {
@@ -2137,6 +2143,7 @@ const styles = StyleSheet.create({
   },
   exportHeaderRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
@@ -2214,7 +2221,7 @@ const styles = StyleSheet.create({
   },
   kpiCard: {
     flex: 1,
-    minWidth: 150,
+    minWidth: 145,
     borderRadius: 14,
     borderWidth: 1,
     padding: 14,
@@ -2234,13 +2241,16 @@ const styles = StyleSheet.create({
   },
   sectionHeaderRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
+    columnGap: 8,
+    rowGap: 4,
   },
   sectionTitle: {
     fontSize: 15,
     fontWeight: '700',
+    flexShrink: 1,
   },
   sectionCounter: {
     fontSize: 11,
@@ -2261,13 +2271,16 @@ const styles = StyleSheet.create({
   },
   insightHeaderRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
+    columnGap: 8,
+    rowGap: 4,
   },
   insightTag: {
     fontSize: 13,
     fontWeight: '700',
+    flexShrink: 1,
   },
   insightScorePill: {
     paddingHorizontal: 8,
@@ -2290,8 +2303,10 @@ const styles = StyleSheet.create({
   },
   verdictLabelRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 4,
   },
   verdictDotLabel: {
     flexDirection: 'row',
@@ -2334,6 +2349,7 @@ const styles = StyleSheet.create({
   },
   timelineRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 10,
@@ -2368,9 +2384,11 @@ const styles = StyleSheet.create({
   },
   recordTopRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
+    columnGap: 8,
+    rowGap: 4,
   },
   monoCode: {
     fontSize: 11,
@@ -2388,6 +2406,7 @@ const styles = StyleSheet.create({
   recordTitle: {
     fontSize: 13,
     fontWeight: '600',
+    flexShrink: 1,
   },
   recordMeta: {
     fontSize: 11,
@@ -2438,6 +2457,7 @@ const styles = StyleSheet.create({
   },
   modalHeader: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingBottom: 10,
@@ -2446,6 +2466,7 @@ const styles = StyleSheet.create({
   },
   modalTitleCol: {
     flex: 1,
+    minWidth: 170,
     gap: 2,
   },
   modalTitle: {

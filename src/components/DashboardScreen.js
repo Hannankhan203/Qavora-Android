@@ -1595,23 +1595,28 @@ const styles = StyleSheet.create({
   },
   modeToggleContainer: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     borderRadius: 12,
     borderWidth: 1,
     padding: 4,
-    gap: 6,
+    gap: 5,
   },
   modeToggleBtn: {
     flex: 1,
+    minWidth: 96,
     minHeight: 38,
     borderRadius: 9,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 7,
-    paddingHorizontal: 10,
+    gap: 5,
+    paddingHorizontal: 7,
+    paddingVertical: 6,
   },
   modeToggleBtnText: {
-    fontSize: 13,
+    fontSize: 12,
+    textAlign: 'center',
+    flexShrink: 1,
   },
   bannerCard: {
     borderRadius: 14,
@@ -1621,12 +1626,14 @@ const styles = StyleSheet.create({
   },
   bannerTopRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    gap: 12,
+    gap: 10,
   },
   bannerTextCol: {
     flex: 1,
+    minWidth: 180,
     gap: 4,
   },
   projectStatusRow: {
@@ -1718,7 +1725,7 @@ const styles = StyleSheet.create({
   },
   kpiCard: {
     flex: 1,
-    minWidth: 150,
+    minWidth: 145,
     borderRadius: 14,
     borderWidth: 1,
     padding: 14,
@@ -1744,17 +1751,21 @@ const styles = StyleSheet.create({
   },
   sectionHeader: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 8,
+    columnGap: 8,
+    rowGap: 4,
   },
   sectionTitleCol: {
     flex: 1,
+    minWidth: 170,
     gap: 2,
   },
   sectionTitle: {
     fontSize: 15,
     fontWeight: '700',
+    flexShrink: 1,
   },
   planSubtitle: {
     fontSize: 11,
@@ -1876,9 +1887,11 @@ const styles = StyleSheet.create({
   },
   rowItemTop: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 8,
+    columnGap: 8,
+    rowGap: 4,
   },
   rowCode: {
     fontSize: 11,
@@ -1887,6 +1900,7 @@ const styles = StyleSheet.create({
   rowTitle: {
     fontSize: 13,
     fontWeight: '600',
+    flexShrink: 1,
   },
   rowMeta: {
     fontSize: 11,

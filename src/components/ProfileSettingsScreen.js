@@ -235,7 +235,8 @@ export default function ProfileSettingsScreen() {
                   { color: colors.textSecondary, fontFamily: monoFontFamily },
                 ]}
               >
-                {displayUserRole} · {activeProjectTitle} ({profile.targetVersion})
+                {displayUserRole} · {activeProjectTitle}
+                {profile.targetVersion ? ` (${profile.targetVersion})` : ''}
               </Text>
               {user ? (
                 <Text
@@ -274,41 +275,47 @@ export default function ProfileSettingsScreen() {
               </Text>
             </Pressable>
 
-            <Pressable
-              onPress={openReportsView}
-              style={[
-                styles.secondaryBtn,
-                {
-                  backgroundColor: colors.surfaceAccent,
-                  borderColor: colors.primary,
-                  flexDirection: 'row',
-                  gap: 6,
-                },
-              ]}
-            >
-              <VectorIcon name="file-text" size={15} color={colors.primary} />
-              <Text style={[styles.secondaryBtnText, { color: colors.primary }]}>
-                Reports & Export
-              </Text>
-            </Pressable>
+            {selectedProject ? (
+              <Pressable
+                onPress={openReportsView}
+                style={[
+                  styles.secondaryBtn,
+                  {
+                    backgroundColor: colors.surfaceAccent,
+                    borderColor: colors.primary,
+                    flexDirection: 'row',
+                    gap: 6,
+                  },
+                ]}
+              >
+                <VectorIcon name="file-text" size={15} color={colors.primary} />
+                <Text
+                  style={[styles.secondaryBtnText, { color: colors.primary }]}
+                >
+                  Reports & Export
+                </Text>
+              </Pressable>
+            ) : null}
 
-            <Pressable
-              onPress={openProjectDetails}
-              style={[
-                styles.secondaryBtn,
-                {
-                  backgroundColor: colors.background,
-                  borderColor: colors.borderStrong,
-                  flexDirection: 'row',
-                  gap: 6,
-                },
-              ]}
-            >
-              <VectorIcon name="info" size={15} color={colors.primary} />
-              <Text style={[styles.secondaryBtnText, { color: colors.text }]}>
-                Project Details
-              </Text>
-            </Pressable>
+            {selectedProject ? (
+              <Pressable
+                onPress={openProjectDetails}
+                style={[
+                  styles.secondaryBtn,
+                  {
+                    backgroundColor: colors.background,
+                    borderColor: colors.borderStrong,
+                    flexDirection: 'row',
+                    gap: 6,
+                  },
+                ]}
+              >
+                <VectorIcon name="info" size={15} color={colors.primary} />
+                <Text style={[styles.secondaryBtnText, { color: colors.text }]}>
+                  Project Details
+                </Text>
+              </Pressable>
+            ) : null}
 
             <Pressable
               onPress={openProjectSelection}
@@ -324,7 +331,8 @@ export default function ProfileSettingsScreen() {
             >
               <VectorIcon name="switch" size={15} color={colors.text} />
               <Text style={[styles.secondaryBtnText, { color: colors.text }]}>
-                Switch Project ({projects.length})
+                {selectedProject ? 'Switch Project' : 'Select Project'} (
+                {projects.length})
               </Text>
             </Pressable>
           </View>
@@ -953,6 +961,7 @@ const styles = StyleSheet.create({
   },
   profileRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: 12,
     marginBottom: 14,
@@ -971,6 +980,7 @@ const styles = StyleSheet.create({
   profileTextCol: {
     flex: 1,
     flexShrink: 1,
+    minWidth: 160,
   },
   profileName: {
     fontSize: 18,
@@ -993,7 +1003,7 @@ const styles = StyleSheet.create({
   },
   statCell: {
     flex: 1,
-    minWidth: 68,
+    minWidth: 64,
     alignItems: 'center',
   },
   statVal: {
@@ -1022,10 +1032,12 @@ const styles = StyleSheet.create({
   },
   themeButtonsRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
   },
   themeBtn: {
     flex: 1,
+    minWidth: 82,
     minHeight: 44,
     borderRadius: 10,
     borderWidth: 1,
@@ -1134,6 +1146,7 @@ const styles = StyleSheet.create({
   },
   modalHeaderRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: 8,
   },
@@ -1141,6 +1154,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     flex: 1,
+    flexShrink: 1,
   },
   modalDescription: {
     fontSize: 13,

@@ -1,3011 +1,4179 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
-  View,
-  Text,
   StyleSheet,
+  Text,
+  View,
   ScrollView,
-  TouchableOpacity,
+  Pressable,
   TextInput,
   Modal,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
 } from 'react-native';
-import VectorIcon from './VectorIcon';
 import { useTheme, monoFontFamily } from '../theme/theme';
-import {
-  useWorkspace,
-  computeRunMetrics,
-  toWebExecutionOutcome,
-} from '../context/WorkspaceContext';
+import { useWorkspace } from '../context/WorkspaceContext';
+import VectorIcon from './VectorIcon';
 
-const RUN_RESULT_FILTERS = ['All', 'Passed', 'Failed', 'Blocked', 'Untested'];
-const HISTORY_OUTCOME_FILTERS = ['All', 'Pass', 'Fail', 'Blocked', 'Not Run'];
-
-function formatShortTimestamp(value) {
-  if (!value) return '—';
-  const raw = String(value);
-  if (raw.includes('T')) {
-    const d = new Date(raw);
-    if (!Number.isNaN(d.getTime())) {
-      return d.toISOString().replace('T', ' ').slice(0, 16);
-    }
-  }
-  return raw;
-}
-
-export default function TestRunsScreen() {
-  const { colors: theme } = useTheme();
+export default function TestCasesScreen() {
+  const { colors } = useTheme();
   const {
-    activeProject: currentProject,
-    profile,
+    activeProject,
+    testPlan,
     suites,
+    suiteCategories,
     testCases,
-    testRuns,
-    executions,
-    defects,
-    selectedTestRunId,
-    setSelectedTestRunId,
-    setSelectedDefectId,
-    setActiveTab,
-    openProjectSelection,
-    recordTestExecution,
-    createTestRun,
-    updateTestRun,
-    completeTestRun,
-    reopenTestRun,
-    deleteTestRun,
-    startDefectFromFailedTest,
-    isSyncingProjectData: isSyncingWorkspace,
-    projectDataError: workspaceError,
-    projectDataConflict: workspaceConflict,
-    clearProjectDataError: clearWorkspaceError,
-    reloadProjectDataFromBackend: reloadCurrentProject,
+    priorities,
+    testTypes,
+    executionStatuses,
+    selectedTestCaseId,
+    setSelectedTestCaseId,
+    isSyncingProjectData,
+    projectDataError,
+    projectDataConflict,
+    clearProjectDataError,
+    reloadProjectDataFromBackend,
+    saveTestPlan,
+    addTestPlanPhase,
+    updateTestPlanPhase,
+    deleteTestPlanPhase,
+    createSuite,
+    updateSuite,
+    deleteSuite,
+    createTestCase,
+    updateTestCase,
+    moveTestCaseToSuite,
+    deleteTestCase,
+    showToast,
   } = useWorkspace();
 
-  // Top-level mode: 'runs' | 'history'
-  const [activeViewMode, setActiveViewMode] = useState('runs');
+  // Top-level Phase 2C sub-navigation: 'cases' | 'suites' | 'plan'
+  const [subTab, setSubTab] = useState('cases');
 
-  // Filters for active run cases
-  const [resultFilter, setResultFilter] = useState('All');
+  // --- Filter & Search State (Test Cases) ---
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedSuiteId, setSelectedSuiteId] = useState('all');
+  const [selectedPriority, setSelectedPriority] = useState('all');
+  const [selectedStatus, setSelectedStatus] = useState('all');
+  const [selectedType, setSelectedType] = useState('all');
 
-  // Filters for chronological execution history
-  const [historyOutcomeFilter, setHistoryOutcomeFilter] = useState('All');
-  const [historySearchQuery, setHistorySearchQuery] = useState('');
+  // --- Test Case Create / Edit Modal State ---
+  const [isFormModalOpen, setIsFormModalOpen] = useState(false);
+  const [editingCase, setEditingCase] = useState(null);
+  const [formTitle, setFormTitle] = useState('');
+  const [formSuiteId, setFormSuiteId] = useState(
+    suites[0]?.id || 'suite-general'
+  );
+  const [formPriority, setFormPriority] = useState('P1');
+  const [formTestType, setFormTestType] = useState('Functional');
+  const [formTags, setFormTags] = useState('');
+  const [formDescription, setFormDescription] = useState('');
+  const [formPreconditions, setFormPreconditions] = useState('');
+  const [formExpectedResult, setFormExpectedResult] = useState('');
+  const [formSteps, setFormSteps] = useState([
+    { action: '', testData: '', expectedResult: '' },
+  ]);
+  const [caseFormError, setCaseFormError] = useState(null);
+  const [isSubmittingCase, setIsSubmittingCase] = useState(false);
+  const caseSubmitLockRef = useRef(false);
 
-  // Feedback banner
-  const [feedbackBanner, setFeedbackBanner] = useState(null);
+  // --- Move Test Case Between Suites Modal State ---
+  const [movingCase, setMovingCase] = useState(null);
+  const [moveTargetSuiteId, setMoveTargetSuiteId] = useState('');
+  const [isMovingCase, setIsMovingCase] = useState(false);
 
-  // Step-by-step Execution Runner modal state
-  const [executingCaseId, setExecutingCaseId] = useState(null);
-  const [execNotes, setExecNotes] = useState('');
-  const [execActualResult, setExecActualResult] = useState('');
-  const [execTester, setExecTester] = useState('');
-  const [execEnvironment, setExecEnvironment] = useState('');
-  const [execDevice, setExecDevice] = useState('');
-  const [execBuildVersion, setExecBuildVersion] = useState('');
-  const [stepStatuses, setStepStatuses] = useState({});
-  const [isSubmittingExec, setIsSubmittingExec] = useState(false);
+  // --- Delete Test Case Confirmation Modal State ---
+  const [deletingCase, setDeletingCase] = useState(null);
+  const [isDeletingCase, setIsDeletingCase] = useState(false);
 
-  // Create / Edit Test Run modal state
-  const [runModalVisible, setRunModalVisible] = useState(false);
-  const [editingRunId, setEditingRunId] = useState(null);
-  const [runName, setRunName] = useState('');
-  const [runSuiteId, setRunSuiteId] = useState('all');
-  const [selectedCaseIds, setSelectedCaseIds] = useState([]);
-  const [runDevice, setRunDevice] = useState('Pixel 8 Pro • Android 14 (API 34)');
-  const [runBuild, setRunBuild] = useState('2.4.0-rc3 (Build 418)');
-  const [runEnvironment, setRunEnvironment] = useState('Android 14 / Staging');
-  const [runTester, setRunTester] = useState('');
-  const [runNotes, setRunNotes] = useState('');
-  const [runFormError, setRunFormError] = useState('');
-  const [isSubmittingRun, setIsSubmittingRun] = useState(false);
+  // --- Test Suite Create / Edit Modal State ---
+  const [isSuiteModalOpen, setIsSuiteModalOpen] = useState(false);
+  const [editingSuite, setEditingSuite] = useState(null);
+  const [suiteNameInput, setSuiteNameInput] = useState('');
+  const [suiteDescInput, setSuiteDescInput] = useState('');
+  const [suiteCategoryInput, setSuiteCategoryInput] = useState('Functional');
+  const [suitePhaseIdInput, setSuitePhaseIdInput] = useState('');
+  const [suiteTagsInput, setSuiteTagsInput] = useState('');
+  const [suiteFormError, setSuiteFormError] = useState(null);
+  const [isSubmittingSuite, setIsSubmittingSuite] = useState(false);
+  const suiteSubmitLockRef = useRef(false);
 
-  // Delete Run confirmation modal state
-  const [runPendingDelete, setRunPendingDelete] = useState(null);
-  const [isDeletingRun, setIsDeletingRun] = useState(false);
+  // --- Delete Test Suite Confirmation Modal State ---
+  const [deletingSuite, setDeletingSuite] = useState(null);
+  const [suiteDeleteMode, setSuiteDeleteMode] = useState('move'); // 'move' | 'delete'
+  const [suiteDeleteTargetId, setSuiteDeleteTargetId] = useState('');
+  const [isDeletingSuite, setIsDeletingSuite] = useState(false);
 
-  // Run status mutation state
-  const [isTogglingRunStatus, setIsTogglingRunStatus] = useState(false);
+  // --- Test Plan Edit Modal State ---
+  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+  const [planForm, setPlanForm] = useState({
+    name: '',
+    description: '',
+    objective: '',
+    scope: '',
+    outOfScope: '',
+    strategy: '',
+    environment: '',
+    entryCriteria: '',
+    exitCriteria: '',
+    deliverables: '',
+    risks: '',
+    tools: '',
+    schedule: '',
+    approvals: '',
+    notes: '',
+  });
+  const [planFormError, setPlanFormError] = useState(null);
+  const [isSubmittingPlan, setIsSubmittingPlan] = useState(false);
+  const planSubmitLockRef = useRef(false);
 
-  const showFeedback = (type, message) => {
-    setFeedbackBanner({ type, message });
-  };
+  // --- Testing Phase Create / Edit / Delete Modal State ---
+  const [isPhaseModalOpen, setIsPhaseModalOpen] = useState(false);
+  const [editingPhase, setEditingPhase] = useState(null);
+  const [phaseNameInput, setPhaseNameInput] = useState('');
+  const [phaseDescInput, setPhaseDescInput] = useState('');
+  const [phaseFormError, setPhaseFormError] = useState(null);
+  const [isSubmittingPhase, setIsSubmittingPhase] = useState(false);
+  const [deletingPhase, setDeletingPhase] = useState(null);
+  const [isDeletingPhase, setIsDeletingPhase] = useState(false);
 
-  useEffect(() => {
-    if (!feedbackBanner) return undefined;
-    const timer = setTimeout(() => {
-      setFeedbackBanner(null);
-    }, 4000);
-    return () => clearTimeout(timer);
-  }, [feedbackBanner]);
+  const selectedTestCase = useMemo(
+    () => testCases.find((tc) => tc.id === selectedTestCaseId) || null,
+    [testCases, selectedTestCaseId]
+  );
 
-  const activeRun = useMemo(() => {
-    return (
-      testRuns.find((r) => r.id === selectedTestRunId) || testRuns[0] || null
-    );
-  }, [testRuns, selectedTestRunId]);
+  const planPhases = useMemo(
+    () => (Array.isArray(testPlan?.phases) ? testPlan.phases : []),
+    [testPlan]
+  );
 
-  const activeRunMetrics = useMemo(() => {
-    if (!activeRun) {
-      return {
-        totalCases: 0,
-        executedCount: 0,
-        passedCases: 0,
-        failedCases: 0,
-        blockedCases: 0,
-        skippedCases: 0,
-        notRunCases: 0,
-        passRate: 0,
+  // Per-suite actual test case counts & status breakdown
+  const suiteStatsMap = useMemo(() => {
+    const map = {};
+    suites.forEach((s) => {
+      map[s.id] = {
+        total: 0,
+        passed: 0,
+        failed: 0,
+        blocked: 0,
+        untested: 0,
       };
-    }
-    return computeRunMetrics(activeRun.results);
-  }, [activeRun]);
-
-  const runCasesWithResults = useMemo(() => {
-    if (!activeRun) return [];
-    const resultsList = Array.isArray(activeRun.results)
-      ? activeRun.results
-      : [];
-    return resultsList
-      .map((res) => {
-        const tcId = res.testCaseId || res.caseId;
-        const tc = testCases.find((c) => c.id === tcId);
-        if (!tc) {
-          return {
-            id: tcId,
-            title: res.caseTitle || tcId,
-            suiteId: res.suiteId || activeRun.suiteId || 'all',
-            priority: 'P1',
-            preconditions: '',
-            expectedResult: '',
-            steps: [],
-            runResult: res,
-          };
-        }
-        return {
-          ...tc,
-          runResult: res,
+    });
+    testCases.forEach((tc) => {
+      if (!map[tc.suiteId]) {
+        map[tc.suiteId] = {
+          total: 0,
+          passed: 0,
+          failed: 0,
+          blocked: 0,
+          untested: 0,
         };
-      })
-      .filter(Boolean);
-  }, [activeRun, testCases]);
-
-  const filteredRunCases = useMemo(() => {
-    return runCasesWithResults.filter((item) => {
-      const status = item.runResult?.status || 'Untested';
-      const matchesFilter = resultFilter === 'All' || status === resultFilter;
-      const q = searchQuery.trim().toLowerCase();
-      const matchesSearch =
-        !q ||
-        String(item.title || '').toLowerCase().includes(q) ||
-        String(item.id || '').toLowerCase().includes(q) ||
-        String(item.runResult?.notes || '').toLowerCase().includes(q) ||
-        String(item.runResult?.actualResult || '').toLowerCase().includes(q);
-      return matchesFilter && matchesSearch;
-    });
-  }, [runCasesWithResults, resultFilter, searchQuery]);
-
-  // Applicable test cases for the Create/Edit Run modal based on suite scope
-  const candidateCasesForModal = useMemo(() => {
-    if (!runSuiteId || runSuiteId === 'all' || runSuiteId === 'ALL') {
-      return testCases;
-    }
-    return testCases.filter((tc) => tc.suiteId === runSuiteId);
-  }, [testCases, runSuiteId]);
-
-  // Filtered chronological execution history
-  const filteredExecutions = useMemo(() => {
-    const list = Array.isArray(executions) ? executions : [];
-    return list.filter((exec) => {
-      const webOutcome = toWebExecutionOutcome(exec.status);
-      const matchesOutcome =
-        historyOutcomeFilter === 'All' || webOutcome === historyOutcomeFilter;
-      const q = historySearchQuery.trim().toLowerCase();
-      const matchesQuery =
-        !q ||
-        String(exec.caseId || exec.testCaseId || '')
-          .toLowerCase()
-          .includes(q) ||
-        String(exec.caseTitle || '').toLowerCase().includes(q) ||
-        String(exec.runId || '').toLowerCase().includes(q) ||
-        String(exec.tester || '').toLowerCase().includes(q) ||
-        String(exec.actualResult || '').toLowerCase().includes(q) ||
-        String(exec.notes || '').toLowerCase().includes(q) ||
-        String(exec.environment || '').toLowerCase().includes(q);
-      return matchesOutcome && matchesQuery;
-    });
-  }, [executions, historyOutcomeFilter, historySearchQuery]);
-
-  const executingCase = useMemo(() => {
-    if (!executingCaseId) return null;
-    return runCasesWithResults.find((c) => c.id === executingCaseId) || null;
-  }, [executingCaseId, runCasesWithResults]);
-
-  const openExecutionModal = (caseItem) => {
-    setExecutingCaseId(caseItem.id);
-    setExecNotes(caseItem.runResult?.notes || '');
-    setExecActualResult(caseItem.runResult?.actualResult || '');
-    setExecTester(
-      caseItem.runResult?.tester ||
-        activeRun?.tester ||
-        profile?.testerName ||
-        'QA Engineer'
-    );
-    setExecEnvironment(
-      caseItem.runResult?.environment ||
-        activeRun?.environment ||
-        currentProject?.environment ||
-        'Android 14 / Staging'
-    );
-    setExecDevice(
-      caseItem.runResult?.device ||
-        activeRun?.deviceInfo ||
-        profile?.defaultDevice ||
-        'Pixel 8 Pro • Android 14'
-    );
-    setExecBuildVersion(
-      caseItem.runResult?.buildVersion ||
-        activeRun?.buildVersion ||
-        currentProject?.version ||
-        profile?.defaultBuild ||
-        '2.4.0-rc3'
-    );
-    const existingSteps = caseItem.runResult?.stepStatuses || {};
-    const initialSteps = {};
-    (caseItem.steps || []).forEach((_, idx) => {
-      initialSteps[idx] = existingSteps[idx] || 'Untested';
-    });
-    setStepStatuses(initialSteps);
-  };
-
-  const toggleStepStatus = (idx, nextStatus) => {
-    setStepStatuses((prev) => ({
-      ...prev,
-      [idx]: prev[idx] === nextStatus ? 'Untested' : nextStatus,
-    }));
-  };
-
-  const markAllStepsPassed = () => {
-    if (!executingCase) return;
-    const next = {};
-    (executingCase.steps || []).forEach((_, idx) => {
-      next[idx] = 'Passed';
-    });
-    setStepStatuses(next);
-  };
-
-  const handleSaveExecution = async (finalStatus, andCreateDefect = false) => {
-    if (!activeRun || !executingCase || isSubmittingExec) return;
-    setIsSubmittingExec(true);
-    try {
-      const resolvedActual =
-        execActualResult.trim() ||
-        (finalStatus === 'Passed' || finalStatus === 'Pass'
-          ? executingCase.expectedResult || 'Verified expected behavior.'
-          : '');
-      const res = await recordTestExecution({
-        testRunId: activeRun.id,
-        testCaseId: executingCase.id,
-        status: finalStatus,
-        notes: execNotes.trim(),
-        actualResult: resolvedActual,
-        tester: execTester.trim(),
-        environment: execEnvironment.trim(),
-        device: execDevice.trim(),
-        buildVersion: execBuildVersion.trim(),
-        stepStatuses,
-      });
-
-      if (!res?.ok) {
-        showFeedback('error', res?.error || 'Failed to save test execution.');
-        return;
       }
+      map[tc.suiteId].total += 1;
+      if (tc.lastStatus === 'Passed') map[tc.suiteId].passed += 1;
+      else if (tc.lastStatus === 'Failed') map[tc.suiteId].failed += 1;
+      else if (tc.lastStatus === 'Blocked') map[tc.suiteId].blocked += 1;
+      else map[tc.suiteId].untested += 1;
+    });
+    return map;
+  }, [suites, testCases]);
 
-      const targetCase = executingCase;
-      const recordedActual =
-        resolvedActual ||
-        execNotes.trim() ||
-        'Observed failure during test execution.';
-      const recordedNotes = execNotes.trim();
-      const recordedExecId = res.execution?.id || null;
+  const filteredTestCases = useMemo(() => {
+    return testCases.filter((tc) => {
+      if (selectedSuiteId !== 'all' && tc.suiteId !== selectedSuiteId) {
+        return false;
+      }
+      if (selectedPriority !== 'all' && tc.priority !== selectedPriority) {
+        return false;
+      }
+      if (selectedStatus !== 'all' && tc.lastStatus !== selectedStatus) {
+        return false;
+      }
+      if (
+        selectedType !== 'all' &&
+        tc.testType !== selectedType &&
+        tc.category !== selectedType
+      ) {
+        return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const tagMatch =
+          Array.isArray(tc.tags) &&
+          tc.tags.some((t) => t.toLowerCase().includes(q));
+        const matchId = (tc.testCaseId || tc.id || '')
+          .toLowerCase()
+          .includes(q);
+        const matchTitle = (tc.title || '').toLowerCase().includes(q);
+        const matchDesc = (tc.description || '').toLowerCase().includes(q);
+        const matchSuite = (tc.suiteName || '').toLowerCase().includes(q);
+        return matchId || matchTitle || matchDesc || matchSuite || tagMatch;
+      }
+      return true;
+    });
+  }, [
+    testCases,
+    selectedSuiteId,
+    selectedPriority,
+    selectedStatus,
+    selectedType,
+    searchQuery,
+  ]);
 
-      setExecutingCaseId(null);
-      showFeedback(
-        'success',
-        `Recorded "${toWebExecutionOutcome(finalStatus)}" for ${targetCase.id}.`
-      );
+  const getPriorityBadgeStyle = (priority) => {
+    switch (priority) {
+      case 'P0':
+      case 'Critical':
+        return {
+          bg: colors.dangerSoft,
+          text: colors.danger,
+          border: colors.danger,
+        };
+      case 'P1':
+      case 'High':
+        return {
+          bg: colors.warningSoft,
+          text: colors.warning,
+          border: colors.warning,
+        };
+      case 'P2':
+      case 'Medium':
+        return {
+          bg: colors.primarySoft,
+          text: colors.primary,
+          border: colors.primary,
+        };
+      default:
+        return {
+          bg: colors.surfaceMuted,
+          text: colors.textSecondary,
+          border: colors.border,
+        };
+    }
+  };
 
-      if (andCreateDefect) {
-        startDefectFromFailedTest({
-          testRun: activeRun,
-          testCase: targetCase,
-          actualResult: recordedActual,
-          notes: recordedNotes,
-          executionId: recordedExecId,
+  const getStatusBadgeStyle = (status) => {
+    switch (status) {
+      case 'Passed':
+        return { bg: colors.successSoft, text: colors.success };
+      case 'Failed':
+        return { bg: colors.dangerSoft, text: colors.danger };
+      case 'Blocked':
+        return { bg: colors.warningSoft, text: colors.warning };
+      default:
+        return { bg: colors.surfaceMuted, text: colors.textMuted };
+    }
+  };
+
+  // =========================================================================
+  // TEST CASE MODAL HANDLERS
+  // =========================================================================
+
+  const openCreateCaseModal = (defaultSuiteId = null) => {
+    setEditingCase(null);
+    setFormTitle('');
+    setFormSuiteId(
+      defaultSuiteId ||
+        (selectedSuiteId !== 'all'
+          ? selectedSuiteId
+          : suites[0]?.id || 'suite-general')
+    );
+    setFormPriority('P1');
+    setFormTestType('Functional');
+    setFormTags('');
+    setFormDescription('');
+    setFormPreconditions('');
+    setFormExpectedResult('');
+    setFormSteps([{ action: '', testData: '', expectedResult: '' }]);
+    setCaseFormError(null);
+    setIsFormModalOpen(true);
+  };
+
+  const openEditCaseModal = (tc) => {
+    setEditingCase(tc);
+    setFormTitle(tc.title || '');
+    setFormSuiteId(tc.suiteId || suites[0]?.id || 'suite-general');
+    setFormPriority(tc.priority || 'P1');
+    setFormTestType(tc.testType || tc.category || 'Functional');
+    setFormTags(Array.isArray(tc.tags) ? tc.tags.join(', ') : '');
+    setFormDescription(tc.description || '');
+    setFormPreconditions(tc.preconditions || '');
+    setFormExpectedResult(tc.expectedResult || '');
+    setFormSteps(
+      tc.steps && tc.steps.length > 0
+        ? tc.steps.map((s) => ({
+            action: s.action || '',
+            testData: s.testData || '',
+            expectedResult: s.expectedResult || '',
+          }))
+        : [{ action: '', testData: '', expectedResult: '' }]
+    );
+    setCaseFormError(null);
+    setIsFormModalOpen(true);
+  };
+
+  const handleStepChange = (index, field, value) => {
+    setFormSteps((prev) =>
+      prev.map((step, idx) =>
+        idx === index ? { ...step, [field]: value } : step
+      )
+    );
+  };
+
+  const addStepRow = () => {
+    setFormSteps((prev) => [
+      ...prev,
+      { action: '', testData: '', expectedResult: '' },
+    ]);
+  };
+
+  const removeStepRow = (index) => {
+    if (formSteps.length <= 1) return;
+    setFormSteps((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleSaveTestCase = async () => {
+    if (caseSubmitLockRef.current || isSubmittingCase) return;
+
+    const trimmedTitle = formTitle.trim();
+    if (!trimmedTitle) {
+      setCaseFormError('Test case title is required.');
+      return;
+    }
+
+    const parsedTags = formTags
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    caseSubmitLockRef.current = true;
+    setIsSubmittingCase(true);
+    setCaseFormError(null);
+
+    try {
+      let res;
+      if (editingCase) {
+        res = await updateTestCase(editingCase.id, {
+          title: trimmedTitle,
+          suiteId: formSuiteId,
+          priority: formPriority,
+          testType: formTestType,
+          category: formTestType,
+          tags: parsedTags,
+          description: formDescription,
+          preconditions: formPreconditions,
+          expectedResult: formExpectedResult,
+          steps: formSteps,
+        });
+      } else {
+        res = await createTestCase({
+          title: trimmedTitle,
+          suiteId: formSuiteId,
+          priority: formPriority,
+          testType: formTestType,
+          category: formTestType,
+          tags: parsedTags,
+          description: formDescription,
+          preconditions: formPreconditions,
+          expectedResult: formExpectedResult,
+          steps: formSteps,
         });
       }
-    } finally {
-      setIsSubmittingExec(false);
-    }
-  };
 
-  const handleQuickOutcome = async (caseItem, status) => {
-    if (!activeRun || isSubmittingExec) return;
-    setIsSubmittingExec(true);
-    try {
-      const res = await recordTestExecution({
-        testRunId: activeRun.id,
-        testCaseId: caseItem.id,
-        status,
-        notes: caseItem.runResult?.notes || '',
-        actualResult:
-          caseItem.runResult?.actualResult ||
-          (status === 'Passed'
-            ? caseItem.expectedResult || 'Verified expected behavior.'
-            : ''),
-        tester:
-          caseItem.runResult?.tester ||
-          activeRun.tester ||
-          profile?.testerName ||
-          'QA Engineer',
-        environment:
-          caseItem.runResult?.environment ||
-          activeRun.environment ||
-          'Android 14 / Staging',
-        device: caseItem.runResult?.device || activeRun.deviceInfo || '',
-        buildVersion:
-          caseItem.runResult?.buildVersion || activeRun.buildVersion || '',
-        stepStatuses: caseItem.runResult?.stepStatuses || {},
-      });
-      if (!res?.ok) {
-        showFeedback(
-          'error',
-          res?.error || 'Failed to update execution result.'
-        );
+      if (res && res.ok) {
+        setIsFormModalOpen(false);
+        setEditingCase(null);
       } else {
-        showFeedback(
-          'success',
-          `${caseItem.id} marked as ${toWebExecutionOutcome(status)}.`
+        setCaseFormError(
+          (res && res.error) || 'Failed to save test case to server.'
         );
       }
     } finally {
-      setIsSubmittingExec(false);
+      caseSubmitLockRef.current = false;
+      setIsSubmittingCase(false);
     }
   };
 
-  const openCreateRunModal = () => {
-    setEditingRunId(null);
-    setRunName('');
-    setRunSuiteId('all');
-    setSelectedCaseIds(testCases.map((tc) => tc.id));
-    setRunDevice(
-      profile?.defaultDevice || 'Pixel 8 Pro • Android 14 (API 34)'
-    );
-    setRunBuild(
-      currentProject?.version || profile?.defaultBuild || '2.4.0-rc3'
-    );
-    setRunEnvironment(
-      currentProject?.environment || 'Android 14 / Staging'
-    );
-    setRunTester(profile?.testerName || 'QA Engineer');
-    setRunNotes('');
-    setRunFormError('');
-    setRunModalVisible(true);
+  const openMoveCaseModal = (tc) => {
+    const otherSuite = suites.find((s) => s.id !== tc.suiteId) || suites[0];
+    setMovingCase(tc);
+    setMoveTargetSuiteId(otherSuite ? otherSuite.id : tc.suiteId);
   };
 
-  const openEditRunModal = (run) => {
-    if (!run) return;
-    setEditingRunId(run.id);
-    setRunName(run.name || '');
-    setRunSuiteId(run.suiteId || 'all');
-    const existingCaseIds = (run.results || [])
-      .map((r) => r.testCaseId || r.caseId)
+  const handleConfirmMoveCase = async () => {
+    if (!movingCase || !moveTargetSuiteId || isMovingCase) return;
+    if (moveTargetSuiteId === movingCase.suiteId) {
+      setMovingCase(null);
+      return;
+    }
+    setIsMovingCase(true);
+    try {
+      const res = await moveTestCaseToSuite(movingCase.id, moveTargetSuiteId);
+      if (res && res.ok) {
+        setMovingCase(null);
+      }
+    } finally {
+      setIsMovingCase(false);
+    }
+  };
+
+  const handleConfirmDeleteCase = async () => {
+    if (!deletingCase || isDeletingCase) return;
+    setIsDeletingCase(true);
+    try {
+      const res = await deleteTestCase(deletingCase.id);
+      if (res && res.ok) {
+        setDeletingCase(null);
+      }
+    } finally {
+      setIsDeletingCase(false);
+    }
+  };
+
+  // =========================================================================
+  // TEST SUITE MODAL HANDLERS
+  // =========================================================================
+
+  const openCreateSuiteModal = () => {
+    setEditingSuite(null);
+    setSuiteNameInput('');
+    setSuiteDescInput('');
+    setSuiteCategoryInput('Functional');
+    setSuitePhaseIdInput(planPhases[0]?.id || '');
+    setSuiteTagsInput('');
+    setSuiteFormError(null);
+    setIsSuiteModalOpen(true);
+  };
+
+  const openEditSuiteModal = (suite) => {
+    setEditingSuite(suite);
+    setSuiteNameInput(suite.name || '');
+    setSuiteDescInput(suite.description || '');
+    setSuiteCategoryInput(suite.category || 'Functional');
+    setSuitePhaseIdInput(suite.phaseId || '');
+    setSuiteTagsInput(Array.isArray(suite.tags) ? suite.tags.join(', ') : '');
+    setSuiteFormError(null);
+    setIsSuiteModalOpen(true);
+  };
+
+  const handleSaveSuite = async () => {
+    if (suiteSubmitLockRef.current || isSubmittingSuite) return;
+    const trimmedName = suiteNameInput.trim();
+    if (!trimmedName) {
+      setSuiteFormError('Suite name is required.');
+      return;
+    }
+
+    const parsedTags = suiteTagsInput
+      .split(',')
+      .map((t) => t.trim())
       .filter(Boolean);
-    setSelectedCaseIds(
-      existingCaseIds.length > 0
-        ? existingCaseIds
-        : testCases.map((tc) => tc.id)
-    );
-    setRunDevice(run.deviceInfo || 'Pixel 8 Pro • Android 14 (API 34)');
-    setRunBuild(run.buildVersion || '2.4.0-rc3');
-    setRunEnvironment(run.environment || 'Android 14 / Staging');
-    setRunTester(run.tester || profile?.testerName || 'QA Engineer');
-    setRunNotes(run.notes || '');
-    setRunFormError('');
-    setRunModalVisible(true);
-  };
 
-  const handleChangeRunSuiteScope = (nextSuiteId) => {
-    setRunSuiteId(nextSuiteId);
-    const matching =
-      nextSuiteId === 'all' || nextSuiteId === 'ALL'
-        ? testCases
-        : testCases.filter((tc) => tc.suiteId === nextSuiteId);
-    setSelectedCaseIds(matching.map((tc) => tc.id));
-  };
+    suiteSubmitLockRef.current = true;
+    setIsSubmittingSuite(true);
+    setSuiteFormError(null);
 
-  const toggleCandidateCaseSelection = (caseId) => {
-    setSelectedCaseIds((prev) =>
-      prev.includes(caseId)
-        ? prev.filter((id) => id !== caseId)
-        : [...prev, caseId]
-    );
-  };
-
-  const handleSaveRunModal = async () => {
-    if (isSubmittingRun) return;
-    if (!runName.trim()) {
-      setRunFormError('Run name is required.');
-      return;
-    }
-    if (testCases.length > 0 && selectedCaseIds.length === 0) {
-      setRunFormError('Select at least one applicable test case for this run.');
-      return;
-    }
-
-    setRunFormError('');
-    setIsSubmittingRun(true);
     try {
-      const payload = {
-        name: runName.trim(),
-        suiteId: runSuiteId,
-        testCaseIds: selectedCaseIds,
-        deviceInfo: runDevice.trim(),
-        buildVersion: runBuild.trim(),
-        environment: runEnvironment.trim(),
-        tester: runTester.trim(),
-        notes: runNotes.trim(),
-      };
-
-      const res = editingRunId
-        ? await updateTestRun(editingRunId, payload)
-        : await createTestRun(payload);
-
-      if (!res?.ok) {
-        setRunFormError(res?.error || 'Failed to save test run.');
-        return;
+      let res;
+      if (editingSuite) {
+        res = await updateSuite(editingSuite.id, {
+          name: trimmedName,
+          description: suiteDescInput,
+          category: suiteCategoryInput,
+          phaseId: suitePhaseIdInput || null,
+          tags: parsedTags,
+        });
+      } else {
+        res = await createSuite({
+          name: trimmedName,
+          description: suiteDescInput,
+          category: suiteCategoryInput,
+          phaseId: suitePhaseIdInput || null,
+          tags: parsedTags,
+        });
       }
 
-      setRunModalVisible(false);
-      showFeedback(
-        'success',
-        editingRunId
-          ? `Updated test run "${runName.trim()}".`
-          : `Created test run "${runName.trim()}".`
-      );
-    } finally {
-      setIsSubmittingRun(false);
-    }
-  };
-
-  const handleToggleRunCompletion = async () => {
-    if (!activeRun || isTogglingRunStatus) return;
-    setIsTogglingRunStatus(true);
-    try {
-      const isCompleted = activeRun.status === 'Completed';
-      const res = isCompleted
-        ? await reopenTestRun(activeRun.id)
-        : await completeTestRun(activeRun.id);
-
-      if (!res?.ok) {
-        showFeedback('error', res?.error || 'Failed to update run status.');
+      if (res && res.ok) {
+        if (!editingSuite && res.suite) {
+          setSelectedSuiteId(res.suite.id);
+        }
+        setIsSuiteModalOpen(false);
+        setEditingSuite(null);
       } else {
-        showFeedback(
-          'success',
-          isCompleted
-            ? `Reopened "${activeRun.name}".`
-            : `Marked "${activeRun.name}" as Completed.`
+        setSuiteFormError(
+          (res && res.error) || 'Failed to save test suite to server.'
         );
       }
     } finally {
-      setIsTogglingRunStatus(false);
+      suiteSubmitLockRef.current = false;
+      setIsSubmittingSuite(false);
     }
   };
 
-  const handleConfirmDeleteRun = async () => {
-    if (!runPendingDelete || isDeletingRun) return;
-    setIsDeletingRun(true);
+  const openDeleteSuiteConfirm = (suite) => {
+    const otherSuites = suites.filter((s) => s.id !== suite.id);
+    const caseCount = suiteStatsMap[suite.id]?.total || 0;
+    setDeletingSuite(suite);
+    if (caseCount > 0 && otherSuites.length > 0) {
+      setSuiteDeleteMode('move');
+      setSuiteDeleteTargetId(otherSuites[0].id);
+    } else {
+      setSuiteDeleteMode('delete');
+      setSuiteDeleteTargetId('');
+    }
+  };
+
+  const handleConfirmDeleteSuite = async () => {
+    if (!deletingSuite || isDeletingSuite) return;
+    setIsDeletingSuite(true);
     try {
-      const targetName = runPendingDelete.name;
-      const res = await deleteTestRun(runPendingDelete.id);
-      if (!res?.ok) {
-        showFeedback('error', res?.error || 'Failed to delete test run.');
-      } else {
-        setRunPendingDelete(null);
-        showFeedback('success', `Deleted test run "${targetName}".`);
+      const targetId = deletingSuite.id;
+      const moveCasesToSuiteId =
+        suiteDeleteMode === 'move' && suiteDeleteTargetId
+          ? suiteDeleteTargetId
+          : null;
+      const res = await deleteSuite(targetId, { moveCasesToSuiteId });
+      if (res && res.ok) {
+        if (selectedSuiteId === targetId) {
+          setSelectedSuiteId(moveCasesToSuiteId || 'all');
+        }
+        setDeletingSuite(null);
       }
     } finally {
-      setIsDeletingRun(false);
+      setIsDeletingSuite(false);
     }
   };
 
-  const getStatusMeta = (status) => {
-    if (status === 'Passed' || status === 'Pass') {
-      return {
-        color: theme.success,
-        bg: theme.successSoft,
-        icon: 'check',
-        label: status === 'Pass' ? 'Pass' : 'Passed',
-        webOutcome: 'Pass',
-      };
-    }
-    if (status === 'Failed' || status === 'Fail') {
-      return {
-        color: theme.danger,
-        bg: theme.dangerSoft,
-        icon: 'close',
-        label: status === 'Fail' ? 'Fail' : 'Failed',
-        webOutcome: 'Fail',
-      };
-    }
-    if (status === 'Blocked') {
-      return {
-        color: theme.warning,
-        bg: theme.warningSoft,
-        icon: 'alert',
-        label: 'Blocked',
-        webOutcome: 'Blocked',
-      };
-    }
-    return {
-      color: theme.textMuted,
-      bg: theme.surfaceMuted,
-      icon: 'info',
-      label: status === 'Not Run' ? 'Not Run' : 'Untested',
-      webOutcome: 'Not Run',
-    };
+  // =========================================================================
+  // TEST PLAN & PHASE MODAL HANDLERS
+  // =========================================================================
+
+  const openEditPlanModal = () => {
+    setPlanForm({
+      name:
+        testPlan?.name ||
+        `${activeProject?.name || 'Project'} Master Test Plan`,
+      description: testPlan?.description || '',
+      objective: testPlan?.objective || '',
+      scope: testPlan?.scope || '',
+      outOfScope: testPlan?.outOfScope || '',
+      strategy: testPlan?.strategy || '',
+      environment:
+        testPlan?.environment || activeProject?.environment || '',
+      entryCriteria: testPlan?.entryCriteria || '',
+      exitCriteria: testPlan?.exitCriteria || '',
+      deliverables: testPlan?.deliverables || '',
+      risks: testPlan?.risks || '',
+      tools: testPlan?.tools || '',
+      schedule: testPlan?.schedule || '',
+      approvals: testPlan?.approvals || '',
+      notes: testPlan?.notes || '',
+    });
+    setPlanFormError(null);
+    setIsPlanModalOpen(true);
   };
 
-  const getSuiteName = (suiteId) => {
-    if (!suiteId || suiteId === 'all' || suiteId === 'ALL') return 'All Suites';
-    return suites.find((s) => s.id === suiteId)?.name || suiteId;
+  const handlePlanFieldChange = (field, value) => {
+    setPlanForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  if (!currentProject) {
-    return (
-      <View
-        style={[
-          styles.emptyWorkspaceWrap,
-          { backgroundColor: theme.background },
-        ]}
-      >
-        <View
-          style={[
-            styles.emptyWorkspaceCard,
-            { backgroundColor: theme.surface, borderColor: theme.border },
-          ]}
-        >
-          <VectorIcon name="folder" size={32} color={theme.primary} />
-          <Text style={[styles.emptyWorkspaceTitle, { color: theme.text }]}>
-            No Active Project Selected
-          </Text>
-          <Text
-            style={[
-              styles.emptyWorkspaceSub,
-              { color: theme.textSecondary },
-            ]}
-          >
-            Select or create a project first to manage test runs and record execution results.
-          </Text>
-          <TouchableOpacity
-            style={[
-              styles.primaryActionBtn,
-              { backgroundColor: theme.primary },
-            ]}
-            onPress={openProjectSelection}
-          >
-            <VectorIcon name="folder" size={15} color="#FFFFFF" />
-            <Text style={styles.primaryActionBtnText}>Select Project</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
+  const handleSavePlan = async () => {
+    if (planSubmitLockRef.current || isSubmittingPlan) return;
+    if (!planForm.name || !planForm.name.trim()) {
+      setPlanFormError('Test Plan name is required.');
+      return;
+    }
+
+    planSubmitLockRef.current = true;
+    setIsSubmittingPlan(true);
+    setPlanFormError(null);
+
+    try {
+      const res = await saveTestPlan(planForm);
+      if (res && res.ok) {
+        setIsPlanModalOpen(false);
+      } else {
+        setPlanFormError(
+          (res && res.error) || 'Failed to save test plan to server.'
+        );
+      }
+    } finally {
+      planSubmitLockRef.current = false;
+      setIsSubmittingPlan(false);
+    }
+  };
+
+  const openCreatePhaseModal = () => {
+    setEditingPhase(null);
+    setPhaseNameInput('');
+    setPhaseDescInput('');
+    setPhaseFormError(null);
+    setIsPhaseModalOpen(true);
+  };
+
+  const openEditPhaseModal = (phase) => {
+    setEditingPhase(phase);
+    setPhaseNameInput(phase.name || '');
+    setPhaseDescInput(phase.description || '');
+    setPhaseFormError(null);
+    setIsPhaseModalOpen(true);
+  };
+
+  const handleSavePhase = async () => {
+    if (isSubmittingPhase) return;
+    if (!phaseNameInput.trim()) {
+      setPhaseFormError('Phase name is required.');
+      return;
+    }
+    setIsSubmittingPhase(true);
+    setPhaseFormError(null);
+    try {
+      let res;
+      if (editingPhase) {
+        res = await updateTestPlanPhase(editingPhase.id, {
+          name: phaseNameInput,
+          description: phaseDescInput,
+        });
+      } else {
+        res = await addTestPlanPhase({
+          name: phaseNameInput,
+          description: phaseDescInput,
+        });
+      }
+      if (res && res.ok) {
+        setIsPhaseModalOpen(false);
+        setEditingPhase(null);
+      } else {
+        setPhaseFormError((res && res.error) || 'Failed to save phase.');
+      }
+    } finally {
+      setIsSubmittingPhase(false);
+    }
+  };
+
+  const handleConfirmDeletePhase = async () => {
+    if (!deletingPhase || isDeletingPhase) return;
+    setIsDeletingPhase(true);
+    try {
+      const res = await deleteTestPlanPhase(deletingPhase.id);
+      if (res && res.ok) {
+        setDeletingPhase(null);
+      }
+    } finally {
+      setIsDeletingPhase(false);
+    }
+  };
+
+  // Plan documentation sections for clean rendering
+  const planDocSections = useMemo(() => {
+    if (!testPlan) return [];
+    return [
+      { key: 'description', label: 'Plan Overview & Description', value: testPlan.description },
+      { key: 'objective', label: 'Testing Objectives', value: testPlan.objective },
+      { key: 'scope', label: 'In Scope', value: testPlan.scope },
+      { key: 'outOfScope', label: 'Out of Scope', value: testPlan.outOfScope },
+      { key: 'strategy', label: 'Test Strategy & Approach', value: testPlan.strategy },
+      { key: 'environment', label: 'Test Environment & Infrastructure', value: testPlan.environment },
+      { key: 'entryCriteria', label: 'Entry Criteria', value: testPlan.entryCriteria },
+      { key: 'exitCriteria', label: 'Exit Criteria', value: testPlan.exitCriteria },
+      { key: 'deliverables', label: 'QA Deliverables', value: testPlan.deliverables },
+      { key: 'risks', label: 'Risks & Mitigation', value: testPlan.risks },
+      { key: 'tools', label: 'Tools & Automation Stack', value: testPlan.tools },
+      { key: 'schedule', label: 'Schedule & Milestones', value: testPlan.schedule },
+      { key: 'approvals', label: 'Sign-off & Approvals', value: testPlan.approvals },
+      { key: 'notes', label: 'Additional Notes', value: testPlan.notes },
+    ];
+  }, [testPlan]);
+
+  const populatedPlanSections = useMemo(
+    () => planDocSections.filter((s) => s.value && String(s.value).trim()),
+    [planDocSections]
+  );
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
-      {/* Top Project Context & Sync Status Strip */}
+    <View style={styles.container}>
+      {/* Top Active Project Bar + Sync Status + Segmented Sub-Navigation */}
       <View
         style={[
-          styles.projectStrip,
+          styles.topSubNavWrap,
           {
-            backgroundColor: theme.surface,
-            borderBottomColor: theme.border,
+            backgroundColor: colors.surface,
+            borderBottomColor: colors.border,
           },
         ]}
       >
-        <View style={styles.projectStripLeft}>
-          <View
-            style={[styles.projectDot, { backgroundColor: theme.primary }]}
-          />
-          <Text
-            style={[styles.projectStripName, { color: theme.text }]}
-            numberOfLines={1}
-          >
-            {currentProject.name}
-          </Text>
-          <View
-            style={[
-              styles.projectStatusBadge,
-              { backgroundColor: theme.primarySoft },
-            ]}
-          >
+        <View style={styles.projectContextRow}>
+          <View style={styles.projectContextLeft}>
+            <VectorIcon name="folder" size={14} color={colors.primary} />
             <Text
-              style={[styles.projectStatusBadgeText, { color: theme.primary }]}
+              style={[styles.projectContextName, { color: colors.text }]}
+              numberOfLines={1}
             >
-              {currentProject.status || 'active'}
+              {activeProject?.name || 'Active Project'}
             </Text>
           </View>
-        </View>
-
-        <View style={styles.projectStripRight}>
-          {isSyncingWorkspace && (
-            <View style={styles.syncIndicator}>
-              <ActivityIndicator size="small" color={theme.primary} />
-              <Text
-                style={[styles.syncIndicatorText, { color: theme.primary }]}
-              >
-                Saving...
-              </Text>
-            </View>
-          )}
-          <TouchableOpacity
-            style={[
-              styles.iconRefreshBtn,
-              {
-                backgroundColor: theme.surfaceElevated,
-                borderColor: theme.border,
-              },
-            ]}
-            onPress={() => reloadCurrentProject()}
-            disabled={isSyncingWorkspace}
-          >
-            <VectorIcon name="refresh" size={13} color={theme.textSecondary} />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Workspace Conflict / API Error Banner */}
-      {workspaceError ? (
-        <View
-          style={[
-            styles.alertBanner,
-            {
-              backgroundColor: theme.dangerSoft,
-              borderColor: theme.danger,
-            },
-          ]}
-        >
-          <View style={styles.alertBannerTop}>
-            <VectorIcon name="alert" size={16} color={theme.danger} />
-            <Text style={[styles.alertBannerText, { color: theme.danger }]}>
-              {workspaceError}
-            </Text>
-          </View>
-          <View style={styles.alertBannerActions}>
-            {workspaceConflict && (
-              <TouchableOpacity
+          <View style={styles.syncStatusRight}>
+            {isSyncingProjectData ? (
+              <View
                 style={[
-                  styles.alertBannerBtn,
-                  { backgroundColor: theme.danger },
+                  styles.syncPill,
+                  { backgroundColor: colors.primarySoft, borderColor: colors.primary },
                 ]}
-                onPress={() => reloadCurrentProject()}
               >
-                <VectorIcon name="refresh" size={12} color="#FFFFFF" />
-                <Text style={styles.alertBannerBtnText}>
-                  Reload Latest Project Data
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={[styles.syncPillText, { color: colors.primary }]}>
+                  Syncing...
                 </Text>
-              </TouchableOpacity>
+              </View>
+            ) : (
+              <Pressable
+                onPress={reloadProjectDataFromBackend}
+                style={({ pressed }) => [
+                  styles.syncPill,
+                  {
+                    backgroundColor: colors.surfaceMuted,
+                    borderColor: colors.border,
+                    opacity: pressed ? 0.8 : 1,
+                  },
+                ]}
+              >
+                <VectorIcon name="refresh" size={12} color={colors.textSecondary} />
+                <Text
+                  style={[styles.syncPillText, { color: colors.textSecondary }]}
+                >
+                  Sync
+                </Text>
+              </Pressable>
             )}
-            <TouchableOpacity
-              style={[
-                styles.alertBannerDismiss,
-                { borderColor: theme.danger },
-              ]}
-              onPress={clearWorkspaceError}
-            >
-              <Text
-                style={[styles.alertBannerDismissText, { color: theme.danger }]}
-              >
-                Dismiss
-              </Text>
-            </TouchableOpacity>
           </View>
         </View>
-      ) : null}
 
-      {/* Transient Feedback Banner */}
-      {feedbackBanner ? (
+        {/* 3-Tab Segmented Switcher: Test Cases | Test Suites | Test Plan */}
         <View
           style={[
-            styles.feedbackBanner,
-            {
-              backgroundColor:
-                feedbackBanner.type === 'error'
-                  ? theme.dangerSoft
-                  : theme.successSoft,
-              borderColor:
-                feedbackBanner.type === 'error' ? theme.danger : theme.success,
-            },
+            styles.segmentedBar,
+            { backgroundColor: colors.surfaceMuted, borderColor: colors.border },
           ]}
         >
-          <VectorIcon
-            name={feedbackBanner.type === 'error' ? 'alert' : 'check'}
-            size={15}
-            color={
-              feedbackBanner.type === 'error' ? theme.danger : theme.success
-            }
-          />
-          <Text
-            style={[
-              styles.feedbackBannerText,
-              {
-                color:
-                  feedbackBanner.type === 'error'
-                    ? theme.danger
-                    : theme.success,
-              },
-            ]}
-          >
-            {feedbackBanner.message}
-          </Text>
-        </View>
-      ) : null}
-
-      {/* Mode Switcher: Test Runs vs Execution History */}
-      <View
-        style={[
-          styles.modeSwitcherWrap,
-          {
-            backgroundColor: theme.surface,
-            borderBottomColor: theme.border,
-          },
-        ]}
-      >
-        <View
-          style={[
-            styles.modeSwitcherTrack,
+          {[
             {
-              backgroundColor: theme.surfaceMuted,
-              borderColor: theme.border,
+              key: 'cases',
+              label: `Cases (${testCases.length})`,
+              icon: 'layers',
             },
-          ]}
-        >
-          <TouchableOpacity
-            style={[
-              styles.modeTab,
-              activeViewMode === 'runs' && {
-                backgroundColor: theme.primary,
-              },
-            ]}
-            onPress={() => setActiveViewMode('runs')}
-          >
-            <VectorIcon
-              name="layers"
-              size={14}
-              color={
-                activeViewMode === 'runs' ? '#FFFFFF' : theme.textSecondary
-              }
-            />
-            <Text
-              style={[
-                styles.modeTabText,
-                {
-                  color:
-                    activeViewMode === 'runs' ? '#FFFFFF' : theme.textSecondary,
-                },
-              ]}
-            >
-              Test Runs ({testRuns.length})
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.modeTab,
-              activeViewMode === 'history' && {
-                backgroundColor: theme.primary,
-              },
-            ]}
-            onPress={() => setActiveViewMode('history')}
-          >
-            <VectorIcon
-              name="calendar"
-              size={14}
-              color={
-                activeViewMode === 'history' ? '#FFFFFF' : theme.textSecondary
-              }
-            />
-            <Text
-              style={[
-                styles.modeTabText,
-                {
-                  color:
-                    activeViewMode === 'history'
-                      ? '#FFFFFF'
-                      : theme.textSecondary,
-                },
-              ]}
-            >
-              Execution History ({executions?.length || 0})
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <TouchableOpacity
-          style={[styles.newRunTopBtn, { backgroundColor: theme.primary }]}
-          onPress={openCreateRunModal}
-        >
-          <VectorIcon name="plus" size={14} color="#FFFFFF" />
-          <Text style={styles.newRunTopBtnText}>New Run</Text>
-        </TouchableOpacity>
-      </View>
-
-      {activeViewMode === 'runs' ? (
-        <>
-          {/* Horizontal Run Selector Bar */}
-          <View
-            style={[
-              styles.runSelectorBar,
-              {
-                backgroundColor: theme.surface,
-                borderBottomColor: theme.border,
-              },
-            ]}
-          >
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.runListScroll}
-            >
-              {testRuns.map((run) => {
-                const isSelected = activeRun?.id === run.id;
-                const metrics = computeRunMetrics(run.results);
-                const completionPct =
-                  metrics.totalCases > 0
-                    ? Math.round(
-                        (metrics.executedCount / metrics.totalCases) * 100
-                      )
-                    : 0;
-
-                return (
-                  <TouchableOpacity
-                    key={run.id}
-                    onPress={() => setSelectedTestRunId(run.id)}
-                    style={[
-                      styles.runTabCard,
-                      {
-                        backgroundColor: isSelected
-                          ? theme.primarySoft
-                          : theme.surfaceElevated,
-                        borderColor: isSelected ? theme.primary : theme.border,
-                      },
-                    ]}
-                  >
-                    <View style={styles.runTabTop}>
-                      <Text
-                        style={[
-                          styles.runTabId,
-                          {
-                            color: isSelected
-                              ? theme.primary
-                              : theme.textMuted,
-                            fontFamily: monoFontFamily,
-                          },
-                        ]}
-                      >
-                        {run.id}
-                      </Text>
-                      <View
-                        style={[
-                          styles.runStatusPill,
-                          {
-                            backgroundColor:
-                              run.status === 'Completed'
-                                ? theme.successSoft
-                                : theme.warningSoft,
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.runStatusText,
-                            {
-                              color:
-                                run.status === 'Completed'
-                                  ? theme.success
-                                  : theme.warning,
-                            },
-                          ]}
-                        >
-                          {run.status}
-                        </Text>
-                      </View>
-                    </View>
-                    <Text
-                      style={[styles.runTabName, { color: theme.text }]}
-                      numberOfLines={1}
-                    >
-                      {run.name}
-                    </Text>
-                    <View style={styles.runMiniProgress}>
-                      <View
-                        style={[
-                          styles.runMiniTrack,
-                          { backgroundColor: theme.border },
-                        ]}
-                      >
-                        <View
-                          style={[
-                            styles.runMiniFill,
-                            {
-                              width: `${completionPct}%`,
-                              backgroundColor:
-                                metrics.failedCases > 0
-                                  ? theme.danger
-                                  : theme.success,
-                            },
-                          ]}
-                        />
-                      </View>
-                      <Text
-                        style={[
-                          styles.runMiniPct,
-                          { color: theme.textSecondary },
-                        ]}
-                      >
-                        {metrics.passedCases}P • {metrics.failedCases}F •{' '}
-                        {completionPct}%
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-
-          {activeRun ? (
-            <ScrollView
-              style={styles.container}
-              contentContainerStyle={styles.contentContainer}
-              showsVerticalScrollIndicator={false}
-            >
-              {/* Active Run Summary & Metadata Card */}
-              <View
-                style={[
-                  styles.summaryCard,
-                  {
-                    backgroundColor: theme.surface,
-                    borderColor: theme.border,
-                  },
-                ]}
-              >
-                <View style={styles.summaryTopRow}>
-                  <View style={{ flex: 1 }}>
-                    <View style={styles.summaryTitleRow}>
-                      <Text
-                        style={[
-                          styles.summaryRunId,
-                          {
-                            color: theme.primary,
-                            fontFamily: monoFontFamily,
-                          },
-                        ]}
-                      >
-                        {activeRun.id}
-                      </Text>
-                      <View
-                        style={[
-                          styles.runStatusPill,
-                          {
-                            backgroundColor:
-                              activeRun.status === 'Completed'
-                                ? theme.successSoft
-                                : theme.warningSoft,
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.runStatusText,
-                            {
-                              color:
-                                activeRun.status === 'Completed'
-                                  ? theme.success
-                                  : theme.warning,
-                            },
-                          ]}
-                        >
-                          {activeRun.status}
-                        </Text>
-                      </View>
-                    </View>
-                    <Text
-                      style={[styles.summaryRunTitle, { color: theme.text }]}
-                    >
-                      {activeRun.name}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.summaryMeta,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
-                      Scope: {getSuiteName(activeRun.suiteId)} •{' '}
-                      {activeRun.deviceInfo || 'Android Device'} • Build:{' '}
-                      {activeRun.buildVersion || 'N/A'}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.summarySubMeta,
-                        { color: theme.textMuted },
-                      ]}
-                    >
-                      Env: {activeRun.environment || 'Android 14 / Staging'} •
-                      Tester: {activeRun.tester || 'QA Engineer'} • Started{' '}
-                      {formatShortTimestamp(
-                        activeRun.startedAt || activeRun.createdAt
-                      )}
-                      {activeRun.completedAt
-                        ? ` • Completed ${formatShortTimestamp(
-                            activeRun.completedAt
-                          )}`
-                        : ''}
-                    </Text>
-                    {activeRun.notes ? (
-                      <Text
-                        style={[
-                          styles.summaryRunNotes,
-                          { color: theme.textSecondary },
-                        ]}
-                      >
-                        Note: {activeRun.notes}
-                      </Text>
-                    ) : null}
-                  </View>
-                </View>
-
-                {/* Run Action Controls */}
-                <View style={styles.runManagementRow}>
-                  <TouchableOpacity
-                    style={[
-                      styles.completeRunBtn,
-                      {
-                        backgroundColor:
-                          activeRun.status === 'Completed'
-                            ? theme.surfaceElevated
-                            : theme.successSoft,
-                        borderColor:
-                          activeRun.status === 'Completed'
-                            ? theme.border
-                            : theme.success,
-                      },
-                    ]}
-                    onPress={handleToggleRunCompletion}
-                    disabled={isTogglingRunStatus}
-                  >
-                    <VectorIcon
-                      name={
-                        activeRun.status === 'Completed' ? 'refresh' : 'check'
-                      }
-                      size={14}
-                      color={
-                        activeRun.status === 'Completed'
-                          ? theme.textSecondary
-                          : theme.success
-                      }
-                    />
-                    <Text
-                      style={[
-                        styles.completeRunBtnText,
-                        {
-                          color:
-                            activeRun.status === 'Completed'
-                              ? theme.textSecondary
-                              : theme.success,
-                        },
-                      ]}
-                    >
-                      {activeRun.status === 'Completed'
-                        ? 'Reopen Run'
-                        : 'Complete Run'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.secondaryRunBtn,
-                      {
-                        backgroundColor: theme.surfaceElevated,
-                        borderColor: theme.border,
-                      },
-                    ]}
-                    onPress={() => openEditRunModal(activeRun)}
-                  >
-                    <VectorIcon
-                      name="edit"
-                      size={13}
-                      color={theme.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.secondaryRunBtnText,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
-                      Edit Run
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.secondaryRunBtn,
-                      {
-                        backgroundColor: theme.dangerSoft,
-                        borderColor: theme.danger,
-                      },
-                    ]}
-                    onPress={() => setRunPendingDelete(activeRun)}
-                  >
-                    <VectorIcon name="trash" size={13} color={theme.danger} />
-                    <Text
-                      style={[
-                        styles.secondaryRunBtnText,
-                        { color: theme.danger },
-                      ]}
-                    >
-                      Delete
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Run Progress Bar & Metrics */}
-                <View style={styles.progressSection}>
-                  <View style={styles.progressHeader}>
-                    <Text
-                      style={[
-                        styles.progressLabel,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
-                      Execution Progress ({activeRunMetrics.executedCount} of{' '}
-                      {activeRunMetrics.totalCases} executed)
-                    </Text>
-                    <Text
-                      style={[styles.progressPct, { color: theme.primary }]}
-                    >
-                      Pass Rate: {activeRunMetrics.passRate}%
-                    </Text>
-                  </View>
-                  <View
-                    style={[
-                      styles.progressTrack,
-                      { backgroundColor: theme.surfaceMuted },
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.progressFill,
-                        {
-                          width: `${
-                            activeRunMetrics.totalCases > 0
-                              ? Math.round(
-                                  (activeRunMetrics.executedCount /
-                                    activeRunMetrics.totalCases) *
-                                    100
-                                )
-                              : 0
-                          }%`,
-                          backgroundColor: theme.primary,
-                        },
-                      ]}
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.counterRow}>
-                  {[
-                    {
-                      label: 'Pass',
-                      filterKey: 'Passed',
-                      val: activeRunMetrics.passedCases,
-                      color: theme.success,
-                      bg: theme.successSoft,
-                    },
-                    {
-                      label: 'Fail',
-                      filterKey: 'Failed',
-                      val: activeRunMetrics.failedCases,
-                      color: theme.danger,
-                      bg: theme.dangerSoft,
-                    },
-                    {
-                      label: 'Blocked',
-                      filterKey: 'Blocked',
-                      val: activeRunMetrics.blockedCases,
-                      color: theme.warning,
-                      bg: theme.warningSoft,
-                    },
-                    {
-                      label: 'Not Run',
-                      filterKey: 'Untested',
-                      val: activeRunMetrics.notRunCases,
-                      color: theme.textSecondary,
-                      bg: theme.surfaceMuted,
-                    },
-                  ].map((item) => (
-                    <TouchableOpacity
-                      key={item.label}
-                      style={[
-                        styles.counterChip,
-                        {
-                          backgroundColor: item.bg,
-                          borderColor:
-                            resultFilter === item.filterKey
-                              ? item.color
-                              : 'transparent',
-                        },
-                      ]}
-                      onPress={() =>
-                        setResultFilter(
-                          resultFilter === item.filterKey
-                            ? 'All'
-                            : item.filterKey
-                        )
-                      }
-                    >
-                      <Text
-                        style={[styles.counterVal, { color: item.color }]}
-                      >
-                        {item.val}
-                      </Text>
-                      <Text
-                        style={[styles.counterLabel, { color: item.color }]}
-                      >
-                        {item.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-
-              {/* Search & Filter Row */}
-              <View style={styles.filterControls}>
-                <View
-                  style={[
-                    styles.searchBox,
-                    {
-                      backgroundColor: theme.surface,
-                      borderColor: theme.border,
-                    },
-                  ]}
-                >
-                  <VectorIcon name="search" size={16} color={theme.textMuted} />
-                  <TextInput
-                    style={[styles.searchInput, { color: theme.text }]}
-                    placeholder="Filter run test cases by ID, title, or notes..."
-                    placeholderTextColor={theme.textMuted}
-                    value={searchQuery}
-                    onChangeText={setSearchQuery}
-                  />
-                  {searchQuery.length > 0 && (
-                    <TouchableOpacity onPress={() => setSearchQuery('')}>
-                      <VectorIcon
-                        name="close"
-                        size={14}
-                        color={theme.textMuted}
-                      />
-                    </TouchableOpacity>
-                  )}
-                </View>
-
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.filterTabsScroll}
-                >
-                  {RUN_RESULT_FILTERS.map((f) => {
-                    const active = resultFilter === f;
-                    return (
-                      <TouchableOpacity
-                        key={f}
-                        onPress={() => setResultFilter(f)}
-                        style={[
-                          styles.filterPill,
-                          {
-                            backgroundColor: active
-                              ? theme.primary
-                              : theme.surface,
-                            borderColor: active ? theme.primary : theme.border,
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.filterPillText,
-                            {
-                              color: active ? '#FFFFFF' : theme.textSecondary,
-                            },
-                          ]}
-                        >
-                          {f === 'Untested' ? 'Not Run / Untested' : f}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              </View>
-
-              {/* Test Case Execution List */}
-              {filteredRunCases.map((tc) => {
-                const status = tc.runResult?.status || 'Untested';
-                const sMeta = getStatusMeta(status);
-                const linkedDefect = defects.find(
-                  (d) =>
-                    d.id === tc.runResult?.linkedDefectId ||
-                    d.defectId === tc.runResult?.linkedDefectId ||
-                    (d.linkedTestCaseId === tc.id &&
-                      d.linkedTestRunId === activeRun.id)
-                );
-
-                return (
-                  <View
-                    key={tc.id}
-                    style={[
-                      styles.execCaseCard,
-                      {
-                        backgroundColor: theme.surface,
-                        borderColor: theme.border,
-                      },
-                    ]}
-                  >
-                    <TouchableOpacity
-                      activeOpacity={0.85}
-                      onPress={() => openExecutionModal(tc)}
-                    >
-                      <View style={styles.execCardTop}>
-                        <View style={styles.execIdWrap}>
-                          <Text
-                            style={[
-                              styles.execId,
-                              {
-                                color: theme.primary,
-                                fontFamily: monoFontFamily,
-                              },
-                            ]}
-                          >
-                            {tc.id}
-                          </Text>
-                          <View
-                            style={[
-                              styles.execBadge,
-                              { backgroundColor: sMeta.bg },
-                            ]}
-                          >
-                            <VectorIcon
-                              name={sMeta.icon}
-                              size={11}
-                              color={sMeta.color}
-                            />
-                            <Text
-                              style={[
-                                styles.execBadgeText,
-                                { color: sMeta.color },
-                              ]}
-                            >
-                              {sMeta.webOutcome} ({sMeta.label})
-                            </Text>
-                          </View>
-                        </View>
-                        <Text
-                          style={[
-                            styles.execStepsCount,
-                            { color: theme.textMuted },
-                          ]}
-                        >
-                          {tc.steps?.length || 0} steps
-                        </Text>
-                      </View>
-
-                      <Text style={[styles.execTitle, { color: theme.text }]}>
-                        {tc.title}
-                      </Text>
-
-                      {tc.runResult?.actualResult ? (
-                        <View
-                          style={[
-                            styles.execNotesBox,
-                            {
-                              backgroundColor: theme.surfaceMuted,
-                              borderColor: theme.border,
-                            },
-                          ]}
-                        >
-                          <VectorIcon
-                            name="check"
-                            size={12}
-                            color={theme.primary}
-                          />
-                          <Text
-                            style={[
-                              styles.execNotesText,
-                              { color: theme.textSecondary },
-                            ]}
-                          >
-                            Actual: {tc.runResult.actualResult}
-                          </Text>
-                        </View>
-                      ) : null}
-
-                      {tc.runResult?.notes ? (
-                        <View
-                          style={[
-                            styles.execNotesBox,
-                            {
-                              backgroundColor: theme.surfaceMuted,
-                              borderColor: theme.border,
-                            },
-                          ]}
-                        >
-                          <VectorIcon
-                            name="info"
-                            size={12}
-                            color={theme.textSecondary}
-                          />
-                          <Text
-                            style={[
-                              styles.execNotesText,
-                              { color: theme.textSecondary },
-                            ]}
-                          >
-                            Notes: {tc.runResult.notes}
-                          </Text>
-                        </View>
-                      ) : null}
-
-                      {tc.runResult?.executedAt ? (
-                        <Text
-                          style={[
-                            styles.execTimestampText,
-                            { color: theme.textMuted },
-                          ]}
-                        >
-                          Executed{' '}
-                          {formatShortTimestamp(tc.runResult.executedAt)} by{' '}
-                          {tc.runResult.tester || 'QA Engineer'} •{' '}
-                          {tc.runResult.environment ||
-                            activeRun.environment ||
-                            'Staging'}
-                        </Text>
-                      ) : null}
-
-                      {linkedDefect && (
-                        <TouchableOpacity
-                          style={[
-                            styles.linkedBugChip,
-                            {
-                              backgroundColor: theme.dangerSoft,
-                              borderColor: theme.danger,
-                            },
-                          ]}
-                          onPress={() => {
-                            setSelectedDefectId(linkedDefect.id);
-                            setActiveTab('defects');
-                          }}
-                        >
-                          <VectorIcon
-                            name="alert"
-                            size={12}
-                            color={theme.danger}
-                          />
-                          <Text
-                            style={[
-                              styles.linkedBugText,
-                              { color: theme.danger },
-                            ]}
-                          >
-                            Linked Defect:{' '}
-                            {linkedDefect.defectId || linkedDefect.id} (
-                            {linkedDefect.status})
-                          </Text>
-                        </TouchableOpacity>
-                      )}
-                    </TouchableOpacity>
-
-                    {/* Quick Outcome Controls + Step Runner */}
-                    <View
-                      style={[
-                        styles.quickActionRow,
-                        { borderTopColor: theme.border },
-                      ]}
-                    >
-                      <View style={styles.quickStatusGroup}>
-                        <TouchableOpacity
-                          style={[
-                            styles.quickBtn,
-                            {
-                              backgroundColor:
-                                status === 'Passed'
-                                  ? theme.success
-                                  : theme.successSoft,
-                            },
-                          ]}
-                          onPress={() => handleQuickOutcome(tc, 'Passed')}
-                          disabled={isSubmittingExec}
-                        >
-                          <VectorIcon
-                            name="check"
-                            size={12}
-                            color={
-                              status === 'Passed' ? '#FFFFFF' : theme.success
-                            }
-                          />
-                          <Text
-                            style={[
-                              styles.quickBtnText,
-                              {
-                                color:
-                                  status === 'Passed'
-                                    ? '#FFFFFF'
-                                    : theme.success,
-                              },
-                            ]}
-                          >
-                            Pass
-                          </Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          style={[
-                            styles.quickBtn,
-                            {
-                              backgroundColor:
-                                status === 'Failed'
-                                  ? theme.danger
-                                  : theme.dangerSoft,
-                            },
-                          ]}
-                          onPress={() => handleQuickOutcome(tc, 'Failed')}
-                          disabled={isSubmittingExec}
-                        >
-                          <VectorIcon
-                            name="close"
-                            size={12}
-                            color={
-                              status === 'Failed' ? '#FFFFFF' : theme.danger
-                            }
-                          />
-                          <Text
-                            style={[
-                              styles.quickBtnText,
-                              {
-                                color:
-                                  status === 'Failed'
-                                    ? '#FFFFFF'
-                                    : theme.danger,
-                              },
-                            ]}
-                          >
-                            Fail
-                          </Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          style={[
-                            styles.quickBtn,
-                            {
-                              backgroundColor:
-                                status === 'Blocked'
-                                  ? theme.warning
-                                  : theme.warningSoft,
-                            },
-                          ]}
-                          onPress={() => handleQuickOutcome(tc, 'Blocked')}
-                          disabled={isSubmittingExec}
-                        >
-                          <VectorIcon
-                            name="alert"
-                            size={12}
-                            color={
-                              status === 'Blocked' ? '#FFFFFF' : theme.warning
-                            }
-                          />
-                          <Text
-                            style={[
-                              styles.quickBtnText,
-                              {
-                                color:
-                                  status === 'Blocked'
-                                    ? '#FFFFFF'
-                                    : theme.warning,
-                              },
-                            ]}
-                          >
-                            Block
-                          </Text>
-                        </TouchableOpacity>
-
-                        {status !== 'Untested' && (
-                          <TouchableOpacity
-                            style={[
-                              styles.quickBtn,
-                              {
-                                backgroundColor: theme.surfaceMuted,
-                              },
-                            ]}
-                            onPress={() => handleQuickOutcome(tc, 'Untested')}
-                            disabled={isSubmittingExec}
-                          >
-                            <VectorIcon
-                              name="refresh"
-                              size={12}
-                              color={theme.textSecondary}
-                            />
-                          </TouchableOpacity>
-                        )}
-                      </View>
-
-                      <View style={styles.quickRightGroup}>
-                        <TouchableOpacity
-                          style={[
-                            styles.logBugInlineBtn,
-                            {
-                              backgroundColor: theme.dangerSoft,
-                              borderColor: theme.danger,
-                            },
-                          ]}
-                          onPress={() => {
-                            startDefectFromFailedTest({
-                              testRun: activeRun,
-                              testCase: tc,
-                              actualResult:
-                                tc.runResult?.actualResult ||
-                                tc.runResult?.notes ||
-                                'Test failed during run execution.',
-                              notes: tc.runResult?.notes || '',
-                            });
-                          }}
-                        >
-                          <VectorIcon
-                            name="alert"
-                            size={12}
-                            color={theme.danger}
-                          />
-                          <Text
-                            style={[
-                              styles.logBugInlineText,
-                              { color: theme.danger },
-                            ]}
-                          >
-                            Defect
-                          </Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          style={[
-                            styles.stepRunnerBtn,
-                            {
-                              backgroundColor: theme.primarySoft,
-                              borderColor: theme.primary,
-                            },
-                          ]}
-                          onPress={() => openExecutionModal(tc)}
-                        >
-                          <VectorIcon
-                            name="chevron-right"
-                            size={12}
-                            color={theme.primary}
-                          />
-                          <Text
-                            style={[
-                              styles.stepRunnerBtnText,
-                              { color: theme.primary },
-                            ]}
-                          >
-                            Execute
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  </View>
-                );
-              })}
-
-              {filteredRunCases.length === 0 && (
-                <View
-                  style={[
-                    styles.emptyBox,
-                    {
-                      backgroundColor: theme.surface,
-                      borderColor: theme.border,
-                    },
-                  ]}
-                >
-                  <VectorIcon name="check" size={28} color={theme.textMuted} />
-                  <Text style={[styles.emptyTitle, { color: theme.text }]}>
-                    No Matching Test Cases in Run
-                  </Text>
-                  <Text
-                    style={[styles.emptySub, { color: theme.textSecondary }]}
-                  >
-                    Adjust your outcome filter or edit this run to include additional test cases.
-                  </Text>
-                </View>
-              )}
-
-              <View style={{ height: 32 }} />
-            </ScrollView>
-          ) : (
-            <View style={styles.emptyRunFallback}>
-              <View
-                style={[
-                  styles.emptyBox,
-                  {
-                    backgroundColor: theme.surface,
-                    borderColor: theme.border,
-                  },
-                ]}
-              >
-                <VectorIcon name="layers" size={32} color={theme.primary} />
-                <Text style={[styles.emptyTitle, { color: theme.text }]}>
-                  No Test Runs Yet
-                </Text>
-                <Text
-                  style={[styles.emptySub, { color: theme.textSecondary }]}
-                >
-                  Create a test run to select applicable test cases and record execution outcomes.
-                </Text>
-                <TouchableOpacity
-                  style={[
-                    styles.primaryActionBtn,
-                    { backgroundColor: theme.primary, marginTop: 10 },
-                  ]}
-                  onPress={openCreateRunModal}
-                >
-                  <VectorIcon name="plus" size={15} color="#FFFFFF" />
-                  <Text style={styles.primaryActionBtnText}>
-                    Create First Test Run
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-        </>
-      ) : (
-        /* Chronological Execution History View */
-        <ScrollView
-          style={styles.container}
-          contentContainerStyle={styles.contentContainer}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.filterControls}>
-            <View
-              style={[
-                styles.searchBox,
-                {
-                  backgroundColor: theme.surface,
-                  borderColor: theme.border,
-                },
-              ]}
-            >
-              <VectorIcon name="search" size={16} color={theme.textMuted} />
-              <TextInput
-                style={[styles.searchInput, { color: theme.text }]}
-                placeholder="Search execution history by case, run, tester, or notes..."
-                placeholderTextColor={theme.textMuted}
-                value={historySearchQuery}
-                onChangeText={setHistorySearchQuery}
-              />
-              {historySearchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setHistorySearchQuery('')}>
-                  <VectorIcon
-                    name="close"
-                    size={14}
-                    color={theme.textMuted}
-                  />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.filterTabsScroll}
-            >
-              {HISTORY_OUTCOME_FILTERS.map((outcome) => {
-                const active = historyOutcomeFilter === outcome;
-                return (
-                  <TouchableOpacity
-                    key={outcome}
-                    onPress={() => setHistoryOutcomeFilter(outcome)}
-                    style={[
-                      styles.filterPill,
-                      {
-                        backgroundColor: active
-                          ? theme.primary
-                          : theme.surface,
-                        borderColor: active ? theme.primary : theme.border,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.filterPillText,
-                        {
-                          color: active ? '#FFFFFF' : theme.textSecondary,
-                        },
-                      ]}
-                    >
-                      {outcome}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-
-          {filteredExecutions.map((exec) => {
-            const sMeta = getStatusMeta(exec.status);
-            const runObj = testRuns.find((r) => r.id === exec.runId);
-            const linkedDefect = defects.find(
-              (d) =>
-                d.id === exec.linkedDefectId ||
-                d.defectId === exec.linkedDefectId ||
-                d.linkedExecutionId === exec.id
-            );
-
+            {
+              key: 'suites',
+              label: `Suites (${suites.length})`,
+              icon: 'folder',
+            },
+            {
+              key: 'plan',
+              label: `Test Plan`,
+              icon: 'info',
+            },
+          ].map((tab) => {
+            const active = subTab === tab.key;
             return (
-              <View
-                key={exec.id}
+              <Pressable
+                key={tab.key}
+                onPress={() => setSubTab(tab.key)}
                 style={[
-                  styles.execCaseCard,
-                  {
-                    backgroundColor: theme.surface,
-                    borderColor: theme.border,
+                  styles.segmentBtn,
+                  active && {
+                    backgroundColor: colors.primary,
                   },
                 ]}
               >
-                <View style={styles.execCardTop}>
-                  <View style={styles.execIdWrap}>
-                    <Text
-                      style={[
-                        styles.execId,
-                        { color: theme.primary, fontFamily: monoFontFamily },
-                      ]}
-                    >
-                      {exec.caseId || exec.testCaseId}
-                    </Text>
-                    <View
-                      style={[
-                        styles.execBadge,
-                        { backgroundColor: sMeta.bg },
-                      ]}
-                    >
-                      <VectorIcon
-                        name={sMeta.icon}
-                        size={11}
-                        color={sMeta.color}
-                      />
-                      <Text
-                        style={[
-                          styles.execBadgeText,
-                          { color: sMeta.color },
-                        ]}
-                      >
-                        {sMeta.webOutcome}
-                      </Text>
-                    </View>
-                    {exec.runId ? (
-                      <TouchableOpacity
-                        style={[
-                          styles.historyRunBadge,
-                          {
-                            backgroundColor: theme.surfaceMuted,
-                            borderColor: theme.border,
-                          },
-                        ]}
-                        onPress={() => {
-                          setSelectedTestRunId(exec.runId);
-                          setActiveViewMode('runs');
-                        }}
-                      >
-                        <Text
-                          style={[
-                            styles.historyRunBadgeText,
-                            { color: theme.textSecondary },
-                          ]}
-                        >
-                          {runObj ? `${runObj.id} • ${runObj.name}` : exec.runId}
-                        </Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-                  <Text
-                    style={[
-                      styles.execStepsCount,
-                      { color: theme.textMuted },
-                    ]}
-                  >
-                    {formatShortTimestamp(exec.executedAt)}
-                  </Text>
-                </View>
-
-                <Text style={[styles.execTitle, { color: theme.text }]}>
-                  {exec.caseTitle || exec.caseId || exec.testCaseId}
-                </Text>
-
-                {exec.actualResult ? (
-                  <View
-                    style={[
-                      styles.execNotesBox,
-                      {
-                        backgroundColor: theme.surfaceMuted,
-                        borderColor: theme.border,
-                      },
-                    ]}
-                  >
-                    <VectorIcon name="check" size={12} color={theme.primary} />
-                    <Text
-                      style={[
-                        styles.execNotesText,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
-                      Actual: {exec.actualResult}
-                    </Text>
-                  </View>
-                ) : null}
-
-                {exec.notes ? (
-                  <View
-                    style={[
-                      styles.execNotesBox,
-                      {
-                        backgroundColor: theme.surfaceMuted,
-                        borderColor: theme.border,
-                      },
-                    ]}
-                  >
-                    <VectorIcon
-                      name="info"
-                      size={12}
-                      color={theme.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.execNotesText,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
-                      Notes: {exec.notes}
-                    </Text>
-                  </View>
-                ) : null}
-
+                <VectorIcon
+                  name={tab.icon}
+                  size={13}
+                  color={active ? '#ffffff' : colors.textSecondary}
+                />
                 <Text
                   style={[
-                    styles.execTimestampText,
-                    { color: theme.textMuted },
+                    styles.segmentBtnText,
+                    { color: active ? '#ffffff' : colors.textSecondary },
                   ]}
+                  numberOfLines={1}
                 >
-                  Tester: {exec.tester || 'QA Engineer'} • Env:{' '}
-                  {exec.environment || 'Staging'}
-                  {exec.device ? ` • ${exec.device}` : ''}
-                  {exec.buildVersion ? ` • Build ${exec.buildVersion}` : ''}
+                  {tab.label}
                 </Text>
-
-                {linkedDefect && (
-                  <TouchableOpacity
-                    style={[
-                      styles.linkedBugChip,
-                      {
-                        backgroundColor: theme.dangerSoft,
-                        borderColor: theme.danger,
-                      },
-                    ]}
-                    onPress={() => {
-                      setSelectedDefectId(linkedDefect.id);
-                      setActiveTab('defects');
-                    }}
-                  >
-                    <VectorIcon name="alert" size={12} color={theme.danger} />
-                    <Text
-                      style={[styles.linkedBugText, { color: theme.danger }]}
-                    >
-                      Linked Defect: {linkedDefect.defectId || linkedDefect.id}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
+              </Pressable>
             );
           })}
+        </View>
 
-          {filteredExecutions.length === 0 && (
+        {/* Error / HTTP 409 Optimistic Concurrency Conflict Banner */}
+        {(projectDataError || projectDataConflict) && (
+          <View
+            style={[
+              styles.errorBanner,
+              {
+                backgroundColor: colors.dangerSoft,
+                borderColor: colors.danger,
+              },
+            ]}
+          >
+            <View style={styles.errorBannerTop}>
+              <VectorIcon name="alert" size={16} color={colors.danger} />
+              <Text style={[styles.errorBannerText, { color: colors.danger }]}>
+                {projectDataConflict
+                  ? projectDataConflict.message
+                  : projectDataError}
+              </Text>
+            </View>
+            <View style={styles.errorBannerActions}>
+              <Pressable
+                onPress={reloadProjectDataFromBackend}
+                style={[
+                  styles.errorBannerBtn,
+                  { backgroundColor: colors.danger },
+                ]}
+              >
+                <Text style={styles.errorBannerBtnText}>
+                  Reload Latest from Server
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={clearProjectDataError}
+                style={[
+                  styles.errorBannerBtnOutline,
+                  { borderColor: colors.danger },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.errorBannerBtnOutlineText,
+                    { color: colors.danger },
+                  ]}
+                >
+                  Dismiss
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+      </View>
+
+      {/* ===================================================================
+          SUB-VIEW 1: TEST CASES
+         =================================================================== */}
+      {subTab === 'cases' && (
+        <>
+          <View
+            style={[
+              styles.topSearchWrap,
+              {
+                backgroundColor: colors.surface,
+                borderBottomColor: colors.border,
+              },
+            ]}
+          >
+            <View style={styles.searchBarRow}>
+              <View
+                style={[
+                  styles.searchInputBox,
+                  {
+                    backgroundColor: colors.surfaceMuted,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <VectorIcon name="search" size={15} color={colors.textMuted} />
+                <TextInput
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  placeholder="Search ID, title, suite, tag..."
+                  placeholderTextColor={colors.textMuted}
+                  style={[styles.searchInput, { color: colors.text }]}
+                />
+                {searchQuery.length > 0 && (
+                  <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
+                    <VectorIcon
+                      name="close"
+                      size={14}
+                      color={colors.textMuted}
+                    />
+                  </Pressable>
+                )}
+              </View>
+              <Pressable
+                onPress={() => openCreateCaseModal()}
+                style={({ pressed }) => [
+                  styles.addCaseBtn,
+                  {
+                    backgroundColor: colors.primary,
+                    opacity: pressed ? 0.85 : 1,
+                  },
+                ]}
+              >
+                <VectorIcon name="plus" size={14} color="#ffffff" />
+                <Text style={styles.addCaseBtnText}>New Case</Text>
+              </Pressable>
+            </View>
+
+            {/* Suite Filter Chips */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.suiteScrollContent}
+            >
+              <Pressable
+                onPress={() => setSelectedSuiteId('all')}
+                style={[
+                  styles.suiteChip,
+                  {
+                    backgroundColor:
+                      selectedSuiteId === 'all'
+                        ? colors.primary
+                        : colors.surfaceMuted,
+                    borderColor:
+                      selectedSuiteId === 'all' ? colors.primary : colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.suiteChipText,
+                    {
+                      color:
+                        selectedSuiteId === 'all'
+                          ? '#ffffff'
+                          : colors.textSecondary,
+                    },
+                  ]}
+                >
+                  All Suites ({testCases.length})
+                </Text>
+              </Pressable>
+
+              {suites.map((suite) => {
+                const count = suiteStatsMap[suite.id]?.total || 0;
+                const active = selectedSuiteId === suite.id;
+                return (
+                  <Pressable
+                    key={suite.id}
+                    onPress={() => setSelectedSuiteId(suite.id)}
+                    style={[
+                      styles.suiteChip,
+                      {
+                        backgroundColor: active
+                          ? colors.primary
+                          : colors.surfaceMuted,
+                        borderColor: active ? colors.primary : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.suiteChipText,
+                        { color: active ? '#ffffff' : colors.textSecondary },
+                      ]}
+                    >
+                      {suite.name} ({count})
+                    </Text>
+                  </Pressable>
+                );
+              })}
+
+              <Pressable
+                onPress={openCreateSuiteModal}
+                style={[
+                  styles.suiteChip,
+                  {
+                    backgroundColor: colors.primarySoft,
+                    borderColor: colors.primary,
+                  },
+                ]}
+              >
+                <Text style={[styles.suiteChipText, { color: colors.primary }]}>
+                  + Suite
+                </Text>
+              </Pressable>
+            </ScrollView>
+
+            {/* Priority & Status Filter Row */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterRowContent}
+            >
+              {['all', ...priorities].map((p) => {
+                const active = selectedPriority === p;
+                return (
+                  <Pressable
+                    key={`prio-${p}`}
+                    onPress={() => setSelectedPriority(p)}
+                    style={[
+                      styles.miniFilterChip,
+                      {
+                        backgroundColor: active
+                          ? colors.primarySoft
+                          : 'transparent',
+                        borderColor: active ? colors.primary : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.miniFilterText,
+                        { color: active ? colors.primary : colors.textMuted },
+                      ]}
+                    >
+                      {p === 'all' ? 'All Priority' : p}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+
+              <View
+                style={[
+                  styles.filterDivider,
+                  { backgroundColor: colors.border },
+                ]}
+              />
+
+              {['all', ...executionStatuses].map((st) => {
+                const active = selectedStatus === st;
+                return (
+                  <Pressable
+                    key={`status-${st}`}
+                    onPress={() => setSelectedStatus(st)}
+                    style={[
+                      styles.miniFilterChip,
+                      {
+                        backgroundColor: active
+                          ? colors.primarySoft
+                          : 'transparent',
+                        borderColor: active ? colors.primary : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.miniFilterText,
+                        { color: active ? colors.primary : colors.textMuted },
+                      ]}
+                    >
+                      {st === 'all' ? 'All Status' : st}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+
+              <View
+                style={[
+                  styles.filterDivider,
+                  { backgroundColor: colors.border },
+                ]}
+              />
+
+              {['all', ...testTypes].map((tp) => {
+                const active = selectedType === tp;
+                return (
+                  <Pressable
+                    key={`type-${tp}`}
+                    onPress={() => setSelectedType(tp)}
+                    style={[
+                      styles.miniFilterChip,
+                      {
+                        backgroundColor: active
+                          ? colors.primarySoft
+                          : 'transparent',
+                        borderColor: active ? colors.primary : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.miniFilterText,
+                        { color: active ? colors.primary : colors.textMuted },
+                      ]}
+                    >
+                      {tp === 'all' ? 'All Types' : tp}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+
+          <ScrollView
+            style={styles.listScroll}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.resultsBar}>
+              <Text style={[styles.resultsCount, { color: colors.textMuted }]}>
+                Showing {filteredTestCases.length} of {testCases.length} test
+                cases
+              </Text>
+              {(selectedSuiteId !== 'all' ||
+                selectedPriority !== 'all' ||
+                selectedStatus !== 'all' ||
+                selectedType !== 'all' ||
+                searchQuery.trim() !== '') && (
+                <Pressable
+                  onPress={() => {
+                    setSelectedSuiteId('all');
+                    setSelectedPriority('all');
+                    setSelectedStatus('all');
+                    setSelectedType('all');
+                    setSearchQuery('');
+                  }}
+                >
+                  <Text style={[styles.resetText, { color: colors.primary }]}>
+                    Reset Filters
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+
+            {filteredTestCases.length === 0 ? (
+              <View
+                style={[
+                  styles.emptyCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <VectorIcon
+                  name="layers"
+                  size={28}
+                  color={colors.primary}
+                  style={{ marginBottom: 8 }}
+                />
+                <Text
+                  style={[styles.emptyTitle, { color: colors.text }]}
+                >
+                  {testCases.length === 0
+                    ? 'No Test Cases in This Project Yet'
+                    : 'No Matching Test Cases'}
+                </Text>
+                <Text
+                  style={[styles.emptySub, { color: colors.textSecondary }]}
+                >
+                  {testCases.length === 0
+                    ? 'Create your first test case with preconditions, test steps, and expected results.'
+                    : 'Adjust your search query or filter criteria, or create a new test case.'}
+                </Text>
+                <Pressable
+                  onPress={() => openCreateCaseModal()}
+                  style={[
+                    styles.emptyCta,
+                    { backgroundColor: colors.primary },
+                  ]}
+                >
+                  <Text style={styles.emptyCtaText}>+ Create Test Case</Text>
+                </Pressable>
+              </View>
+            ) : (
+              filteredTestCases.map((tc) => {
+                const prioStyle = getPriorityBadgeStyle(tc.priority);
+                const statusStyle = getStatusBadgeStyle(tc.lastStatus);
+                return (
+                  <Pressable
+                    key={tc.id}
+                    onPress={() => setSelectedTestCaseId(tc.id)}
+                    style={({ pressed }) => [
+                      styles.caseCard,
+                      {
+                        backgroundColor: colors.surface,
+                        borderColor: colors.border,
+                        opacity: pressed ? 0.92 : 1,
+                      },
+                    ]}
+                  >
+                    <View style={styles.caseTopRow}>
+                      <View style={styles.caseIdBadgeRow}>
+                        <Text
+                          style={[
+                            styles.caseId,
+                            {
+                              color: colors.primary,
+                              fontFamily: monoFontFamily,
+                            },
+                          ]}
+                        >
+                          {tc.testCaseId || tc.id}
+                        </Text>
+                        <View
+                          style={[
+                            styles.prioBadge,
+                            {
+                              backgroundColor: prioStyle.bg,
+                              borderColor: prioStyle.border,
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.prioBadgeText,
+                              { color: prioStyle.text },
+                            ]}
+                          >
+                            {tc.priority}
+                          </Text>
+                        </View>
+                      </View>
+                      <View
+                        style={[
+                          styles.statusBadge,
+                          { backgroundColor: statusStyle.bg },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.statusBadgeText,
+                            { color: statusStyle.text },
+                          ]}
+                        >
+                          {tc.lastStatus}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <Text
+                      style={[styles.caseTitle, { color: colors.text }]}
+                    >
+                      {tc.title}
+                    </Text>
+
+                    {!!tc.description && (
+                      <Text
+                        style={[
+                          styles.caseDesc,
+                          { color: colors.textSecondary },
+                        ]}
+                        numberOfLines={2}
+                      >
+                        {tc.description}
+                      </Text>
+                    )}
+
+                    <View style={styles.caseFooterRow}>
+                      <View style={styles.caseMetaRow}>
+                        <View
+                          style={[
+                            styles.metaPill,
+                            { backgroundColor: colors.surfaceMuted },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.metaPillText,
+                              { color: colors.textSecondary },
+                            ]}
+                          >
+                            {tc.suiteName}
+                          </Text>
+                        </View>
+                        <View
+                          style={[
+                            styles.metaPill,
+                            { backgroundColor: colors.surfaceMuted },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.metaPillText,
+                              { color: colors.textMuted },
+                            ]}
+                          >
+                            {tc.testType || tc.category}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text
+                        style={[
+                          styles.stepsCountText,
+                          { color: colors.textMuted },
+                        ]}
+                      >
+                        {(tc.steps || []).length} steps
+                      </Text>
+                    </View>
+
+                    {/* Quick Card Actions: Move Suite | Edit | Delete */}
+                    <View
+                      style={[
+                        styles.cardActionsBar,
+                        { borderTopColor: colors.border },
+                      ]}
+                    >
+                      {suites.length > 1 && (
+                        <Pressable
+                          onPress={(e) => {
+                            e.stopPropagation?.();
+                            openMoveCaseModal(tc);
+                          }}
+                          style={[
+                            styles.cardMiniBtn,
+                            {
+                              backgroundColor: colors.surfaceMuted,
+                              borderColor: colors.border,
+                            },
+                          ]}
+                        >
+                          <VectorIcon
+                            name="switch"
+                            size={12}
+                            color={colors.textSecondary}
+                          />
+                          <Text
+                            style={[
+                              styles.cardMiniBtnText,
+                              { color: colors.textSecondary },
+                            ]}
+                          >
+                            Move Suite
+                          </Text>
+                        </Pressable>
+                      )}
+                      <Pressable
+                        onPress={(e) => {
+                          e.stopPropagation?.();
+                          openEditCaseModal(tc);
+                        }}
+                        style={[
+                          styles.cardMiniBtn,
+                          {
+                            backgroundColor: colors.surfaceMuted,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                      >
+                        <VectorIcon
+                          name="edit"
+                          size={12}
+                          color={colors.primary}
+                        />
+                        <Text
+                          style={[
+                            styles.cardMiniBtnText,
+                            { color: colors.primary },
+                          ]}
+                        >
+                          Edit
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={(e) => {
+                          e.stopPropagation?.();
+                          setDeletingCase(tc);
+                        }}
+                        style={[
+                          styles.cardMiniBtn,
+                          {
+                            backgroundColor: colors.dangerSoft,
+                            borderColor: colors.danger,
+                          },
+                        ]}
+                      >
+                        <VectorIcon
+                          name="trash"
+                          size={12}
+                          color={colors.danger}
+                        />
+                        <Text
+                          style={[
+                            styles.cardMiniBtnText,
+                            { color: colors.danger },
+                          ]}
+                        >
+                          Delete
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </Pressable>
+                );
+              })
+            )}
+          </ScrollView>
+        </>
+      )}
+
+      {/* ===================================================================
+          SUB-VIEW 2: TEST SUITES
+         =================================================================== */}
+      {subTab === 'suites' && (
+        <ScrollView
+          style={styles.listScroll}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View
+            style={[
+              styles.sectionBannerCard,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
+            <View style={{ flex: 1 }}>
+              <Text
+                style={[
+                  styles.sectionBannerTitle,
+                  { color: colors.text },
+                ]}
+              >
+                Test Suites ({suites.length})
+              </Text>
+              <Text
+                style={[
+                  styles.sectionBannerSub,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                Organize project test cases into logical functional, regression,
+                or security suites.
+              </Text>
+            </View>
+            <Pressable
+              onPress={openCreateSuiteModal}
+              style={[
+                styles.primaryActionBtn,
+                { backgroundColor: colors.primary },
+              ]}
+            >
+              <VectorIcon name="plus" size={14} color="#ffffff" />
+              <Text style={styles.primaryActionBtnText}>New Suite</Text>
+            </Pressable>
+          </View>
+
+          {suites.length === 0 ? (
             <View
               style={[
-                styles.emptyBox,
+                styles.emptyCard,
                 {
-                  backgroundColor: theme.surface,
-                  borderColor: theme.border,
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
                 },
               ]}
             >
-              <VectorIcon name="calendar" size={28} color={theme.textMuted} />
-              <Text style={[styles.emptyTitle, { color: theme.text }]}>
-                No Execution Records Found
+              <VectorIcon
+                name="folder"
+                size={28}
+                color={colors.primary}
+                style={{ marginBottom: 8 }}
+              />
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                No Test Suites Defined Yet
               </Text>
-              <Text style={[styles.emptySub, { color: theme.textSecondary }]}>
-                Execute test cases inside a Test Run to populate the project execution log.
+              <Text style={[styles.emptySub, { color: colors.textSecondary }]}>
+                Create a test suite to organize your test cases by feature
+                module or testing phase.
               </Text>
+              <Pressable
+                onPress={openCreateSuiteModal}
+                style={[styles.emptyCta, { backgroundColor: colors.primary }]}
+              >
+                <Text style={styles.emptyCtaText}>+ Create First Suite</Text>
+              </Pressable>
             </View>
+          ) : (
+            suites.map((suite) => {
+              const stats = suiteStatsMap[suite.id] || {
+                total: 0,
+                passed: 0,
+                failed: 0,
+                blocked: 0,
+                untested: 0,
+              };
+              const linkedPhase = planPhases.find(
+                (p) => p.id === suite.phaseId
+              );
+              return (
+                <View
+                  key={suite.id}
+                  style={[
+                    styles.suiteDetailCard,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View style={styles.suiteDetailTop}>
+                    <View style={{ flex: 1, gap: 4 }}>
+                      <View style={styles.suiteBadgeRow}>
+                        <View
+                          style={[
+                            styles.metaPill,
+                            { backgroundColor: colors.primarySoft },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.metaPillText,
+                              { color: colors.primary },
+                            ]}
+                          >
+                            {suite.category || 'Functional'}
+                          </Text>
+                        </View>
+                        {linkedPhase && (
+                          <View
+                            style={[
+                              styles.metaPill,
+                              { backgroundColor: colors.surfaceMuted },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.metaPillText,
+                                { color: colors.textSecondary },
+                              ]}
+                            >
+                              Phase: {linkedPhase.name}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text
+                        style={[
+                          styles.suiteDetailName,
+                          { color: colors.text },
+                        ]}
+                      >
+                        {suite.name}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.caseCountBadge,
+                        {
+                          backgroundColor: colors.surfaceMuted,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.caseCountNumber,
+                          { color: colors.primary },
+                        ]}
+                      >
+                        {stats.total}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.caseCountLabel,
+                          { color: colors.textMuted },
+                        ]}
+                      >
+                        {stats.total === 1 ? 'Case' : 'Cases'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text
+                    style={[
+                      styles.suiteDetailDesc,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    {suite.description || 'No suite description provided.'}
+                  </Text>
+
+                  {Array.isArray(suite.tags) && suite.tags.length > 0 && (
+                    <View style={styles.suiteTagsRow}>
+                      {suite.tags.map((tag, idx) => (
+                        <View
+                          key={`${suite.id}-tag-${idx}`}
+                          style={[
+                            styles.metaPill,
+                            { backgroundColor: colors.surfaceMuted },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.metaPillText,
+                              { color: colors.textMuted },
+                            ]}
+                          >
+                            #{tag}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* Suite Status Breakdown */}
+                  <View
+                    style={[
+                      styles.suiteStatsRow,
+                      { backgroundColor: colors.surfaceMuted },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.suiteStatItem, { color: colors.success }]}
+                    >
+                      Passed: {stats.passed}
+                    </Text>
+                    <Text
+                      style={[styles.suiteStatItem, { color: colors.danger }]}
+                    >
+                      Failed: {stats.failed}
+                    </Text>
+                    <Text
+                      style={[styles.suiteStatItem, { color: colors.warning }]}
+                    >
+                      Blocked: {stats.blocked}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.suiteStatItem,
+                        { color: colors.textMuted },
+                      ]}
+                    >
+                      Untested: {stats.untested}
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.cardActionsBar,
+                      { borderTopColor: colors.border },
+                    ]}
+                  >
+                    <Pressable
+                      onPress={() => {
+                        setSelectedSuiteId(suite.id);
+                        setSubTab('cases');
+                      }}
+                      style={[
+                        styles.cardMiniBtn,
+                        {
+                          backgroundColor: colors.primarySoft,
+                          borderColor: colors.primary,
+                        },
+                      ]}
+                    >
+                      <VectorIcon
+                        name="layers"
+                        size={12}
+                        color={colors.primary}
+                      />
+                      <Text
+                        style={[
+                          styles.cardMiniBtnText,
+                          { color: colors.primary },
+                        ]}
+                      >
+                        View Cases ({stats.total})
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => openCreateCaseModal(suite.id)}
+                      style={[
+                        styles.cardMiniBtn,
+                        {
+                          backgroundColor: colors.surfaceMuted,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      <VectorIcon
+                        name="plus"
+                        size={12}
+                        color={colors.text}
+                      />
+                      <Text
+                        style={[
+                          styles.cardMiniBtnText,
+                          { color: colors.text },
+                        ]}
+                      >
+                        Add Case
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => openEditSuiteModal(suite)}
+                      style={[
+                        styles.cardMiniBtn,
+                        {
+                          backgroundColor: colors.surfaceMuted,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      <VectorIcon
+                        name="edit"
+                        size={12}
+                        color={colors.textSecondary}
+                      />
+                      <Text
+                        style={[
+                          styles.cardMiniBtnText,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Edit
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => openDeleteSuiteConfirm(suite)}
+                      style={[
+                        styles.cardMiniBtn,
+                        {
+                          backgroundColor: colors.dangerSoft,
+                          borderColor: colors.danger,
+                        },
+                      ]}
+                    >
+                      <VectorIcon
+                        name="trash"
+                        size={12}
+                        color={colors.danger}
+                      />
+                      <Text
+                        style={[
+                          styles.cardMiniBtnText,
+                          { color: colors.danger },
+                        ]}
+                      >
+                        Delete
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })
           )}
         </ScrollView>
       )}
 
-      {/* STEP-BY-STEP EXECUTION RUNNER MODAL */}
+      {/* ===================================================================
+          SUB-VIEW 3: TEST PLAN
+         =================================================================== */}
+      {subTab === 'plan' && (
+        <ScrollView
+          style={styles.listScroll}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Test Plan Master Header Card */}
+          <View
+            style={[
+              styles.planHeaderCard,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.planHeaderTop}>
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text
+                  style={[
+                    styles.planIdLabel,
+                    { color: colors.primary, fontFamily: monoFontFamily },
+                  ]}
+                >
+                  {testPlan?.id || `plan_${activeProject?.id || 'project'}`}
+                </Text>
+                <Text
+                  style={[styles.planTitle, { color: colors.text }]}
+                >
+                  {testPlan?.name ||
+                    `${activeProject?.name || 'Project'} Master Test Plan`}
+                </Text>
+              </View>
+              <Pressable
+                onPress={openEditPlanModal}
+                style={[
+                  styles.primaryActionBtn,
+                  { backgroundColor: colors.primary },
+                ]}
+              >
+                <VectorIcon name="edit" size={14} color="#ffffff" />
+                <Text style={styles.primaryActionBtnText}>Edit Plan</Text>
+              </Pressable>
+            </View>
+
+            <View
+              style={[
+                styles.planSummaryStrip,
+                { backgroundColor: colors.surfaceMuted },
+              ]}
+            >
+              <View style={styles.planMetricBox}>
+                <Text
+                  style={[styles.planMetricVal, { color: colors.text }]}
+                >
+                  {planPhases.length}
+                </Text>
+                <Text
+                  style={[styles.planMetricLbl, { color: colors.textMuted }]}
+                >
+                  Phases
+                </Text>
+              </View>
+              <View style={styles.planMetricBox}>
+                <Text
+                  style={[styles.planMetricVal, { color: colors.text }]}
+                >
+                  {suites.length}
+                </Text>
+                <Text
+                  style={[styles.planMetricLbl, { color: colors.textMuted }]}
+                >
+                  Suites
+                </Text>
+              </View>
+              <View style={styles.planMetricBox}>
+                <Text
+                  style={[styles.planMetricVal, { color: colors.text }]}
+                >
+                  {testCases.length}
+                </Text>
+                <Text
+                  style={[styles.planMetricLbl, { color: colors.textMuted }]}
+                >
+                  Test Cases
+                </Text>
+              </View>
+              <View style={styles.planMetricBox}>
+                <Text style={[styles.planMetricVal, { color: colors.primary }]}>
+                  {populatedPlanSections.length}/{planDocSections.length}
+                </Text>
+                <Text
+                  style={[styles.planMetricLbl, { color: colors.textMuted }]}
+                >
+                  Sections
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Testing Phases Section (`testPlan.phases`) */}
+          <View
+            style={[
+              styles.planSectionCard,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.planSectionHeader}>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.planSectionTitle,
+                    { color: colors.text },
+                  ]}
+                >
+                  Testing Phases ({planPhases.length})
+                </Text>
+                <Text
+                  style={[
+                    styles.planSectionSub,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Define execution milestones (e.g. Smoke, Functional,
+                  Regression, Release Gate).
+                </Text>
+              </View>
+              <Pressable
+                onPress={openCreatePhaseModal}
+                style={[
+                  styles.secondaryActionBtn,
+                  {
+                    backgroundColor: colors.primarySoft,
+                    borderColor: colors.primary,
+                  },
+                ]}
+              >
+                <VectorIcon name="plus" size={12} color={colors.primary} />
+                <Text
+                  style={[
+                    styles.secondaryActionBtnText,
+                    { color: colors.primary },
+                  ]}
+                >
+                  Add Phase
+                </Text>
+              </Pressable>
+            </View>
+
+            {planPhases.length === 0 ? (
+              <View
+                style={[
+                  styles.inlineEmptyBox,
+                  {
+                    backgroundColor: colors.surfaceMuted,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.inlineEmptyText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  No testing phases added yet. Add phases to structure your test
+                  plan milestones.
+                </Text>
+              </View>
+            ) : (
+              planPhases.map((phase, idx) => {
+                const phaseSuites = suites.filter(
+                  (s) => s.phaseId === phase.id
+                );
+                const phaseCasesCount = phaseSuites.reduce(
+                  (acc, s) => acc + (suiteStatsMap[s.id]?.total || 0),
+                  0
+                );
+                return (
+                  <View
+                    key={phase.id}
+                    style={[
+                      styles.phaseRowCard,
+                      {
+                        backgroundColor: colors.surfaceMuted,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.phaseOrderCircle,
+                        { backgroundColor: colors.primary },
+                      ]}
+                    >
+                      <Text style={styles.phaseOrderText}>{idx + 1}</Text>
+                    </View>
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text
+                        style={[
+                          styles.phaseRowName,
+                          { color: colors.text },
+                        ]}
+                      >
+                        {phase.name}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.phaseRowDesc,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        {phase.description || 'No phase description'}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.phaseRowStats,
+                          { color: colors.textMuted },
+                        ]}
+                      >
+                        {phaseSuites.length} suites · {phaseCasesCount} cases
+                      </Text>
+                    </View>
+                    <View style={styles.phaseRowActions}>
+                      <Pressable
+                        onPress={() => openEditPhaseModal(phase)}
+                        style={[
+                          styles.iconSquareBtn,
+                          {
+                            backgroundColor: colors.surface,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                      >
+                        <VectorIcon
+                          name="edit"
+                          size={13}
+                          color={colors.primary}
+                        />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => setDeletingPhase(phase)}
+                        style={[
+                          styles.iconSquareBtn,
+                          {
+                            backgroundColor: colors.dangerSoft,
+                            borderColor: colors.danger,
+                          },
+                        ]}
+                      >
+                        <VectorIcon
+                          name="trash"
+                          size={13}
+                          color={colors.danger}
+                        />
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
+
+          {/* Test Plan Documentation & Criteria Sections */}
+          <View
+            style={[
+              styles.planSectionCard,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.planSectionHeader}>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.planSectionTitle,
+                    { color: colors.text },
+                  ]}
+                >
+                  Test Plan Specification
+                </Text>
+                <Text
+                  style={[
+                    styles.planSectionSub,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Objectives, scope, entry/exit criteria, environment, and
+                  deliverables.
+                </Text>
+              </View>
+            </View>
+
+            {populatedPlanSections.length === 0 ? (
+              <View
+                style={[
+                  styles.inlineEmptyBox,
+                  {
+                    backgroundColor: colors.surfaceMuted,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.inlineEmptyText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  No test plan specification details have been authored yet. Tap
+                  &quot;Edit Plan&quot; to document objectives, scope, strategy,
+                  and criteria.
+                </Text>
+                <Pressable
+                  onPress={openEditPlanModal}
+                  style={[
+                    styles.emptyCta,
+                    { backgroundColor: colors.primary, marginTop: 8 },
+                  ]}
+                >
+                  <Text style={styles.emptyCtaText}>
+                    Author Test Plan Details
+                  </Text>
+                </Pressable>
+              </View>
+            ) : (
+              planDocSections.map((sec) => {
+                const hasVal = sec.value && String(sec.value).trim();
+                return (
+                  <View
+                    key={sec.key}
+                    style={[
+                      styles.planDocBlock,
+                      {
+                        backgroundColor: colors.surfaceMuted,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.planDocLabel,
+                        { color: colors.textMuted },
+                      ]}
+                    >
+                      {sec.label}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.planDocValue,
+                        {
+                          color: hasVal
+                            ? colors.text
+                            : colors.textMuted,
+                          fontStyle: hasVal ? 'normal' : 'italic',
+                        },
+                      ]}
+                    >
+                      {hasVal ? sec.value : 'Not specified'}
+                    </Text>
+                  </View>
+                );
+              })
+            )}
+          </View>
+        </ScrollView>
+      )}
+
+      {/* ===================================================================
+          MODAL 1: TEST CASE DETAIL INSPECTION
+         =================================================================== */}
       <Modal
-        visible={!!executingCase}
+        visible={!!selectedTestCase}
         animationType="slide"
         transparent
-        onRequestClose={() => setExecutingCaseId(null)}
+        onRequestClose={() => setSelectedTestCaseId(null)}
       >
-        <View
-          style={[styles.modalOverlay, { backgroundColor: theme.overlay }]}
-        >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        <View style={styles.modalOverlay}>
+          <View
             style={[
               styles.modalSheet,
               {
-                backgroundColor: theme.surface,
-                borderColor: theme.border,
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
               },
             ]}
           >
-            {executingCase && (
+            {selectedTestCase && (
               <>
                 <View
                   style={[
                     styles.modalHeader,
-                    { borderBottomColor: theme.border },
+                    { borderBottomColor: colors.border },
                   ]}
                 >
-                  <View style={{ flex: 1, paddingRight: 10 }}>
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.modalIdRow}>
+                      <Text
+                        style={[
+                          styles.modalCaseId,
+                          {
+                            color: colors.primary,
+                            fontFamily: monoFontFamily,
+                          },
+                        ]}
+                      >
+                        {selectedTestCase.testCaseId || selectedTestCase.id}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.modalSuiteName,
+                          { color: colors.textMuted },
+                        ]}
+                      >
+                        · {selectedTestCase.suiteName}
+                      </Text>
+                    </View>
                     <Text
                       style={[
-                        styles.modalCaseId,
-                        { color: theme.primary, fontFamily: monoFontFamily },
+                        styles.modalTitle,
+                        { color: colors.text },
                       ]}
                     >
-                      {executingCase.id} • {activeRun?.id} ({activeRun?.name})
-                    </Text>
-                    <Text
-                      style={[styles.modalTitle, { color: theme.text }]}
-                      numberOfLines={2}
-                    >
-                      {executingCase.title}
+                      {selectedTestCase.title}
                     </Text>
                   </View>
-                  <TouchableOpacity
-                    onPress={() => setExecutingCaseId(null)}
+                  <Pressable
+                    onPress={() => setSelectedTestCaseId(null)}
                     style={[
-                      styles.closeBtn,
-                      { backgroundColor: theme.surfaceMuted },
+                      styles.closeCircle,
+                      { backgroundColor: colors.surfaceMuted },
                     ]}
                   >
                     <VectorIcon
                       name="close"
-                      size={16}
-                      color={theme.textSecondary}
+                      size={14}
+                      color={colors.textSecondary}
                     />
-                  </TouchableOpacity>
+                  </Pressable>
                 </View>
 
                 <ScrollView
+                  style={styles.modalBody}
+                  contentContainerStyle={styles.modalBodyContent}
                   showsVerticalScrollIndicator={false}
-                  contentContainerStyle={styles.modalBody}
                 >
-                  {executingCase.preconditions ? (
+                  {/* Quick Status Selector */}
+                  <View
+                    style={[
+                      styles.detailBlock,
+                      {
+                        backgroundColor: colors.surface,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.blockLabel, { color: colors.textMuted }]}
+                    >
+                      CURRENT EXECUTION STATUS
+                    </Text>
+                    <View style={styles.quickStatusRow}>
+                      {executionStatuses.map((st) => {
+                        const active = selectedTestCase.lastStatus === st;
+                        const stStyle = getStatusBadgeStyle(st);
+                        return (
+                          <Pressable
+                            key={st}
+                            onPress={() =>
+                              updateTestCase(selectedTestCase.id, {
+                                lastStatus: st,
+                              })
+                            }
+                            style={[
+                              styles.quickStatusBtn,
+                              {
+                                backgroundColor: active
+                                  ? stStyle.bg
+                                  : colors.surfaceMuted,
+                                borderColor: active
+                                  ? stStyle.text
+                                  : colors.border,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.quickStatusText,
+                                {
+                                  color: active
+                                    ? stStyle.text
+                                    : colors.textSecondary,
+                                },
+                              ]}
+                            >
+                              {st}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+
+                  {/* Move Between Suites Selector inside Detail Modal */}
+                  {suites.length > 1 && (
                     <View
                       style={[
-                        styles.precondBanner,
+                        styles.detailBlock,
                         {
-                          backgroundColor: theme.infoSoft,
-                          borderColor: theme.info,
+                          backgroundColor: colors.surface,
+                          borderColor: colors.border,
                         },
                       ]}
                     >
-                      <VectorIcon name="info" size={14} color={theme.info} />
                       <Text
-                        style={[styles.precondText, { color: theme.text }]}
+                        style={[styles.blockLabel, { color: colors.textMuted }]}
                       >
-                        <Text style={{ fontWeight: '800' }}>
-                          Precondition:{' '}
-                        </Text>
-                        {executingCase.preconditions}
+                        ASSIGNED TEST SUITE (TAP TO MOVE)
                       </Text>
+                      <View style={styles.optionChipsWrap}>
+                        {suites.map((s) => {
+                          const isCurrent = s.id === selectedTestCase.suiteId;
+                          return (
+                            <Pressable
+                              key={s.id}
+                              onPress={() => {
+                                if (!isCurrent) {
+                                  moveTestCaseToSuite(
+                                    selectedTestCase.id,
+                                    s.id
+                                  );
+                                }
+                              }}
+                              style={[
+                                styles.optionChip,
+                                {
+                                  backgroundColor: isCurrent
+                                    ? colors.primary
+                                    : colors.surfaceMuted,
+                                  borderColor: isCurrent
+                                    ? colors.primary
+                                    : colors.border,
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.optionChipText,
+                                  {
+                                    color: isCurrent
+                                      ? '#ffffff'
+                                      : colors.textSecondary,
+                                  },
+                                ]}
+                              >
+                                {s.name}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
                     </View>
-                  ) : null}
+                  )}
 
-                  <View style={styles.stepSectionHeaderRow}>
-                    <Text
+                  {/* Metadata Grid */}
+                  <View style={styles.metaGrid}>
+                    <View
                       style={[
-                        styles.sectionHeaderLabel,
-                        { color: theme.textSecondary, marginBottom: 0 },
+                        styles.metaCell,
+                        {
+                          backgroundColor: colors.surface,
+                          borderColor: colors.border,
+                        },
                       ]}
                     >
-                      INTERACTIVE STEP VERIFICATION (
-                      {
-                        Object.values(stepStatuses).filter(
-                          (s) => s === 'Passed'
-                        ).length
-                      }
-                      /{(executingCase.steps || []).length} PASSED)
-                    </Text>
-                    {(executingCase.steps || []).length > 0 && (
-                      <TouchableOpacity
-                        style={[
-                          styles.passAllStepsBtn,
-                          { backgroundColor: theme.successSoft },
-                        ]}
-                        onPress={markAllStepsPassed}
+                      <Text
+                        style={[styles.metaCellLabel, { color: colors.textMuted }]}
                       >
-                        <VectorIcon
-                          name="check"
-                          size={12}
-                          color={theme.success}
-                        />
+                        Priority
+                      </Text>
+                      <Text
+                        style={[
+                          styles.metaCellValue,
+                          { color: colors.text },
+                        ]}
+                      >
+                        {selectedTestCase.priority}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.metaCell,
+                        {
+                          backgroundColor: colors.surface,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[styles.metaCellLabel, { color: colors.textMuted }]}
+                      >
+                        Test Type
+                      </Text>
+                      <Text
+                        style={[
+                          styles.metaCellValue,
+                          { color: colors.text },
+                        ]}
+                      >
+                        {selectedTestCase.testType || selectedTestCase.category}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.metaCell,
+                        {
+                          backgroundColor: colors.surface,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[styles.metaCellLabel, { color: colors.textMuted }]}
+                      >
+                        Updated
+                      </Text>
+                      <Text
+                        style={[
+                          styles.metaCellValue,
+                          { color: colors.textSecondary, fontSize: 11 },
+                        ]}
+                      >
+                        {selectedTestCase.updatedAt}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {Array.isArray(selectedTestCase.tags) &&
+                    selectedTestCase.tags.length > 0 && (
+                      <View
+                        style={[
+                          styles.detailBlock,
+                          {
+                            backgroundColor: colors.surface,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                      >
                         <Text
                           style={[
-                            styles.passAllStepsBtnText,
-                            { color: theme.success },
+                            styles.blockLabel,
+                            { color: colors.textMuted },
                           ]}
                         >
-                          Pass All Steps
+                          TAGS
                         </Text>
-                      </TouchableOpacity>
+                        <View style={styles.suiteTagsRow}>
+                          {selectedTestCase.tags.map((t, idx) => (
+                            <View
+                              key={`tc-tag-${idx}`}
+                              style={[
+                                styles.metaPill,
+                                { backgroundColor: colors.surfaceMuted },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.metaPillText,
+                                  { color: colors.textSecondary },
+                                ]}
+                              >
+                                #{t}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+                    )}
+
+                  {/* Preconditions & Description */}
+                  <View
+                    style={[
+                      styles.detailBlock,
+                      {
+                        backgroundColor: colors.surface,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.blockLabel, { color: colors.textMuted }]}
+                    >
+                      PRECONDITIONS
+                    </Text>
+                    <Text
+                      style={[styles.blockBody, { color: colors.text }]}
+                    >
+                      {selectedTestCase.preconditions ||
+                        'Standard application state.'}
+                    </Text>
+                    {!!selectedTestCase.description && (
+                      <>
+                        <Text
+                          style={[
+                            styles.blockLabel,
+                            { color: colors.textMuted, marginTop: 12 },
+                          ]}
+                        >
+                          DESCRIPTION
+                        </Text>
+                        <Text
+                          style={[
+                            styles.blockBody,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          {selectedTestCase.description}
+                        </Text>
+                      </>
                     )}
                   </View>
 
-                  {(executingCase.steps || []).map((step, idx) => {
-                    const stepText =
-                      typeof step === 'string'
-                        ? step
-                        : step?.action || step?.step || '';
-                    const stepExpected =
-                      typeof step === 'object' ? step?.expected || '' : '';
-                    const st = stepStatuses[idx] || 'Untested';
-                    return (
-                      <View
-                        key={idx}
-                        style={[
-                          styles.stepRunnerRow,
-                          {
-                            backgroundColor: theme.surfaceMuted,
-                            borderColor:
-                              st === 'Passed'
-                                ? theme.success
-                                : st === 'Failed'
-                                ? theme.danger
-                                : theme.border,
-                          },
-                        ]}
-                      >
-                        <View style={styles.stepInfo}>
-                          <Text
-                            style={[
-                              styles.stepNumLabel,
-                              { color: theme.primary },
-                            ]}
-                          >
-                            Step {idx + 1}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.stepDescText,
-                              { color: theme.text },
-                            ]}
-                          >
-                            {stepText}
-                          </Text>
-                          {stepExpected ? (
-                            <Text
-                              style={[
-                                styles.stepExpectedSub,
-                                { color: theme.textSecondary },
-                              ]}
-                            >
-                              Expected: {stepExpected}
-                            </Text>
-                          ) : null}
-                        </View>
-                        <View style={styles.stepToggles}>
-                          <TouchableOpacity
-                            onPress={() => toggleStepStatus(idx, 'Passed')}
-                            style={[
-                              styles.stepToggleBtn,
-                              {
-                                backgroundColor:
-                                  st === 'Passed'
-                                    ? theme.success
-                                    : theme.surface,
-                                borderColor: theme.success,
-                              },
-                            ]}
-                          >
-                            <VectorIcon
-                              name="check"
-                              size={14}
-                              color={
-                                st === 'Passed' ? '#FFFFFF' : theme.success
-                              }
-                            />
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            onPress={() => toggleStepStatus(idx, 'Failed')}
-                            style={[
-                              styles.stepToggleBtn,
-                              {
-                                backgroundColor:
-                                  st === 'Failed'
-                                    ? theme.danger
-                                    : theme.surface,
-                                borderColor: theme.danger,
-                              },
-                            ]}
-                          >
-                            <VectorIcon
-                              name="close"
-                              size={14}
-                              color={
-                                st === 'Failed' ? '#FFFFFF' : theme.danger
-                              }
-                            />
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    );
-                  })}
-
+                  {/* Numbered Test Steps */}
                   <View
                     style={[
-                      styles.expectedBox,
+                      styles.detailBlock,
                       {
-                        backgroundColor: theme.successSoft,
-                        borderColor: theme.success,
+                        backgroundColor: colors.surface,
+                        borderColor: colors.border,
                       },
                     ]}
                   >
                     <Text
-                      style={[styles.expectedLabel, { color: theme.success }]}
+                      style={[styles.blockLabel, { color: colors.textMuted }]}
                     >
-                      EXPECTED OUTCOME
+                      TEST STEPS ({(selectedTestCase.steps || []).length})
                     </Text>
-                    <Text style={[styles.expectedVal, { color: theme.text }]}>
-                      {executingCase.expectedResult ||
-                        'Verify expected behavior across all steps.'}
-                    </Text>
+                    {(selectedTestCase.steps || []).map((step, idx) => (
+                      <View
+                        key={step.id || idx}
+                        style={[
+                          styles.stepItem,
+                          { borderBottomColor: colors.border },
+                          idx === (selectedTestCase.steps || []).length - 1 && {
+                            borderBottomWidth: 0,
+                          },
+                        ]}
+                      >
+                        <View
+                          style={[
+                            styles.stepNumberCircle,
+                            { backgroundColor: colors.primarySoft },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.stepNumberText,
+                              { color: colors.primary },
+                            ]}
+                          >
+                            {step.stepNumber || idx + 1}
+                          </Text>
+                        </View>
+                        <View style={styles.stepContentCol}>
+                          <Text
+                            style={[
+                              styles.stepActionText,
+                              { color: colors.text },
+                            ]}
+                          >
+                            {step.action}
+                          </Text>
+                          {!!step.testData && (
+                            <Text
+                              style={[
+                                styles.stepExpectedText,
+                                { color: colors.primary },
+                              ]}
+                            >
+                              Test Data: {step.testData}
+                            </Text>
+                          )}
+                          {!!step.expectedResult && (
+                            <Text
+                              style={[
+                                styles.stepExpectedText,
+                                { color: colors.textSecondary },
+                              ]}
+                            >
+                              Expected: {step.expectedResult}
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    ))}
                   </View>
 
-                  <Text
+                  {/* Overall Expected Result */}
+                  <View
                     style={[
-                      styles.sectionHeaderLabel,
-                      { color: theme.textSecondary, marginTop: 14 },
-                    ]}
-                  >
-                    ACTUAL RESULT / OBSERVED OUTCOME
-                  </Text>
-                  <TextInput
-                    style={[
-                      styles.notesArea,
+                      styles.detailBlock,
                       {
-                        backgroundColor: theme.surfaceMuted,
-                        borderColor: theme.border,
-                        color: theme.text,
+                        backgroundColor: colors.surface,
+                        borderColor: colors.border,
                       },
                     ]}
-                    placeholder="Record actual result observed during execution..."
-                    placeholderTextColor={theme.textMuted}
-                    multiline
-                    value={execActualResult}
-                    onChangeText={setExecActualResult}
-                  />
-
-                  <Text
-                    style={[
-                      styles.sectionHeaderLabel,
-                      { color: theme.textSecondary, marginTop: 14 },
-                    ]}
                   >
-                    EXECUTION NOTES & LOGS
-                  </Text>
-                  <TextInput
-                    style={[
-                      styles.notesArea,
-                      {
-                        backgroundColor: theme.surfaceMuted,
-                        borderColor: theme.border,
-                        color: theme.text,
-                      },
-                    ]}
-                    placeholder="Add logcat snippets, latency metrics, or environment notes..."
-                    placeholderTextColor={theme.textMuted}
-                    multiline
-                    value={execNotes}
-                    onChangeText={setExecNotes}
-                  />
-
-                  <View style={styles.execMetaInputsGrid}>
-                    <View style={styles.execMetaInputCol}>
-                      <Text
-                        style={[
-                          styles.inputLabel,
-                          { color: theme.textSecondary, marginTop: 10 },
-                        ]}
-                      >
-                        Tester
-                      </Text>
-                      <TextInput
-                        style={[
-                          styles.inputField,
-                          {
-                            backgroundColor: theme.surfaceMuted,
-                            borderColor: theme.border,
-                            color: theme.text,
-                          },
-                        ]}
-                        value={execTester}
-                        onChangeText={setExecTester}
-                        placeholder="Tester name"
-                        placeholderTextColor={theme.textMuted}
-                      />
-                    </View>
-                    <View style={styles.execMetaInputCol}>
-                      <Text
-                        style={[
-                          styles.inputLabel,
-                          { color: theme.textSecondary, marginTop: 10 },
-                        ]}
-                      >
-                        Environment
-                      </Text>
-                      <TextInput
-                        style={[
-                          styles.inputField,
-                          {
-                            backgroundColor: theme.surfaceMuted,
-                            borderColor: theme.border,
-                            color: theme.text,
-                          },
-                        ]}
-                        value={execEnvironment}
-                        onChangeText={setExecEnvironment}
-                        placeholder="Android 14 / Staging"
-                        placeholderTextColor={theme.textMuted}
-                      />
-                    </View>
+                    <Text
+                      style={[styles.blockLabel, { color: colors.textMuted }]}
+                    >
+                      OVERALL EXPECTED RESULT
+                    </Text>
+                    <Text
+                      style={[styles.blockBody, { color: colors.text }]}
+                    >
+                      {selectedTestCase.expectedResult}
+                    </Text>
                   </View>
                 </ScrollView>
 
                 <View
                   style={[
-                    styles.runnerFooter,
-                    { borderTopColor: theme.border },
+                    styles.modalFooter,
+                    { borderTopColor: colors.border },
                   ]}
                 >
-                  <Text
+                  <Pressable
+                    onPress={() => {
+                      const target = selectedTestCase;
+                      setSelectedTestCaseId(null);
+                      setDeletingCase(target);
+                    }}
                     style={[
-                      styles.runnerFooterTitle,
-                      { color: theme.textSecondary },
-                    ]}
-                  >
-                    RECORD FINAL TEST RESULT:
-                  </Text>
-                  <View style={styles.runnerOutcomeButtons}>
-                    <TouchableOpacity
-                      style={[
-                        styles.outcomeBtn,
-                        { backgroundColor: theme.success },
-                      ]}
-                      onPress={() => handleSaveExecution('Passed', false)}
-                      disabled={isSubmittingExec}
-                    >
-                      <VectorIcon name="check" size={14} color="#FFFFFF" />
-                      <Text style={styles.outcomeBtnText}>Pass</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[
-                        styles.outcomeBtn,
-                        { backgroundColor: theme.danger },
-                      ]}
-                      onPress={() => handleSaveExecution('Failed', false)}
-                      disabled={isSubmittingExec}
-                    >
-                      <VectorIcon name="close" size={14} color="#FFFFFF" />
-                      <Text style={styles.outcomeBtnText}>Fail</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[
-                        styles.outcomeBtn,
-                        { backgroundColor: theme.warning },
-                      ]}
-                      onPress={() => handleSaveExecution('Blocked', false)}
-                      disabled={isSubmittingExec}
-                    >
-                      <VectorIcon name="alert" size={14} color="#FFFFFF" />
-                      <Text style={styles.outcomeBtnText}>Blocked</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[
-                        styles.outcomeBtn,
-                        {
-                          backgroundColor: theme.surfaceMuted,
-                          borderWidth: 1,
-                          borderColor: theme.border,
-                        },
-                      ]}
-                      onPress={() => handleSaveExecution('Untested', false)}
-                      disabled={isSubmittingExec}
-                    >
-                      <VectorIcon
-                        name="refresh"
-                        size={14}
-                        color={theme.textSecondary}
-                      />
-                      <Text
-                        style={[
-                          styles.outcomeBtnText,
-                          { color: theme.textSecondary },
-                        ]}
-                      >
-                        Not Run
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.failAndBugBtn,
+                      styles.footerDangerBtn,
                       {
-                        backgroundColor: theme.dangerSoft,
-                        borderColor: theme.danger,
+                        backgroundColor: colors.dangerSoft,
+                        borderColor: colors.danger,
                       },
                     ]}
-                    onPress={() => handleSaveExecution('Failed', true)}
-                    disabled={isSubmittingExec}
                   >
-                    <VectorIcon name="alert" size={15} color={theme.danger} />
+                    <Text
+                      style={[styles.footerDangerText, { color: colors.danger }]}
+                    >
+                      Delete
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      const tc = selectedTestCase;
+                      setSelectedTestCaseId(null);
+                      openEditCaseModal(tc);
+                    }}
+                    style={[
+                      styles.footerSecondaryBtn,
+                      {
+                        backgroundColor: colors.surfaceMuted,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
                     <Text
                       style={[
-                        styles.failAndBugBtnText,
-                        { color: theme.danger },
+                        styles.footerSecondaryText,
+                        { color: colors.text },
                       ]}
                     >
-                      Mark Failed & Create Linked Defect
+                      Edit Case
                     </Text>
-                  </TouchableOpacity>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setSelectedTestCaseId(null)}
+                    style={[
+                      styles.footerPrimaryBtn,
+                      { backgroundColor: colors.primary },
+                    ]}
+                  >
+                    <Text style={styles.footerPrimaryText}>Done</Text>
+                  </Pressable>
                 </View>
               </>
             )}
-          </KeyboardAvoidingView>
+          </View>
         </View>
       </Modal>
 
-      {/* CREATE / EDIT TEST RUN MODAL */}
+      {/* ===================================================================
+          MODAL 2: CREATE / EDIT TEST CASE
+         =================================================================== */}
       <Modal
-        visible={runModalVisible}
+        visible={isFormModalOpen}
         animationType="slide"
         transparent
-        onRequestClose={() => setRunModalVisible(false)}
+        onRequestClose={() => !isSubmittingCase && setIsFormModalOpen(false)}
       >
-        <View
-          style={[styles.modalOverlay, { backgroundColor: theme.overlay }]}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
         >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          <View
             style={[
               styles.modalSheet,
               {
-                backgroundColor: theme.surface,
-                borderColor: theme.border,
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
               },
             ]}
           >
             <View
               style={[
                 styles.modalHeader,
-                { borderBottomColor: theme.border },
+                { borderBottomColor: colors.border },
               ]}
             >
-              <Text style={[styles.modalTitle, { color: theme.text }]}>
-                {editingRunId
-                  ? `Edit Test Run (${editingRunId})`
-                  : 'Create New Test Run'}
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
+                {editingCase
+                  ? `Edit ${editingCase.testCaseId || editingCase.id}`
+                  : 'Create New Test Case'}
               </Text>
-              <TouchableOpacity
-                onPress={() => setRunModalVisible(false)}
+              <Pressable
+                onPress={() => !isSubmittingCase && setIsFormModalOpen(false)}
                 style={[
-                  styles.closeBtn,
-                  { backgroundColor: theme.surfaceMuted },
+                  styles.closeCircle,
+                  { backgroundColor: colors.surfaceMuted },
                 ]}
               >
                 <VectorIcon
                   name="close"
-                  size={16}
-                  color={theme.textSecondary}
+                  size={14}
+                  color={colors.textSecondary}
                 />
-              </TouchableOpacity>
+              </Pressable>
             </View>
 
             <ScrollView
+              style={styles.modalBody}
+              contentContainerStyle={styles.modalBodyContent}
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.modalBody}
             >
-              {runFormError ? (
+              {caseFormError && (
                 <View
                   style={[
-                    styles.formErrorBox,
+                    styles.formAlertBox,
                     {
-                      backgroundColor: theme.dangerSoft,
-                      borderColor: theme.danger,
+                      backgroundColor: colors.dangerSoft,
+                      borderColor: colors.danger,
                     },
                   ]}
                 >
-                  <VectorIcon name="alert" size={14} color={theme.danger} />
-                  <Text
-                    style={[styles.formErrorText, { color: theme.danger }]}
-                  >
-                    {runFormError}
+                  <Text style={[styles.formAlertText, { color: colors.danger }]}>
+                    {caseFormError}
                   </Text>
                 </View>
-              ) : null}
+              )}
 
-              <Text
-                style={[styles.inputLabel, { color: theme.textSecondary }]}
-              >
-                Run Name *
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+                Test Case Title *
               </Text>
               <TextInput
+                value={formTitle}
+                onChangeText={setFormTitle}
+                placeholder="e.g., Verify biometric login fallback to PIN"
+                placeholderTextColor={colors.textMuted}
                 style={[
-                  styles.inputField,
+                  styles.textInput,
                   {
-                    backgroundColor: theme.surfaceMuted,
-                    borderColor: theme.border,
-                    color: theme.text,
+                    backgroundColor: colors.surfaceMuted,
+                    color: colors.text,
+                    borderColor: colors.border,
                   },
                 ]}
-                placeholder="e.g., Release v2.4 Smoke Verification"
-                placeholderTextColor={theme.textMuted}
-                value={runName}
-                onChangeText={setRunName}
               />
 
-              <Text
-                style={[styles.inputLabel, { color: theme.textSecondary }]}
-              >
-                Target Suite Scope
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+                Test Suite *
               </Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={{ marginVertical: 6 }}
-              >
-                <TouchableOpacity
-                  onPress={() => handleChangeRunSuiteScope('all')}
-                  style={[
-                    styles.optionPill,
-                    {
-                      backgroundColor:
-                        runSuiteId === 'all' || runSuiteId === 'ALL'
-                          ? theme.primarySoft
-                          : theme.surfaceMuted,
-                      borderColor:
-                        runSuiteId === 'all' || runSuiteId === 'ALL'
-                          ? theme.primary
-                          : theme.border,
-                    },
-                  ]}
+              {suites.length === 0 ? (
+                <Text
+                  style={[styles.emptyHintText, { color: colors.textMuted }]}
                 >
-                  <Text
-                    style={[
-                      styles.optionPillText,
-                      {
-                        color:
-                          runSuiteId === 'all' || runSuiteId === 'ALL'
-                            ? theme.primary
-                            : theme.textSecondary,
-                      },
-                    ]}
-                  >
-                    All Suites ({testCases.length} cases)
-                  </Text>
-                </TouchableOpacity>
-                {suites.map((s) => {
-                  const active = runSuiteId === s.id;
-                  const count = testCases.filter(
-                    (tc) => tc.suiteId === s.id
-                  ).length;
+                  No suites exist yet — a default &quot;General QA Suite&quot;
+                  will be created automatically.
+                </Text>
+              ) : (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.optionChipsRow}
+                >
+                  {suites.map((s) => {
+                    const active = formSuiteId === s.id;
+                    return (
+                      <Pressable
+                        key={s.id}
+                        onPress={() => setFormSuiteId(s.id)}
+                        style={[
+                          styles.optionChip,
+                          {
+                            backgroundColor: active
+                              ? colors.primary
+                              : colors.surfaceMuted,
+                            borderColor: active ? colors.primary : colors.border,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.optionChipText,
+                            { color: active ? '#ffffff' : colors.textSecondary },
+                          ]}
+                        >
+                          {s.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              )}
+
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+                Priority
+              </Text>
+              <View style={styles.optionChipsWrap}>
+                {priorities.map((p) => {
+                  const active = formPriority === p;
                   return (
-                    <TouchableOpacity
-                      key={s.id}
-                      onPress={() => handleChangeRunSuiteScope(s.id)}
+                    <Pressable
+                      key={p}
+                      onPress={() => setFormPriority(p)}
                       style={[
-                        styles.optionPill,
+                        styles.optionChip,
                         {
                           backgroundColor: active
-                            ? theme.primarySoft
-                            : theme.surfaceMuted,
-                          borderColor: active ? theme.primary : theme.border,
+                            ? colors.primary
+                            : colors.surfaceMuted,
+                          borderColor: active ? colors.primary : colors.border,
                         },
                       ]}
                     >
                       <Text
                         style={[
-                          styles.optionPillText,
-                          {
-                            color: active
-                              ? theme.primary
-                              : theme.textSecondary,
-                          },
+                          styles.optionChipText,
+                          { color: active ? '#ffffff' : colors.textSecondary },
                         ]}
                       >
-                        {s.name} ({count})
+                        {p}
                       </Text>
-                    </TouchableOpacity>
+                    </Pressable>
                   );
                 })}
-              </ScrollView>
+              </View>
 
-              {/* Applicable Test Cases Selection */}
-              <View style={styles.caseSelectionHeader}>
-                <Text
-                  style={[
-                    styles.inputLabel,
-                    { color: theme.textSecondary, marginTop: 4 },
-                  ]}
-                >
-                  Select Applicable Test Cases ({selectedCaseIds.length} of{' '}
-                  {candidateCasesForModal.length} selected)
-                </Text>
-                <View style={styles.caseSelectionQuickBtns}>
-                  <TouchableOpacity
-                    onPress={() =>
-                      setSelectedCaseIds(
-                        candidateCasesForModal.map((tc) => tc.id)
-                      )
-                    }
-                  >
-                    <Text
-                      style={[styles.selectAllLink, { color: theme.primary }]}
-                    >
-                      Select All
-                    </Text>
-                  </TouchableOpacity>
-                  <Text style={{ color: theme.textMuted }}>•</Text>
-                  <TouchableOpacity onPress={() => setSelectedCaseIds([])}>
-                    <Text
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+                Category / Test Type
+              </Text>
+              <View style={styles.optionChipsWrap}>
+                {testTypes.map((t) => {
+                  const active = formTestType === t;
+                  return (
+                    <Pressable
+                      key={t}
+                      onPress={() => setFormTestType(t)}
                       style={[
-                        styles.selectAllLink,
-                        { color: theme.textSecondary },
+                        styles.optionChip,
+                        {
+                          backgroundColor: active
+                            ? colors.primary
+                            : colors.surfaceMuted,
+                          borderColor: active ? colors.primary : colors.border,
+                        },
                       ]}
                     >
-                      Clear
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <View
-                style={[
-                  styles.casePickerBox,
-                  {
-                    backgroundColor: theme.surfaceMuted,
-                    borderColor: theme.border,
-                  },
-                ]}
-              >
-                {candidateCasesForModal.length === 0 ? (
-                  <Text
-                    style={[
-                      styles.emptyPickerText,
-                      { color: theme.textMuted },
-                    ]}
-                  >
-                    No test cases available in this suite scope.
-                  </Text>
-                ) : (
-                  candidateCasesForModal.map((tc) => {
-                    const checked = selectedCaseIds.includes(tc.id);
-                    return (
-                      <TouchableOpacity
-                        key={tc.id}
+                      <Text
                         style={[
-                          styles.casePickerRow,
-                          {
-                            borderBottomColor: theme.border,
-                            backgroundColor: checked
-                              ? theme.primarySoft
-                              : 'transparent',
-                          },
+                          styles.optionChipText,
+                          { color: active ? '#ffffff' : colors.textSecondary },
                         ]}
-                        onPress={() => toggleCandidateCaseSelection(tc.id)}
                       >
-                        <VectorIcon
-                          name={checked ? 'check' : 'plus'}
-                          size={14}
-                          color={checked ? theme.primary : theme.textMuted}
-                        />
-                        <View style={{ flex: 1 }}>
-                          <Text
-                            style={[
-                              styles.casePickerTitle,
-                              { color: theme.text },
-                            ]}
-                            numberOfLines={1}
-                          >
-                            <Text
-                              style={{
-                                color: theme.primary,
-                                fontWeight: '800',
-                              }}
-                            >
-                              {tc.id}
-                            </Text>{' '}
-                            • {tc.title}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })
-                )}
+                        {t}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
 
-              <Text
-                style={[styles.inputLabel, { color: theme.textSecondary }]}
-              >
-                Environment
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+                Tags (comma-separated)
               </Text>
               <TextInput
+                value={formTags}
+                onChangeText={setFormTags}
+                placeholder="e.g., auth, smoke, release-gate"
+                placeholderTextColor={colors.textMuted}
                 style={[
-                  styles.inputField,
+                  styles.textInput,
                   {
-                    backgroundColor: theme.surfaceMuted,
-                    borderColor: theme.border,
-                    color: theme.text,
+                    backgroundColor: colors.surfaceMuted,
+                    color: colors.text,
+                    borderColor: colors.border,
                   },
                 ]}
-                placeholder="e.g., Android 14 / Staging"
-                placeholderTextColor={theme.textMuted}
-                value={runEnvironment}
-                onChangeText={setRunEnvironment}
               />
 
-              <Text
-                style={[styles.inputLabel, { color: theme.textSecondary }]}
-              >
-                Target Device & Android OS
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+                Description / Objective
               </Text>
               <TextInput
-                style={[
-                  styles.inputField,
-                  {
-                    backgroundColor: theme.surfaceMuted,
-                    borderColor: theme.border,
-                    color: theme.text,
-                  },
-                ]}
-                placeholder="e.g., Pixel 8 Pro • Android 14"
-                placeholderTextColor={theme.textMuted}
-                value={runDevice}
-                onChangeText={setRunDevice}
-              />
-
-              <Text
-                style={[styles.inputLabel, { color: theme.textSecondary }]}
-              >
-                Build Version
-              </Text>
-              <TextInput
-                style={[
-                  styles.inputField,
-                  {
-                    backgroundColor: theme.surfaceMuted,
-                    borderColor: theme.border,
-                    color: theme.text,
-                  },
-                ]}
-                placeholder="e.g., 2.4.0-rc3 (Build 418)"
-                placeholderTextColor={theme.textMuted}
-                value={runBuild}
-                onChangeText={setRunBuild}
-              />
-
-              <Text
-                style={[styles.inputLabel, { color: theme.textSecondary }]}
-              >
-                Assigned Tester
-              </Text>
-              <TextInput
-                style={[
-                  styles.inputField,
-                  {
-                    backgroundColor: theme.surfaceMuted,
-                    borderColor: theme.border,
-                    color: theme.text,
-                  },
-                ]}
-                placeholder="e.g., QA Lead"
-                placeholderTextColor={theme.textMuted}
-                value={runTester}
-                onChangeText={setRunTester}
-              />
-
-              <Text
-                style={[styles.inputLabel, { color: theme.textSecondary }]}
-              >
-                Run Notes / Cycle Scope
-              </Text>
-              <TextInput
-                style={[
-                  styles.notesArea,
-                  {
-                    backgroundColor: theme.surfaceMuted,
-                    borderColor: theme.border,
-                    color: theme.text,
-                    marginTop: 6,
-                  },
-                ]}
-                placeholder="Optional cycle notes or release criteria..."
-                placeholderTextColor={theme.textMuted}
+                value={formDescription}
+                onChangeText={setFormDescription}
+                placeholder="Brief summary of what this test validates..."
+                placeholderTextColor={colors.textMuted}
                 multiline
-                value={runNotes}
-                onChangeText={setRunNotes}
+                style={[
+                  styles.textArea,
+                  {
+                    backgroundColor: colors.surfaceMuted,
+                    color: colors.text,
+                    borderColor: colors.border,
+                  },
+                ]}
+              />
+
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+                Preconditions
+              </Text>
+              <TextInput
+                value={formPreconditions}
+                onChangeText={setFormPreconditions}
+                placeholder="Required user state, test data, or configuration..."
+                placeholderTextColor={colors.textMuted}
+                style={[
+                  styles.textInput,
+                  {
+                    backgroundColor: colors.surfaceMuted,
+                    color: colors.text,
+                    borderColor: colors.border,
+                  },
+                ]}
+              />
+
+              {/* Dynamic Steps Builder */}
+              <View style={styles.stepsHeaderRow}>
+                <Text
+                  style={[styles.inputLabel, { color: colors.textSecondary }]}
+                >
+                  Execution Steps
+                </Text>
+                <Pressable onPress={addStepRow}>
+                  <Text style={[styles.addStepLink, { color: colors.primary }]}>
+                    + Add Step
+                  </Text>
+                </Pressable>
+              </View>
+
+              {formSteps.map((step, index) => (
+                <View
+                  key={`form-step-${index}`}
+                  style={[
+                    styles.stepBuilderCard,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View style={styles.stepBuilderTop}>
+                    <Text
+                      style={[styles.stepBuilderTitle, { color: colors.primary }]}
+                    >
+                      Step #{index + 1}
+                    </Text>
+                    {formSteps.length > 1 && (
+                      <Pressable onPress={() => removeStepRow(index)}>
+                        <Text
+                          style={{
+                            color: colors.danger,
+                            fontSize: 12,
+                            fontWeight: '600',
+                          }}
+                        >
+                          Remove
+                        </Text>
+                      </Pressable>
+                    )}
+                  </View>
+                  <TextInput
+                    value={step.action}
+                    onChangeText={(val) =>
+                      handleStepChange(index, 'action', val)
+                    }
+                    placeholder="Action: What the tester does..."
+                    placeholderTextColor={colors.textMuted}
+                    style={[
+                      styles.textInput,
+                      {
+                        backgroundColor: colors.surfaceMuted,
+                        color: colors.text,
+                        borderColor: colors.border,
+                        marginBottom: 8,
+                      },
+                    ]}
+                  />
+                  <TextInput
+                    value={step.testData}
+                    onChangeText={(val) =>
+                      handleStepChange(index, 'testData', val)
+                    }
+                    placeholder="Test Data (optional): e.g. user@qavora.io"
+                    placeholderTextColor={colors.textMuted}
+                    style={[
+                      styles.textInput,
+                      {
+                        backgroundColor: colors.surfaceMuted,
+                        color: colors.text,
+                        borderColor: colors.border,
+                        marginBottom: 8,
+                      },
+                    ]}
+                  />
+                  <TextInput
+                    value={step.expectedResult}
+                    onChangeText={(val) =>
+                      handleStepChange(index, 'expectedResult', val)
+                    }
+                    placeholder="Expected step result..."
+                    placeholderTextColor={colors.textMuted}
+                    style={[
+                      styles.textInput,
+                      {
+                        backgroundColor: colors.surfaceMuted,
+                        color: colors.text,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  />
+                </View>
+              ))}
+
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+                Overall Expected Result
+              </Text>
+              <TextInput
+                value={formExpectedResult}
+                onChangeText={setFormExpectedResult}
+                placeholder="Final outcome when all steps succeed..."
+                placeholderTextColor={colors.textMuted}
+                multiline
+                style={[
+                  styles.textArea,
+                  {
+                    backgroundColor: colors.surfaceMuted,
+                    color: colors.text,
+                    borderColor: colors.border,
+                  },
+                ]}
               />
             </ScrollView>
 
             <View
-              style={[
-                styles.modalFooter,
-                { borderTopColor: theme.border },
-              ]}
+              style={[styles.modalFooter, { borderTopColor: colors.border }]}
             >
-              <TouchableOpacity
+              <Pressable
+                disabled={isSubmittingCase}
+                onPress={() => setIsFormModalOpen(false)}
                 style={[
-                  styles.cancelBtn,
+                  styles.footerSecondaryBtn,
                   {
-                    backgroundColor: theme.surfaceMuted,
-                    borderColor: theme.border,
+                    backgroundColor: colors.surfaceMuted,
+                    borderColor: colors.border,
+                    opacity: isSubmittingCase ? 0.5 : 1,
                   },
                 ]}
-                onPress={() => setRunModalVisible(false)}
-                disabled={isSubmittingRun}
               >
                 <Text
                   style={[
-                    styles.cancelBtnText,
-                    { color: theme.textSecondary },
+                    styles.footerSecondaryText,
+                    { color: colors.textSecondary },
                   ]}
                 >
                   Cancel
                 </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
+              </Pressable>
+              <Pressable
+                disabled={isSubmittingCase}
+                onPress={handleSaveTestCase}
                 style={[
-                  styles.saveBtn,
+                  styles.footerPrimaryBtn,
                   {
-                    backgroundColor: theme.primary,
-                    opacity: isSubmittingRun ? 0.7 : 1,
+                    backgroundColor: colors.primary,
+                    opacity: isSubmittingCase ? 0.65 : 1,
                   },
                 ]}
-                onPress={handleSaveRunModal}
-                disabled={isSubmittingRun}
               >
-                {isSubmittingRun ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
+                {isSubmittingCase ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
                 ) : (
-                  <VectorIcon name="check" size={15} color="#FFFFFF" />
+                  <Text style={styles.footerPrimaryText}>
+                    {editingCase ? 'Save Changes' : 'Create Test Case'}
+                  </Text>
                 )}
-                <Text style={styles.saveBtnText}>
-                  {editingRunId ? 'Save Run Changes' : 'Launch Test Run'}
-                </Text>
-              </TouchableOpacity>
+              </Pressable>
             </View>
-          </KeyboardAvoidingView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ===================================================================
+          MODAL 3: MOVE TEST CASE BETWEEN SUITES
+         =================================================================== */}
+      <Modal
+        visible={!!movingCase}
+        animationType="fade"
+        transparent
+        onRequestClose={() => !isMovingCase && setMovingCase(null)}
+      >
+        <View style={styles.centeredModalOverlay}>
+          <View
+            style={[
+              styles.smallModalCard,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            {movingCase && (
+              <>
+                <Text
+                  style={[
+                    styles.smallModalTitle,
+                    { color: colors.text },
+                  ]}
+                >
+                  Move {movingCase.testCaseId || movingCase.id} to Suite
+                </Text>
+                <Text
+                  style={[
+                    styles.confirmDialogDesc,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Current Suite: &quot;{movingCase.suiteName}&quot;. Select a
+                  destination suite below:
+                </Text>
+
+                <View style={styles.suiteSelectList}>
+                  {suites.map((s) => {
+                    const active = moveTargetSuiteId === s.id;
+                    return (
+                      <Pressable
+                        key={s.id}
+                        onPress={() => setMoveTargetSuiteId(s.id)}
+                        style={[
+                          styles.suiteSelectItem,
+                          {
+                            backgroundColor: active
+                              ? colors.primarySoft
+                              : colors.surfaceMuted,
+                            borderColor: active ? colors.primary : colors.border,
+                          },
+                        ]}
+                      >
+                        <VectorIcon
+                          name={active ? 'check' : 'folder'}
+                          size={14}
+                          color={active ? colors.primary : colors.textSecondary}
+                        />
+                        <Text
+                          style={[
+                            styles.suiteSelectItemText,
+                            {
+                              color: active
+                                ? colors.primary
+                                : colors.text,
+                            },
+                          ]}
+                        >
+                          {s.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <View style={styles.smallModalActions}>
+                  <Pressable
+                    disabled={isMovingCase}
+                    onPress={() => setMovingCase(null)}
+                    style={[
+                      styles.footerSecondaryBtn,
+                      {
+                        backgroundColor: colors.surfaceMuted,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.footerSecondaryText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Cancel
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={isMovingCase}
+                    onPress={handleConfirmMoveCase}
+                    style={[
+                      styles.footerPrimaryBtn,
+                      { backgroundColor: colors.primary },
+                    ]}
+                  >
+                    {isMovingCase ? (
+                      <ActivityIndicator size="small" color="#ffffff" />
+                    ) : (
+                      <Text style={styles.footerPrimaryText}>Move Case</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
         </View>
       </Modal>
 
-      {/* DELETE TEST RUN CONFIRMATION MODAL */}
+      {/* ===================================================================
+          MODAL 4: DELETE TEST CASE CONFIRMATION
+         =================================================================== */}
       <Modal
-        visible={!!runPendingDelete}
+        visible={!!deletingCase}
         animationType="fade"
         transparent
-        onRequestClose={() => setRunPendingDelete(null)}
+        onRequestClose={() => !isDeletingCase && setDeletingCase(null)}
       >
-        <View
-          style={[
-            styles.confirmOverlay,
-            { backgroundColor: theme.overlay },
-          ]}
+        <View style={styles.centeredModalOverlay}>
+          <View
+            style={[
+              styles.smallModalCard,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            {deletingCase && (
+              <>
+                <Text
+                  style={[
+                    styles.smallModalTitle,
+                    { color: colors.text },
+                  ]}
+                >
+                  Delete Test Case?
+                </Text>
+                <Text
+                  style={[
+                    styles.confirmDialogDesc,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Are you sure you want to permanently delete{' '}
+                  <Text style={{ fontWeight: '800', color: colors.text }}>
+                    {deletingCase.testCaseId || deletingCase.id}: &quot;
+                    {deletingCase.title}&quot;
+                  </Text>{' '}
+                  from suite &quot;{deletingCase.suiteName}&quot;?
+                </Text>
+
+                <View style={styles.smallModalActions}>
+                  <Pressable
+                    disabled={isDeletingCase}
+                    onPress={() => setDeletingCase(null)}
+                    style={[
+                      styles.footerSecondaryBtn,
+                      {
+                        backgroundColor: colors.surfaceMuted,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.footerSecondaryText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Cancel
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={isDeletingCase}
+                    onPress={handleConfirmDeleteCase}
+                    style={[
+                      styles.footerPrimaryBtn,
+                      { backgroundColor: colors.danger },
+                    ]}
+                  >
+                    {isDeletingCase ? (
+                      <ActivityIndicator size="small" color="#ffffff" />
+                    ) : (
+                      <Text style={styles.footerPrimaryText}>
+                        Confirm Delete
+                      </Text>
+                    )}
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* ===================================================================
+          MODAL 5: CREATE / EDIT TEST SUITE
+         =================================================================== */}
+      <Modal
+        visible={isSuiteModalOpen}
+        animationType="fade"
+        transparent
+        onRequestClose={() => !isSubmittingSuite && setIsSuiteModalOpen(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.centeredModalOverlay}
         >
           <View
             style={[
-              styles.confirmCard,
+              styles.smallModalCard,
               {
-                backgroundColor: theme.surface,
-                borderColor: theme.border,
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Text
+              style={[styles.smallModalTitle, { color: colors.text }]}
+            >
+              {editingSuite ? 'Edit Test Suite' : 'Create Test Suite'}
+            </Text>
+
+            {suiteFormError && (
+              <View
+                style={[
+                  styles.formAlertBox,
+                  {
+                    backgroundColor: colors.dangerSoft,
+                    borderColor: colors.danger,
+                  },
+                ]}
+              >
+                <Text style={[styles.formAlertText, { color: colors.danger }]}>
+                  {suiteFormError}
+                </Text>
+              </View>
+            )}
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Suite Name *
+            </Text>
+            <TextInput
+              value={suiteNameInput}
+              onChangeText={setSuiteNameInput}
+              placeholder="e.g., Payment & Checkout Flows"
+              placeholderTextColor={colors.textMuted}
+              style={[
+                styles.textInput,
+                {
+                  backgroundColor: colors.surfaceMuted,
+                  color: colors.text,
+                  borderColor: colors.border,
+                },
+              ]}
+            />
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Category
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.optionChipsRow}
+            >
+              {(suiteCategories || ['Functional', 'UI/UX', 'Security', 'Regression']).map(
+                (cat) => {
+                  const active = suiteCategoryInput === cat;
+                  return (
+                    <Pressable
+                      key={cat}
+                      onPress={() => setSuiteCategoryInput(cat)}
+                      style={[
+                        styles.optionChip,
+                        {
+                          backgroundColor: active
+                            ? colors.primary
+                            : colors.surfaceMuted,
+                          borderColor: active ? colors.primary : colors.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.optionChipText,
+                          { color: active ? '#ffffff' : colors.textSecondary },
+                        ]}
+                      >
+                        {cat}
+                      </Text>
+                    </Pressable>
+                  );
+                }
+              )}
+            </ScrollView>
+
+            {planPhases.length > 0 && (
+              <>
+                <Text
+                  style={[styles.inputLabel, { color: colors.textSecondary }]}
+                >
+                  Testing Phase
+                </Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.optionChipsRow}
+                >
+                  <Pressable
+                    onPress={() => setSuitePhaseIdInput('')}
+                    style={[
+                      styles.optionChip,
+                      {
+                        backgroundColor: !suitePhaseIdInput
+                          ? colors.primary
+                          : colors.surfaceMuted,
+                        borderColor: !suitePhaseIdInput
+                          ? colors.primary
+                          : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.optionChipText,
+                        {
+                          color: !suitePhaseIdInput
+                            ? '#ffffff'
+                            : colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      General (Unassigned)
+                    </Text>
+                  </Pressable>
+                  {planPhases.map((ph) => {
+                    const active = suitePhaseIdInput === ph.id;
+                    return (
+                      <Pressable
+                        key={ph.id}
+                        onPress={() => setSuitePhaseIdInput(ph.id)}
+                        style={[
+                          styles.optionChip,
+                          {
+                            backgroundColor: active
+                              ? colors.primary
+                              : colors.surfaceMuted,
+                            borderColor: active ? colors.primary : colors.border,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.optionChipText,
+                            { color: active ? '#ffffff' : colors.textSecondary },
+                          ]}
+                        >
+                          {ph.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </>
+            )}
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Tags (comma-separated)
+            </Text>
+            <TextInput
+              value={suiteTagsInput}
+              onChangeText={setSuiteTagsInput}
+              placeholder="e.g., checkout, stripe, critical"
+              placeholderTextColor={colors.textMuted}
+              style={[
+                styles.textInput,
+                {
+                  backgroundColor: colors.surfaceMuted,
+                  color: colors.text,
+                  borderColor: colors.border,
+                },
+              ]}
+            />
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Description
+            </Text>
+            <TextInput
+              value={suiteDescInput}
+              onChangeText={setSuiteDescInput}
+              placeholder="Scope of this test suite..."
+              placeholderTextColor={colors.textMuted}
+              style={[
+                styles.textInput,
+                {
+                  backgroundColor: colors.surfaceMuted,
+                  color: colors.text,
+                  borderColor: colors.border,
+                },
+              ]}
+            />
+
+            <View style={styles.smallModalActions}>
+              <Pressable
+                disabled={isSubmittingSuite}
+                onPress={() => setIsSuiteModalOpen(false)}
+                style={[
+                  styles.footerSecondaryBtn,
+                  {
+                    backgroundColor: colors.surfaceMuted,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.footerSecondaryText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Cancel
+                </Text>
+              </Pressable>
+              <Pressable
+                disabled={isSubmittingSuite}
+                onPress={handleSaveSuite}
+                style={[
+                  styles.footerPrimaryBtn,
+                  { backgroundColor: colors.primary },
+                ]}
+              >
+                {isSubmittingSuite ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <Text style={styles.footerPrimaryText}>
+                    {editingSuite ? 'Save Suite' : 'Create Suite'}
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ===================================================================
+          MODAL 6: DELETE TEST SUITE CONFIRMATION (WITH CASE PRESERVATION)
+         =================================================================== */}
+      <Modal
+        visible={!!deletingSuite}
+        animationType="fade"
+        transparent
+        onRequestClose={() => !isDeletingSuite && setDeletingSuite(null)}
+      >
+        <View style={styles.centeredModalOverlay}>
+          <View
+            style={[
+              styles.smallModalCard,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            {deletingSuite && (
+              <>
+                <Text
+                  style={[
+                    styles.smallModalTitle,
+                    { color: colors.text },
+                  ]}
+                >
+                  Delete Suite &quot;{deletingSuite.name}&quot;?
+                </Text>
+
+                {(() => {
+                  const caseCount = suiteStatsMap[deletingSuite.id]?.total || 0;
+                  const otherSuites = suites.filter(
+                    (s) => s.id !== deletingSuite.id
+                  );
+
+                  if (caseCount === 0) {
+                    return (
+                      <Text
+                        style={[
+                          styles.confirmDialogDesc,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        This test suite contains 0 test cases. Are you sure you
+                        want to delete it?
+                      </Text>
+                    );
+                  }
+
+                  return (
+                    <View style={{ gap: 10 }}>
+                      <Text
+                        style={[
+                          styles.confirmDialogDesc,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        This suite contains{' '}
+                        <Text
+                          style={{
+                            fontWeight: '800',
+                            color: colors.text,
+                          }}
+                        >
+                          {caseCount} test {caseCount === 1 ? 'case' : 'cases'}
+                        </Text>
+                        . Choose how to handle existing test cases:
+                      </Text>
+
+                      {otherSuites.length > 0 && (
+                        <Pressable
+                          onPress={() => setSuiteDeleteMode('move')}
+                          style={[
+                            styles.suiteSelectItem,
+                            {
+                              backgroundColor:
+                                suiteDeleteMode === 'move'
+                                  ? colors.primarySoft
+                                  : colors.surfaceMuted,
+                              borderColor:
+                                suiteDeleteMode === 'move'
+                                  ? colors.primary
+                                  : colors.border,
+                            },
+                          ]}
+                        >
+                          <VectorIcon
+                            name={
+                              suiteDeleteMode === 'move' ? 'check' : 'switch'
+                            }
+                            size={14}
+                            color={
+                              suiteDeleteMode === 'move'
+                                ? colors.primary
+                                : colors.textSecondary
+                            }
+                          />
+                          <Text
+                            style={[
+                              styles.suiteSelectItemText,
+                              {
+                                color:
+                                  suiteDeleteMode === 'move'
+                                    ? colors.primary
+                                    : colors.text,
+                              },
+                            ]}
+                          >
+                            Move {caseCount} case(s) to another suite
+                          </Text>
+                        </Pressable>
+                      )}
+
+                      {suiteDeleteMode === 'move' && otherSuites.length > 0 && (
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          contentContainerStyle={styles.optionChipsRow}
+                        >
+                          {otherSuites.map((s) => {
+                            const active = suiteDeleteTargetId === s.id;
+                            return (
+                              <Pressable
+                                key={s.id}
+                                onPress={() => setSuiteDeleteTargetId(s.id)}
+                                style={[
+                                  styles.optionChip,
+                                  {
+                                    backgroundColor: active
+                                      ? colors.primary
+                                      : colors.surfaceMuted,
+                                    borderColor: active
+                                      ? colors.primary
+                                      : colors.border,
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.optionChipText,
+                                    {
+                                      color: active
+                                        ? '#ffffff'
+                                        : colors.textSecondary,
+                                    },
+                                  ]}
+                                >
+                                  {s.name}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </ScrollView>
+                      )}
+
+                      <Pressable
+                        onPress={() => setSuiteDeleteMode('delete')}
+                        style={[
+                          styles.suiteSelectItem,
+                          {
+                            backgroundColor:
+                              suiteDeleteMode === 'delete'
+                                ? colors.dangerSoft
+                                : colors.surfaceMuted,
+                            borderColor:
+                              suiteDeleteMode === 'delete'
+                                ? colors.danger
+                                : colors.border,
+                          },
+                        ]}
+                      >
+                        <VectorIcon
+                          name="trash"
+                          size={14}
+                          color={
+                            suiteDeleteMode === 'delete'
+                              ? colors.danger
+                              : colors.textSecondary
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.suiteSelectItemText,
+                            {
+                              color:
+                                suiteDeleteMode === 'delete'
+                                  ? colors.danger
+                                  : colors.text,
+                            },
+                          ]}
+                        >
+                          Delete suite and its {caseCount} test case(s)
+                        </Text>
+                      </Pressable>
+                    </View>
+                  );
+                })()}
+
+                <View style={styles.smallModalActions}>
+                  <Pressable
+                    disabled={isDeletingSuite}
+                    onPress={() => setDeletingSuite(null)}
+                    style={[
+                      styles.footerSecondaryBtn,
+                      {
+                        backgroundColor: colors.surfaceMuted,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.footerSecondaryText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Cancel
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={isDeletingSuite}
+                    onPress={handleConfirmDeleteSuite}
+                    style={[
+                      styles.footerPrimaryBtn,
+                      { backgroundColor: colors.danger },
+                    ]}
+                  >
+                    {isDeletingSuite ? (
+                      <ActivityIndicator size="small" color="#ffffff" />
+                    ) : (
+                      <Text style={styles.footerPrimaryText}>Delete Suite</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* ===================================================================
+          MODAL 7: EDIT TEST PLAN
+         =================================================================== */}
+      <Modal
+        visible={isPlanModalOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => !isSubmittingPlan && setIsPlanModalOpen(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <View
+            style={[
+              styles.modalSheet,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
               },
             ]}
           >
             <View
               style={[
-                styles.confirmIconCircle,
-                { backgroundColor: theme.dangerSoft },
+                styles.modalHeader,
+                { borderBottomColor: colors.border },
               ]}
             >
-              <VectorIcon name="trash" size={22} color={theme.danger} />
-            </View>
-            <Text style={[styles.confirmTitle, { color: theme.text }]}>
-              Delete Test Run?
-            </Text>
-            <Text
-              style={[
-                styles.confirmDesc,
-                { color: theme.textSecondary },
-              ]}
-            >
-              Are you sure you want to delete{' '}
-              <Text style={{ fontWeight: '800', color: theme.text }}>
-                {runPendingDelete?.name} ({runPendingDelete?.id})
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
+                Edit Project Test Plan
               </Text>
-              ? Its execution history will be removed and any linked defects will be safely unlinked.
-            </Text>
-
-            <View style={styles.confirmBtnRow}>
-              <TouchableOpacity
+              <Pressable
+                onPress={() => !isSubmittingPlan && setIsPlanModalOpen(false)}
                 style={[
-                  styles.confirmCancelBtn,
+                  styles.closeCircle,
+                  { backgroundColor: colors.surfaceMuted },
+                ]}
+              >
+                <VectorIcon
+                  name="close"
+                  size={14}
+                  color={colors.textSecondary}
+                />
+              </Pressable>
+            </View>
+
+            <ScrollView
+              style={styles.modalBody}
+              contentContainerStyle={styles.modalBodyContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {planFormError && (
+                <View
+                  style={[
+                    styles.formAlertBox,
+                    {
+                      backgroundColor: colors.dangerSoft,
+                      borderColor: colors.danger,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.formAlertText, { color: colors.danger }]}>
+                    {planFormError}
+                  </Text>
+                </View>
+              )}
+
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+                Test Plan Name *
+              </Text>
+              <TextInput
+                value={planForm.name}
+                onChangeText={(val) => handlePlanFieldChange('name', val)}
+                placeholder="e.g., Qavora v2.4 Master Test Plan"
+                placeholderTextColor={colors.textMuted}
+                style={[
+                  styles.textInput,
                   {
-                    backgroundColor: theme.surfaceMuted,
-                    borderColor: theme.border,
+                    backgroundColor: colors.surfaceMuted,
+                    color: colors.text,
+                    borderColor: colors.border,
                   },
                 ]}
-                onPress={() => setRunPendingDelete(null)}
-                disabled={isDeletingRun}
+              />
+
+              {[
+                {
+                  key: 'description',
+                  label: 'Plan Overview & Description',
+                  placeholder: 'High-level summary of the release test plan...',
+                },
+                {
+                  key: 'objective',
+                  label: 'Testing Objectives',
+                  placeholder: 'Primary quality goals and validation targets...',
+                },
+                {
+                  key: 'scope',
+                  label: 'In Scope',
+                  placeholder: 'Features, modules, and APIs covered by this plan...',
+                },
+                {
+                  key: 'outOfScope',
+                  label: 'Out of Scope',
+                  placeholder: 'Features explicitly excluded from this cycle...',
+                },
+                {
+                  key: 'strategy',
+                  label: 'Test Strategy & Approach',
+                  placeholder: 'Manual, automated, exploratory, regression strategy...',
+                },
+                {
+                  key: 'environment',
+                  label: 'Test Environment & Infrastructure',
+                  placeholder: 'Target devices, OS versions, staging endpoints...',
+                },
+                {
+                  key: 'entryCriteria',
+                  label: 'Entry Criteria',
+                  placeholder: 'Conditions required before testing starts...',
+                },
+                {
+                  key: 'exitCriteria',
+                  label: 'Exit Criteria',
+                  placeholder: 'Pass rate and defect thresholds for sign-off...',
+                },
+                {
+                  key: 'deliverables',
+                  label: 'QA Deliverables',
+                  placeholder: 'Test reports, defect logs, release sign-off...',
+                },
+                {
+                  key: 'risks',
+                  label: 'Risks & Mitigation',
+                  placeholder: 'Known technical or schedule risks and fallbacks...',
+                },
+                {
+                  key: 'tools',
+                  label: 'Tools & Automation Stack',
+                  placeholder: 'Qavora, Playwright, Postman, Android Studio...',
+                },
+                {
+                  key: 'schedule',
+                  label: 'Schedule & Milestones',
+                  placeholder: 'Target dates for freeze, regression, and release...',
+                },
+                {
+                  key: 'approvals',
+                  label: 'Sign-off & Approvals',
+                  placeholder: 'QA Lead, Product Manager, Engineering Lead...',
+                },
+                {
+                  key: 'notes',
+                  label: 'Additional Notes',
+                  placeholder: 'Any supplemental test plan notes...',
+                },
+              ].map((field) => (
+                <View key={field.key}>
+                  <Text
+                    style={[styles.inputLabel, { color: colors.textSecondary }]}
+                  >
+                    {field.label}
+                  </Text>
+                  <TextInput
+                    value={planForm[field.key]}
+                    onChangeText={(val) =>
+                      handlePlanFieldChange(field.key, val)
+                    }
+                    placeholder={field.placeholder}
+                    placeholderTextColor={colors.textMuted}
+                    multiline
+                    style={[
+                      styles.textArea,
+                      {
+                        backgroundColor: colors.surfaceMuted,
+                        color: colors.text,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  />
+                </View>
+              ))}
+            </ScrollView>
+
+            <View
+              style={[styles.modalFooter, { borderTopColor: colors.border }]}
+            >
+              <Pressable
+                disabled={isSubmittingPlan}
+                onPress={() => setIsPlanModalOpen(false)}
+                style={[
+                  styles.footerSecondaryBtn,
+                  {
+                    backgroundColor: colors.surfaceMuted,
+                    borderColor: colors.border,
+                  },
+                ]}
               >
                 <Text
                   style={[
-                    styles.confirmCancelText,
-                    { color: theme.textSecondary },
+                    styles.footerSecondaryText,
+                    { color: colors.textSecondary },
                   ]}
                 >
                   Cancel
                 </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
+              </Pressable>
+              <Pressable
+                disabled={isSubmittingPlan}
+                onPress={handleSavePlan}
                 style={[
-                  styles.confirmDeleteBtn,
+                  styles.footerPrimaryBtn,
+                  { backgroundColor: colors.primary },
+                ]}
+              >
+                {isSubmittingPlan ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <Text style={styles.footerPrimaryText}>Save Test Plan</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ===================================================================
+          MODAL 8: CREATE / EDIT TESTING PHASE
+         =================================================================== */}
+      <Modal
+        visible={isPhaseModalOpen}
+        animationType="fade"
+        transparent
+        onRequestClose={() => !isSubmittingPhase && setIsPhaseModalOpen(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.centeredModalOverlay}
+        >
+          <View
+            style={[
+              styles.smallModalCard,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Text
+              style={[styles.smallModalTitle, { color: colors.text }]}
+            >
+              {editingPhase ? 'Edit Testing Phase' : 'Add Testing Phase'}
+            </Text>
+
+            {phaseFormError && (
+              <View
+                style={[
+                  styles.formAlertBox,
                   {
-                    backgroundColor: theme.danger,
-                    opacity: isDeletingRun ? 0.7 : 1,
+                    backgroundColor: colors.dangerSoft,
+                    borderColor: colors.danger,
                   },
                 ]}
-                onPress={handleConfirmDeleteRun}
-                disabled={isDeletingRun}
               >
-                {isDeletingRun ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
+                <Text style={[styles.formAlertText, { color: colors.danger }]}>
+                  {phaseFormError}
+                </Text>
+              </View>
+            )}
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Phase Name *
+            </Text>
+            <TextInput
+              value={phaseNameInput}
+              onChangeText={setPhaseNameInput}
+              placeholder="e.g., Phase 1: Smoke & Sanity"
+              placeholderTextColor={colors.textMuted}
+              style={[
+                styles.textInput,
+                {
+                  backgroundColor: colors.surfaceMuted,
+                  color: colors.text,
+                  borderColor: colors.border,
+                },
+              ]}
+            />
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Phase Description
+            </Text>
+            <TextInput
+              value={phaseDescInput}
+              onChangeText={setPhaseDescInput}
+              placeholder="Goals and gate criteria for this phase..."
+              placeholderTextColor={colors.textMuted}
+              style={[
+                styles.textInput,
+                {
+                  backgroundColor: colors.surfaceMuted,
+                  color: colors.text,
+                  borderColor: colors.border,
+                },
+              ]}
+            />
+
+            <View style={styles.smallModalActions}>
+              <Pressable
+                disabled={isSubmittingPhase}
+                onPress={() => setIsPhaseModalOpen(false)}
+                style={[
+                  styles.footerSecondaryBtn,
+                  {
+                    backgroundColor: colors.surfaceMuted,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.footerSecondaryText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Cancel
+                </Text>
+              </Pressable>
+              <Pressable
+                disabled={isSubmittingPhase}
+                onPress={handleSavePhase}
+                style={[
+                  styles.footerPrimaryBtn,
+                  { backgroundColor: colors.primary },
+                ]}
+              >
+                {isSubmittingPhase ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
                 ) : (
-                  <VectorIcon name="trash" size={14} color="#FFFFFF" />
+                  <Text style={styles.footerPrimaryText}>
+                    {editingPhase ? 'Save Phase' : 'Add Phase'}
+                  </Text>
                 )}
-                <Text style={styles.confirmDeleteText}>Delete Run</Text>
-              </TouchableOpacity>
+              </Pressable>
             </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ===================================================================
+          MODAL 9: DELETE TESTING PHASE CONFIRMATION
+         =================================================================== */}
+      <Modal
+        visible={!!deletingPhase}
+        animationType="fade"
+        transparent
+        onRequestClose={() => !isDeletingPhase && setDeletingPhase(null)}
+      >
+        <View style={styles.centeredModalOverlay}>
+          <View
+            style={[
+              styles.smallModalCard,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            {deletingPhase && (
+              <>
+                <Text
+                  style={[
+                    styles.smallModalTitle,
+                    { color: colors.text },
+                  ]}
+                >
+                  Delete Phase &quot;{deletingPhase.name}&quot;?
+                </Text>
+                <Text
+                  style={[
+                    styles.confirmDialogDesc,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Deleting this testing phase will remove the phase milestone
+                  from the Test Plan while preserving all existing test suites
+                  and test cases in the project.
+                </Text>
+
+                <View style={styles.smallModalActions}>
+                  <Pressable
+                    disabled={isDeletingPhase}
+                    onPress={() => setDeletingPhase(null)}
+                    style={[
+                      styles.footerSecondaryBtn,
+                      {
+                        backgroundColor: colors.surfaceMuted,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.footerSecondaryText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Cancel
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={isDeletingPhase}
+                    onPress={handleConfirmDeletePhase}
+                    style={[
+                      styles.footerPrimaryBtn,
+                      { backgroundColor: colors.danger },
+                    ]}
+                  >
+                    {isDeletingPhase ? (
+                      <ActivityIndicator size="small" color="#ffffff" />
+                    ) : (
+                      <Text style={styles.footerPrimaryText}>Delete Phase</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </>
+            )}
           </View>
         </View>
       </Modal>
@@ -3017,604 +4185,630 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  emptyWorkspaceWrap: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  emptyWorkspaceCard: {
-    width: '100%',
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 24,
-    alignItems: 'center',
-    gap: 10,
-  },
-  emptyWorkspaceTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  emptyWorkspaceSub: {
-    fontSize: 13,
-    textAlign: 'center',
-    lineHeight: 19,
-  },
-  primaryActionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  topSubNavWrap: {
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
     gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 10,
   },
-  primaryActionBtnText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  projectStrip: {
+  projectContextRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
+    columnGap: 8,
+    rowGap: 4,
   },
-  projectStripLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flex: 1,
-  },
-  projectDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  projectStripName: {
-    fontSize: 13,
-    fontWeight: '800',
-    maxWidth: 190,
-  },
-  projectStatusBadge: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  projectStatusBadgeText: {
-    fontSize: 10,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  projectStripRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  syncIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  syncIndicatorText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  iconRefreshBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  alertBanner: {
-    marginHorizontal: 16,
-    marginTop: 10,
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 8,
-  },
-  alertBannerTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  alertBannerText: {
-    flex: 1,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 17,
-  },
-  alertBannerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 8,
-  },
-  alertBannerBtn: {
+  projectContextLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    flex: 1,
+    flexShrink: 1,
+    minWidth: 140,
+  },
+  projectContextName: {
+    fontSize: 12,
+    fontWeight: '800',
+    flexShrink: 1,
+  },
+  syncStatusRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  syncPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  syncPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  segmentedBar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 3,
+    gap: 4,
+  },
+  segmentBtn: {
+    flex: 1,
+    minWidth: 92,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 7,
+    paddingHorizontal: 6,
+    borderRadius: 8,
+  },
+  segmentBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    flexShrink: 1,
+  },
+  errorBanner: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 10,
+    gap: 8,
+  },
+  errorBannerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  errorBannerText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
+  },
+  errorBannerActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  errorBannerBtn: {
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
   },
-  alertBannerBtnText: {
-    color: '#FFFFFF',
+  errorBannerBtnText: {
+    color: '#ffffff',
     fontSize: 11,
     fontWeight: '800',
   },
-  alertBannerDismiss: {
+  errorBannerBtnOutline: {
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 6,
     borderRadius: 8,
     borderWidth: 1,
   },
-  alertBannerDismissText: {
+  errorBannerBtnOutlineText: {
     fontSize: 11,
     fontWeight: '700',
   },
-  feedbackBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginHorizontal: 16,
-    marginTop: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  feedbackBannerText: {
-    flex: 1,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  modeSwitcherWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+  topSearchWrap: {
+    paddingTop: 10,
+    paddingBottom: 10,
     borderBottomWidth: 1,
-    gap: 10,
+    gap: 8,
   },
-  modeSwitcherTrack: {
-    flex: 1,
+  searchBarRow: {
     flexDirection: 'row',
-    borderRadius: 10,
-    borderWidth: 1,
-    padding: 3,
+    paddingHorizontal: 14,
+    gap: 8,
   },
-  modeTab: {
+  searchInputBox: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    height: 40,
     gap: 6,
-    paddingVertical: 7,
-    borderRadius: 8,
-  },
-  modeTabText: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  newRunTopBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderRadius: 10,
-  },
-  newRunTopBtnText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  runSelectorBar: {
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-  },
-  runListScroll: {
-    paddingHorizontal: 16,
-    gap: 10,
-    alignItems: 'center',
-  },
-  runTabCard: {
-    width: 196,
-    padding: 11,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  runTabTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  runTabId: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  runStatusPill: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  runStatusText: {
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  runTabName: {
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 7,
-  },
-  runMiniProgress: {
-    gap: 4,
-  },
-  runMiniTrack: {
-    height: 5,
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  runMiniFill: {
-    height: '100%',
-    borderRadius: 3,
-  },
-  runMiniPct: {
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  contentContainer: {
-    padding: 16,
-  },
-  summaryCard: {
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 15,
-    marginBottom: 14,
-  },
-  summaryTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: 10,
-    marginBottom: 10,
-  },
-  summaryTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
-  },
-  summaryRunId: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  summaryRunTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    marginBottom: 3,
-  },
-  summaryMeta: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  summarySubMeta: {
-    fontSize: 11,
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  summaryRunNotes: {
-    fontSize: 12,
-    fontStyle: 'italic',
-    marginTop: 5,
-  },
-  runManagementRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  completeRunBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  completeRunBtnText: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  secondaryRunBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  secondaryRunBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  progressSection: {
-    marginBottom: 12,
-  },
-  progressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  progressLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  progressPct: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  progressTrack: {
-    height: 8,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  counterRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  counterChip: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1.5,
-  },
-  counterVal: {
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  counterLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  filterControls: {
-    marginBottom: 12,
-    gap: 10,
-  },
-  searchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 42,
-    borderRadius: 11,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    gap: 8,
   },
   searchInput: {
     flex: 1,
     fontSize: 13,
-    height: '100%',
+    paddingVertical: 0,
   },
-  filterTabsScroll: {
-    gap: 8,
+  addCaseBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    height: 40,
   },
-  filterPill: {
-    paddingHorizontal: 13,
-    paddingVertical: 6,
-    borderRadius: 18,
-    borderWidth: 1,
-  },
-  filterPillText: {
+  addCaseBtnText: {
+    color: '#ffffff',
     fontSize: 12,
     fontWeight: '700',
   },
-  execCaseCard: {
-    borderRadius: 14,
-    borderWidth: 1,
-    padding: 14,
-    marginBottom: 10,
+  suiteScrollContent: {
+    paddingHorizontal: 14,
+    gap: 6,
   },
-  execCardTop: {
+  suiteChip: {
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  suiteChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  filterRowContent: {
+    paddingHorizontal: 14,
+    gap: 6,
+    alignItems: 'center',
+  },
+  miniFilterChip: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  miniFilterText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  filterDivider: {
+    width: 1,
+    height: 16,
+    marginHorizontal: 4,
+  },
+  listScroll: {
+    flex: 1,
+  },
+  listContent: {
+    padding: 14,
+    paddingBottom: 32,
+    gap: 10,
+  },
+  resultsBar: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    gap: 6,
+    marginBottom: 2,
   },
-  execIdWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  execId: {
+  resultsCount: {
     fontSize: 12,
+    fontWeight: '600',
+  },
+  resetText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  emptyCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 24,
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  emptySub: {
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 19,
+  },
+  emptyCta: {
+    marginTop: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  emptyCtaText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  caseCard: {
+    borderRadius: 13,
+    borderWidth: 1,
+    padding: 13,
+    gap: 7,
+  },
+  caseTopRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 6,
+  },
+  caseIdBadgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+  },
+  caseId: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  prioBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 5,
+    borderWidth: 1,
+  },
+  prioBadgeText: {
+    fontSize: 10,
     fontWeight: '800',
   },
-  execBadge: {
+  statusBadge: {
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  caseTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 20,
+  },
+  caseDesc: {
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  caseFooterRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
+    marginTop: 2,
+  },
+  caseMetaRow: {
+    flexDirection: 'row',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  metaPill: {
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
   },
-  execBadgeText: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  historyRunBadge: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 6,
-    borderWidth: 1,
-  },
-  historyRunBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  execStepsCount: {
+  metaPillText: {
     fontSize: 11,
     fontWeight: '600',
   },
-  execTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 20,
-    marginBottom: 8,
+  stepsCountText: {
+    fontSize: 11,
+    fontWeight: '600',
   },
-  execNotesBox: {
+  cardActionsBar: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
     gap: 6,
-    padding: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    marginBottom: 6,
-  },
-  execNotesText: {
-    flex: 1,
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  execTimestampText: {
-    fontSize: 11,
-    fontWeight: '500',
-    marginBottom: 6,
-  },
-  linkedBugChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 1,
-    marginBottom: 8,
-  },
-  linkedBugText: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  quickActionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 10,
+    paddingTop: 8,
     marginTop: 4,
     borderTopWidth: 1,
-    flexWrap: 'wrap',
-    gap: 8,
   },
-  quickStatusGroup: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  quickRightGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  quickBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  quickBtnText: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  logBugInlineBtn: {
+  cardMiniBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     paddingHorizontal: 9,
-    paddingVertical: 6,
-    borderRadius: 8,
+    paddingVertical: 5,
+    borderRadius: 7,
     borderWidth: 1,
   },
-  logBugInlineText: {
+  cardMiniBtnText: {
     fontSize: 11,
+    fontWeight: '700',
+  },
+  sectionBannerCard: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  sectionBannerTitle: {
+    fontSize: 15,
     fontWeight: '800',
   },
-  stepRunnerBtn: {
+  sectionBannerSub: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 2,
+  },
+  primaryActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 10,
+  },
+  primaryActionBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  secondaryActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 7,
     borderRadius: 8,
     borderWidth: 1,
   },
-  stepRunnerBtnText: {
+  secondaryActionBtnText: {
     fontSize: 11,
     fontWeight: '800',
   },
-  emptyRunFallback: {
-    padding: 16,
-  },
-  emptyBox: {
+  suiteDetailCard: {
     borderRadius: 14,
     borderWidth: 1,
-    padding: 28,
+    padding: 14,
+    gap: 8,
+  },
+  suiteDetailTop: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  suiteBadgeRow: {
+    flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    flexWrap: 'wrap',
   },
-  emptyTitle: {
+  suiteDetailName: {
     fontSize: 15,
     fontWeight: '800',
   },
-  emptySub: {
+  suiteDetailDesc: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  suiteTagsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  caseCountBadge: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    minWidth: 54,
+  },
+  caseCountNumber: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  caseCountLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  suiteStatsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  suiteStatItem: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  planHeaderCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 14,
+    gap: 12,
+  },
+  planHeaderTop: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  planIdLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  planTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    lineHeight: 22,
+  },
+  planSummaryStrip: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    justifyContent: 'space-around',
+    gap: 8,
+  },
+  planMetricBox: {
+    alignItems: 'center',
+    minWidth: 60,
+    gap: 2,
+  },
+  planMetricVal: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  planMetricLbl: {
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  planSectionCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 14,
+    gap: 10,
+  },
+  planSectionHeader: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  planSectionTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  planSectionSub: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 2,
+  },
+  inlineEmptyBox: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 14,
+    alignItems: 'center',
+  },
+  inlineEmptyText: {
     fontSize: 12,
     textAlign: 'center',
     lineHeight: 18,
   },
+  phaseRowCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 11,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  phaseOrderCircle: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  phaseOrderText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  phaseRowName: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  phaseRowDesc: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  phaseRowStats: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  phaseRowActions: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  iconSquareBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  planDocBlock: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 11,
+    gap: 4,
+  },
+  planDocLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  planDocValue: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
   modalOverlay: {
     flex: 1,
+    backgroundColor: 'rgba(2, 6, 23, 0.72)',
     justifyContent: 'flex-end',
   },
   modalSheet: {
-    maxHeight: '92%',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    maxHeight: '90%',
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
     borderWidth: 1,
     overflow: 'hidden',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     padding: 16,
     borderBottomWidth: 1,
+    gap: 12,
+  },
+  modalIdRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
   },
   modalCaseId: {
-    fontSize: 11,
-    fontWeight: '800',
-    marginBottom: 2,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  modalSuiteName: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   modalTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '800',
+    lineHeight: 22,
   },
-  closeBtn: {
+  closeCircle: {
     width: 32,
     height: 32,
     borderRadius: 16,
@@ -3622,328 +4816,252 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalBody: {
-    padding: 16,
+    maxHeight: 500,
   },
-  precondBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  modalBodyContent: {
+    padding: 16,
+    gap: 12,
+  },
+  detailBlock: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
     gap: 8,
-    padding: 10,
+  },
+  blockLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  blockBody: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  quickStatusRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  quickStatusBtn: {
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  quickStatusText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  metaGrid: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  metaCell: {
+    flex: 1,
     borderRadius: 10,
     borderWidth: 1,
-    marginBottom: 14,
+    padding: 10,
+    gap: 3,
   },
-  precondText: {
+  metaCellLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  metaCellValue: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  stepItem: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+  },
+  stepNumberCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepNumberText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  stepContentCol: {
     flex: 1,
+    gap: 3,
+  },
+  stepActionText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  stepExpectedText: {
     fontSize: 12,
     lineHeight: 17,
   },
-  stepSectionHeaderRow: {
+  modalFooter: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  passAllStepsBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  passAllStepsBtnText: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  sectionHeaderLabel: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    marginBottom: 8,
-  },
-  stepRunnerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    marginBottom: 8,
-    gap: 10,
-  },
-  stepInfo: {
-    flex: 1,
-  },
-  stepNumLabel: {
-    fontSize: 11,
-    fontWeight: '800',
-    marginBottom: 2,
-  },
-  stepDescText: {
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  stepExpectedSub: {
-    fontSize: 11,
-    marginTop: 2,
-  },
-  stepToggles: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  stepToggleBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  expectedBox: {
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    marginTop: 4,
-  },
-  expectedLabel: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    marginBottom: 4,
-  },
-  expectedVal: {
-    fontSize: 13,
-    fontWeight: '600',
-    lineHeight: 18,
-  },
-  notesArea: {
-    minHeight: 74,
-    borderRadius: 10,
-    borderWidth: 1,
-    padding: 10,
-    fontSize: 13,
-    textAlignVertical: 'top',
-  },
-  execMetaInputsGrid: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  execMetaInputCol: {
-    flex: 1,
-  },
-  runnerFooter: {
-    padding: 16,
+    padding: 14,
     borderTopWidth: 1,
-    gap: 10,
-  },
-  runnerFooterTitle: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  runnerOutcomeButtons: {
-    flexDirection: 'row',
     gap: 8,
   },
-  outcomeBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    height: 40,
-    borderRadius: 10,
-  },
-  outcomeBtnText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  failAndBugBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    height: 42,
+  footerDangerBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 11,
     borderRadius: 10,
     borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  failAndBugBtnText: {
+  footerDangerText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  footerSecondaryBtn: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footerSecondaryText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  footerPrimaryBtn: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footerPrimaryText: {
+    color: '#ffffff',
     fontSize: 13,
     fontWeight: '800',
   },
-  formErrorBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  formAlertBox: {
     padding: 10,
     borderRadius: 10,
     borderWidth: 1,
-    marginBottom: 8,
   },
-  formErrorText: {
-    flex: 1,
+  formAlertText: {
     fontSize: 12,
     fontWeight: '700',
   },
   inputLabel: {
     fontSize: 12,
     fontWeight: '700',
-    marginTop: 10,
-    marginBottom: 6,
+    marginTop: 4,
   },
-  inputField: {
-    height: 42,
-    borderRadius: 10,
+  emptyHintText: {
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
+  textInput: {
     borderWidth: 1,
+    borderRadius: 10,
     paddingHorizontal: 12,
+    paddingVertical: 10,
     fontSize: 13,
   },
-  optionPill: {
+  textArea: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+    minHeight: 72,
+    textAlignVertical: 'top',
+  },
+  optionChipsRow: {
+    gap: 6,
+    paddingVertical: 2,
+  },
+  optionChipsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  optionChip: {
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 8,
     borderWidth: 1,
-    marginRight: 8,
   },
-  optionPillText: {
+  optionChipText: {
     fontSize: 12,
     fontWeight: '700',
   },
-  caseSelectionHeader: {
+  stepsHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 6,
+    marginTop: 6,
   },
-  caseSelectionQuickBtns: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  selectAllLink: {
+  addStepLink: {
     fontSize: 12,
     fontWeight: '800',
   },
-  casePickerBox: {
-    maxHeight: 165,
+  stepBuilderCard: {
     borderRadius: 10,
     borderWidth: 1,
-    overflow: 'hidden',
-  },
-  emptyPickerText: {
-    padding: 12,
-    fontSize: 12,
-    textAlign: 'center',
-  },
-  casePickerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-  },
-  casePickerTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  modalFooter: {
-    flexDirection: 'row',
-    gap: 10,
-    padding: 16,
-    borderTopWidth: 1,
-  },
-  cancelBtn: {
-    flex: 1,
-    height: 44,
-    borderRadius: 11,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cancelBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  saveBtn: {
-    flex: 2,
-    flexDirection: 'row',
-    height: 44,
-    borderRadius: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
+    padding: 10,
     gap: 6,
   },
-  saveBtnText: {
-    color: '#FFFFFF',
-    fontSize: 13,
+  stepBuilderTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  stepBuilderTitle: {
+    fontSize: 12,
     fontWeight: '800',
   },
-  confirmOverlay: {
+  centeredModalOverlay: {
     flex: 1,
-    alignItems: 'center',
+    backgroundColor: 'rgba(2, 6, 23, 0.72)',
     justifyContent: 'center',
-    padding: 24,
+    padding: 20,
   },
-  confirmCard: {
-    width: '100%',
-    maxWidth: 400,
+  smallModalCard: {
     borderRadius: 18,
     borderWidth: 1,
-    padding: 20,
-    alignItems: 'center',
-  },
-  confirmIconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  confirmTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    marginBottom: 6,
-  },
-  confirmDesc: {
-    fontSize: 13,
-    textAlign: 'center',
-    lineHeight: 19,
-    marginBottom: 18,
-  },
-  confirmBtnRow: {
-    flexDirection: 'row',
+    padding: 18,
     gap: 10,
-    width: '100%',
   },
-  confirmCancelBtn: {
-    flex: 1,
-    height: 42,
+  smallModalTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  confirmDialogDesc: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  suiteSelectList: {
+    gap: 8,
+    marginVertical: 4,
+  },
+  suiteSelectItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderRadius: 10,
     borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  confirmCancelText: {
+  suiteSelectItemText: {
     fontSize: 13,
     fontWeight: '700',
   },
-  confirmDeleteBtn: {
-    flex: 1,
+  smallModalActions: {
     flexDirection: 'row',
-    height: 42,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  confirmDeleteText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '800',
+    gap: 8,
+    marginTop: 8,
   },
 });

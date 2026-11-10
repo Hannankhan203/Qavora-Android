@@ -1016,21 +1016,22 @@ const styles = StyleSheet.create({
   },
   navRightGroup: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: 8,
   },
   navBtn: {
-    minHeight: 40,
-    paddingHorizontal: 12,
+    minHeight: 38,
+    paddingHorizontal: 11,
     borderRadius: 10,
     borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 5,
   },
   navBtnText: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: '700',
   },
   errorBanner: {
@@ -1054,6 +1055,7 @@ const styles = StyleSheet.create({
   },
   identityHeaderRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,

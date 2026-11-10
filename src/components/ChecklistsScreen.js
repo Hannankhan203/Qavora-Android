@@ -381,13 +381,21 @@ export default function ChecklistsScreen({ onBackToOverview }) {
     setFormError(null);
 
     try {
+      const existingChecklist =
+        formMode === 'edit' && editingChecklistId
+          ? checklists.find((c) => c.id === editingChecklistId)
+          : null;
       const targetProjId =
-        formProjectScope === 'current' && selectedProjectId
-          ? selectedProjectId
+        formProjectScope === 'current'
+          ? selectedProjectId ||
+            (existingChecklist && existingChecklist.projectId) ||
+            null
           : null;
       const targetProjName =
-        formProjectScope === 'current' && selectedProject
-          ? selectedProject.name || ''
+        formProjectScope === 'current'
+          ? (selectedProject && selectedProject.name) ||
+            (existingChecklist && existingChecklist.projectName) ||
+            ''
           : '';
 
       if (formMode === 'create') {
@@ -2167,7 +2175,7 @@ export default function ChecklistsScreen({ onBackToOverview }) {
                 >
                   <VectorIcon name="chevron-left" size={14} color={colors.text} />
                   <Text style={[styles.secondaryHeaderBtnText, { color: colors.text }]}>
-                    Overview
+                    {selectedProject ? 'Overview' : 'Projects'}
                   </Text>
                 </Pressable>
               ) : null}
@@ -2916,30 +2924,30 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   primaryHeaderBtn: {
-    minHeight: 44,
-    paddingHorizontal: 14,
+    minHeight: 40,
+    paddingHorizontal: 12,
     borderRadius: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 5,
   },
   primaryHeaderBtnText: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: '700',
   },
   secondaryHeaderBtn: {
-    minHeight: 44,
-    paddingHorizontal: 12,
+    minHeight: 40,
+    paddingHorizontal: 11,
     borderRadius: 10,
     borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 5,
   },
   secondaryHeaderBtnText: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: '600',
   },
   scopeToggleRow: {
@@ -2949,17 +2957,19 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   scopeTab: {
-    minHeight: 40,
-    paddingHorizontal: 12,
+    minHeight: 38,
+    paddingHorizontal: 11,
     borderRadius: 10,
     borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    flexShrink: 1,
   },
   scopeTabText: {
     fontSize: 12,
     fontWeight: '700',
+    flexShrink: 1,
   },
   statusBanner: {
     borderRadius: 12,
@@ -3181,6 +3191,7 @@ const styles = StyleSheet.create({
   },
   detailTopActions: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: 8,
   },
@@ -3214,13 +3225,16 @@ const styles = StyleSheet.create({
   },
   progressHeaderRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 6,
     marginBottom: 6,
   },
   progressLabel: {
     fontSize: 12,
     fontWeight: '600',
+    flexShrink: 1,
   },
   progressPercent: {
     fontSize: 14,

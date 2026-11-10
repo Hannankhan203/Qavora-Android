@@ -17,6 +17,7 @@ import AuthScreen from './src/components/AuthScreen';
 import ProjectSelectionScreen from './src/components/ProjectSelectionScreen';
 import ProjectDetailsScreen from './src/components/ProjectDetailsScreen';
 import DashboardScreen from './src/components/DashboardScreen';
+import ChecklistsScreen from './src/components/ChecklistsScreen';
 import TestCasesScreen from './src/components/TestCasesScreen';
 import TestRunsScreen from './src/components/TestRunsScreen';
 import DefectsScreen from './src/components/DefectsScreen';
@@ -50,21 +51,51 @@ function QavoraQAShell() {
     setDashboardSubTab,
     projectViewMode,
     setProjectViewMode,
+    openChecklistsView,
+    openDataManagementView,
     metrics,
     selectedTestCaseId,
     setSelectedTestCaseId,
     selectedDefectId,
     setSelectedDefectId,
     toast,
+    showToast,
     dismissToast,
   } = useWorkspace();
 
-  // If no project is selected, always show the Project Selection screen
-  const effectiveViewMode = !selectedProject ? 'selection' : projectViewMode;
+  // Allow account-level Checklists and Profile/Settings/Data Management even when selectedProject is null
+  const canViewWithoutProject =
+    projectViewMode === 'checklists' ||
+    (projectViewMode === 'workspace' &&
+      (activeTab === 'profile' ||
+        (activeTab === 'dashboard' && dashboardSubTab === 'checklists')));
+
+  const effectiveViewMode =
+    !selectedProject && !canViewWithoutProject
+      ? 'selection'
+      : !selectedProject && projectViewMode === 'details'
+      ? 'selection'
+      : projectViewMode;
+
+  const isChecklistsActive =
+    effectiveViewMode === 'checklists' ||
+    (effectiveViewMode === 'workspace' &&
+      activeTab === 'dashboard' &&
+      dashboardSubTab === 'checklists');
 
   // Android Hardware Back Navigation Handler
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (effectiveViewMode === 'checklists') {
+        if (selectedProject) {
+          setProjectViewMode('workspace');
+          setDashboardSubTab('overview');
+        } else {
+          setProjectViewMode('selection');
+          setDashboardSubTab('overview');
+        }
+        return true;
+      }
       if (effectiveViewMode === 'details' && selectedProject) {
         setProjectViewMode('workspace');
         return true;
@@ -81,6 +112,10 @@ function QavoraQAShell() {
         setSelectedDefectId(null);
         return true;
       }
+      if (!selectedProject && effectiveViewMode === 'workspace') {
+        setProjectViewMode('selection');
+        return true;
+      }
       if (
         activeTab === 'dashboard' &&
         (dashboardSubTab === 'reports' || dashboardSubTab === 'checklists')
@@ -89,7 +124,11 @@ function QavoraQAShell() {
         return true;
       }
       if (activeTab !== 'dashboard') {
-        setActiveTab('dashboard');
+        if (selectedProject) {
+          setActiveTab('dashboard');
+        } else {
+          setProjectViewMode('selection');
+        }
         return true;
       }
       return false;
@@ -110,15 +149,19 @@ function QavoraQAShell() {
   ]);
 
   const headerSubtitle = !selectedProject
-    ? 'Select or Create a Project'
+    ? isChecklistsActive
+      ? 'Account-Wide QA Checklists'
+      : effectiveViewMode === 'workspace' && activeTab === 'profile'
+      ? 'Account Settings & Data Management'
+      : 'Select or Create a Project'
     : effectiveViewMode === 'selection'
     ? `Switching Project · Active: ${selectedProject.name}`
     : effectiveViewMode === 'details'
     ? `${selectedProject.name} · Project Details`
+    : isChecklistsActive
+    ? `${selectedProject.name} · QA Checklists`
     : activeTab === 'dashboard' && dashboardSubTab === 'reports'
     ? `${selectedProject.name} · Reports & Analytics`
-    : activeTab === 'dashboard' && dashboardSubTab === 'checklists'
-    ? `${selectedProject.name} · QA Checklists`
     : `${selectedProject.name} · ${SCREEN_TITLES[activeTab] || 'QA Manager'}`;
 
   return (
@@ -142,6 +185,8 @@ function QavoraQAShell() {
                 setProjectViewMode(
                   effectiveViewMode === 'details' ? 'workspace' : 'details'
                 );
+              } else {
+                setProjectViewMode('selection');
               }
             }}
             style={styles.brandLockup}
@@ -171,105 +216,93 @@ function QavoraQAShell() {
           </Pressable>
 
           <View style={styles.topRightUtilities}>
-            {selectedProject ? (
-              <Pressable
-                onPress={() => {
-                  if (
-                    effectiveViewMode === 'workspace' &&
-                    activeTab === 'dashboard' &&
-                    dashboardSubTab === 'checklists'
-                  ) {
+            <Pressable
+              onPress={() => {
+                if (isChecklistsActive) {
+                  if (selectedProject) {
+                    setProjectViewMode('workspace');
                     setDashboardSubTab('overview');
                   } else {
-                    setProjectViewMode('workspace');
-                    setActiveTab('dashboard');
-                    setDashboardSubTab('checklists');
+                    setProjectViewMode('selection');
+                    setDashboardSubTab('overview');
                   }
-                }}
-                style={[
-                  styles.projectSwitchBtn,
-                  {
-                    backgroundColor:
-                      effectiveViewMode === 'workspace' &&
-                      activeTab === 'dashboard' &&
-                      dashboardSubTab === 'checklists'
-                        ? colors.primary
-                        : colors.surfaceAccent,
-                    borderColor: colors.primary,
-                  },
-                ]}
-              >
-                <VectorIcon
-                  name="clipboard"
-                  size={14}
-                  color={
-                    effectiveViewMode === 'workspace' &&
-                    activeTab === 'dashboard' &&
-                    dashboardSubTab === 'checklists'
-                      ? colors.textOnPrimary
-                      : colors.primary
-                  }
-                />
-                <Text
-                  style={[
-                    styles.projectSwitchBtnText,
-                    {
-                      color:
-                        effectiveViewMode === 'workspace' &&
-                        activeTab === 'dashboard' &&
-                        dashboardSubTab === 'checklists'
-                          ? colors.textOnPrimary
-                          : colors.primary,
-                    },
-                  ]}
-                >
-                  Checklists
-                </Text>
-              </Pressable>
-            ) : null}
-
-            {selectedProject ? (
-              <Pressable
-                onPress={() =>
-                  setProjectViewMode(
-                    effectiveViewMode === 'selection' ? 'workspace' : 'selection'
-                  )
+                } else {
+                  openChecklistsView();
                 }
+              }}
+              style={[
+                styles.projectSwitchBtn,
+                {
+                  backgroundColor: isChecklistsActive
+                    ? colors.primary
+                    : colors.surfaceAccent,
+                  borderColor: colors.primary,
+                },
+              ]}
+            >
+              <VectorIcon
+                name="clipboard"
+                size={14}
+                color={
+                  isChecklistsActive ? colors.textOnPrimary : colors.primary
+                }
+              />
+              <Text
                 style={[
-                  styles.projectSwitchBtn,
+                  styles.projectSwitchBtnText,
                   {
-                    backgroundColor:
-                      effectiveViewMode === 'selection'
-                        ? colors.primary
-                        : colors.surfaceAccent,
-                    borderColor: colors.primary,
+                    color: isChecklistsActive
+                      ? colors.textOnPrimary
+                      : colors.primary,
                   },
                 ]}
               >
-                <VectorIcon
-                  name="folder"
-                  size={14}
-                  color={
+                Checklists
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => {
+                if (effectiveViewMode === 'selection' && selectedProject) {
+                  setProjectViewMode('workspace');
+                } else {
+                  setProjectViewMode('selection');
+                }
+              }}
+              style={[
+                styles.projectSwitchBtn,
+                {
+                  backgroundColor:
                     effectiveViewMode === 'selection'
-                      ? colors.textOnPrimary
-                      : colors.primary
-                  }
-                />
-                <Text
-                  style={[
-                    styles.projectSwitchBtnText,
-                    {
-                      color:
-                        effectiveViewMode === 'selection'
-                          ? colors.textOnPrimary
-                          : colors.primary,
-                    },
-                  ]}
-                >
-                  Projects
-                </Text>
-              </Pressable>
-            ) : null}
+                      ? colors.primary
+                      : colors.surfaceAccent,
+                  borderColor: colors.primary,
+                },
+              ]}
+            >
+              <VectorIcon
+                name="folder"
+                size={14}
+                color={
+                  effectiveViewMode === 'selection'
+                    ? colors.textOnPrimary
+                    : colors.primary
+                }
+              />
+              <Text
+                style={[
+                  styles.projectSwitchBtnText,
+                  {
+                    color:
+                      effectiveViewMode === 'selection'
+                        ? colors.textOnPrimary
+                        : colors.primary,
+                  },
+                ]}
+              >
+                Projects
+              </Text>
+            </Pressable>
 
             {selectedProject && effectiveViewMode === 'workspace' ? (
               <Text
@@ -288,10 +321,7 @@ function QavoraQAShell() {
                   syncStatus.conflictCount > 0 ||
                   syncStatus.isSyncing))) ? (
               <Pressable
-                onPress={() => {
-                  setProjectViewMode('workspace');
-                  setActiveTab('profile');
-                }}
+                onPress={openDataManagementView}
                 style={[
                   styles.syncPillBtn,
                   {
@@ -391,79 +421,151 @@ function QavoraQAShell() {
       <View style={styles.mainViewport}>
         {effectiveViewMode === 'selection' ? (
           <ProjectSelectionScreen
-            onOpenWorkspace={
-              selectedProject ? () => setProjectViewMode('workspace') : () => setProjectViewMode('workspace')
-            }
+            onOpenWorkspace={() => {
+              if (selectedProject) {
+                setProjectViewMode('workspace');
+              } else {
+                setProjectViewMode('selection');
+              }
+            }}
             onOpenProjectDetails={() => setProjectViewMode('details')}
           />
-        ) : effectiveViewMode === 'details' ? (
+        ) : effectiveViewMode === 'details' && selectedProject ? (
           <ProjectDetailsScreen
             onBackToWorkspace={() => setProjectViewMode('workspace')}
             onSwitchProject={() => setProjectViewMode('selection')}
             onProjectDeleted={() => setProjectViewMode('selection')}
           />
+        ) : effectiveViewMode === 'checklists' ||
+          (!selectedProject &&
+            effectiveViewMode === 'workspace' &&
+            activeTab === 'dashboard' &&
+            dashboardSubTab === 'checklists') ? (
+          <ChecklistsScreen
+            onBackToOverview={() => {
+              if (selectedProject) {
+                setProjectViewMode('workspace');
+                setDashboardSubTab('overview');
+              } else {
+                setProjectViewMode('selection');
+                setDashboardSubTab('overview');
+              }
+            }}
+          />
         ) : (
           <>
-            {activeTab === 'dashboard' && <DashboardScreen />}
-            {activeTab === 'testcases' && <TestCasesScreen />}
-            {activeTab === 'testruns' && <TestRunsScreen />}
-            {activeTab === 'defects' && <DefectsScreen />}
+            {activeTab === 'dashboard' &&
+              (selectedProject ? (
+                <DashboardScreen />
+              ) : (
+                <ProjectSelectionScreen
+                  onOpenWorkspace={() => setProjectViewMode('workspace')}
+                  onOpenProjectDetails={() => setProjectViewMode('details')}
+                />
+              ))}
+            {activeTab === 'testcases' &&
+              (selectedProject ? (
+                <TestCasesScreen />
+              ) : (
+                <ProjectSelectionScreen
+                  onOpenWorkspace={() => setProjectViewMode('workspace')}
+                  onOpenProjectDetails={() => setProjectViewMode('details')}
+                />
+              ))}
+            {activeTab === 'testruns' &&
+              (selectedProject ? (
+                <TestRunsScreen />
+              ) : (
+                <ProjectSelectionScreen
+                  onOpenWorkspace={() => setProjectViewMode('workspace')}
+                  onOpenProjectDetails={() => setProjectViewMode('details')}
+                />
+              ))}
+            {activeTab === 'defects' &&
+              (selectedProject ? (
+                <DefectsScreen />
+              ) : (
+                <ProjectSelectionScreen
+                  onOpenWorkspace={() => setProjectViewMode('workspace')}
+                  onOpenProjectDetails={() => setProjectViewMode('details')}
+                />
+              ))}
             {activeTab === 'profile' && <ProfileSettingsScreen />}
           </>
         )}
       </View>
 
-      {/* Single Primary Bottom Navigation Bar (Shown when a project is selected) */}
-      {selectedProject ? (
-        <View
-          style={[
-            styles.bottomBar,
-            { backgroundColor: colors.surface, borderTopColor: colors.border },
-          ]}
-        >
-          <View style={styles.bottomBarInner}>
-            {BOTTOM_TABS.map((tab) => {
-              const active =
-                effectiveViewMode === 'workspace' && activeTab === tab.id;
-              const showOpenBugCount =
-                tab.id === 'defects' && metrics.openDefects > 0;
+      {/* Primary Mobile Bottom Navigation Bar */}
+      <View
+        style={[
+          styles.bottomBar,
+          { backgroundColor: colors.surface, borderTopColor: colors.border },
+        ]}
+      >
+        <View style={styles.bottomBarInner}>
+          {BOTTOM_TABS.map((tab) => {
+            const active =
+              effectiveViewMode === 'workspace' &&
+              activeTab === tab.id &&
+              (tab.id === 'profile' || Boolean(selectedProject)) &&
+              (tab.id !== 'dashboard' || dashboardSubTab === 'overview');
+            const showOpenBugCount =
+              Boolean(selectedProject) &&
+              tab.id === 'defects' &&
+              metrics.openDefects > 0;
 
-              return (
-                <Pressable
-                  key={tab.id}
-                  onPress={() => {
-                    setProjectViewMode('workspace');
-                    setActiveTab(tab.id);
-                  }}
-                  style={styles.bottomTabBtn}
+            return (
+              <Pressable
+                key={tab.id}
+                onPress={() => {
+                  if (tab.id === 'profile') {
+                    openDataManagementView();
+                    return;
+                  }
+                  if (!selectedProject) {
+                    setProjectViewMode('selection');
+                    if (showToast) {
+                      showToast(
+                        `Select or create a QA project first to open ${tab.label}.`,
+                        'info'
+                      );
+                    }
+                    return;
+                  }
+                  setProjectViewMode('workspace');
+                  setActiveTab(tab.id);
+                  if (tab.id === 'dashboard') {
+                    setDashboardSubTab('overview');
+                  }
+                }}
+                style={styles.bottomTabBtn}
+              >
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.bottomTabLabel,
+                    {
+                      color: active ? colors.primary : colors.textSecondary,
+                      fontWeight: active ? '700' : '500',
+                    },
+                  ]}
                 >
-                  <Text
-                    numberOfLines={1}
+                  {tab.label}
+                  {showOpenBugCount ? ` (${metrics.openDefects})` : ''}
+                </Text>
+                {active && (
+                  <View
                     style={[
-                      styles.bottomTabLabel,
-                      {
-                        color: active ? colors.primary : colors.textSecondary,
-                        fontWeight: active ? '700' : '500',
-                      },
+                      styles.activeBarIndicator,
+                      { backgroundColor: colors.primary },
                     ]}
-                  >
-                    {tab.label}
-                    {showOpenBugCount ? ` (${metrics.openDefects})` : ''}
-                  </Text>
-                  {active && (
-                    <View
-                      style={[
-                        styles.activeBarIndicator,
-                        { backgroundColor: colors.primary },
-                      ]}
-                    />
-                  )}
-                </Pressable>
-              );
-            })}
-          </View>
+                  />
+                )}
+              </Pressable>
+            );
+          })}
         </View>
-      ) : null}
+      </View>
     </SafeAreaView>
   );
 }
@@ -565,26 +667,30 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   topBar: {
-    height: 54,
+    minHeight: 54,
     borderBottomWidth: 1,
     justifyContent: 'center',
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   topBarInner: {
     maxWidth: 920,
     width: '100%',
     alignSelf: 'center',
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
+    columnGap: 8,
+    rowGap: 6,
   },
   brandLockup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     flex: 1,
     flexShrink: 1,
+    minWidth: 145,
   },
   brandBadge: {
     width: 32,
@@ -611,30 +717,33 @@ const styles = StyleSheet.create({
   },
   topRightUtilities: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'flex-end',
+    gap: 6,
+    flexShrink: 1,
   },
   projectSwitchBtn: {
-    minHeight: 36,
-    paddingHorizontal: 10,
+    minHeight: 34,
+    paddingHorizontal: 9,
     borderRadius: 8,
     borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
+    gap: 4,
   },
   projectSwitchBtnText: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '700',
   },
   passRatePill: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '700',
   },
   syncPillBtn: {
     minHeight: 34,
-    paddingHorizontal: 9,
+    paddingHorizontal: 8,
     borderRadius: 8,
     borderWidth: 1,
     alignItems: 'center',
@@ -645,16 +754,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   themeBtn: {
-    minHeight: 36,
-    minWidth: 52,
-    paddingHorizontal: 10,
+    minHeight: 34,
+    minWidth: 46,
+    paddingHorizontal: 8,
     borderRadius: 8,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   themeBtnText: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '700',
   },
   toastBanner: {
@@ -679,7 +788,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   bottomBar: {
-    height: 58,
+    minHeight: 58,
     borderTopWidth: 1,
     justifyContent: 'center',
     paddingHorizontal: 4,
@@ -701,8 +810,9 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   bottomTabLabel: {
-    fontSize: 11,
+    fontSize: 10.5,
     textAlign: 'center',
+    flexShrink: 1,
   },
   activeBarIndicator: {
     position: 'absolute',

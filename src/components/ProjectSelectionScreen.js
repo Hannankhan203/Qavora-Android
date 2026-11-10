@@ -86,7 +86,8 @@ export default function ProjectSelectionScreen({
     selectProject,
     refreshProjects,
   } = useProjects();
-  const { showToast } = useWorkspace();
+  const { showToast, openChecklistsView, openDataManagementView } =
+    useWorkspace();
 
   const [statusFilter, setStatusFilter] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -306,6 +307,46 @@ export default function ProjectSelectionScreen({
                 {isLoading || isRefreshing ? 'Refreshing...' : 'Refresh'}
               </Text>
             </Pressable>
+
+            {typeof openChecklistsView === 'function' ? (
+              <Pressable
+                onPress={openChecklistsView}
+                style={[
+                  styles.secondaryActionBtn,
+                  {
+                    backgroundColor: colors.background,
+                    borderColor: colors.borderStrong,
+                  },
+                ]}
+              >
+                <VectorIcon name="clipboard" size={15} color={colors.primary} />
+                <Text
+                  style={[styles.secondaryActionText, { color: colors.text }]}
+                >
+                  QA Checklists
+                </Text>
+              </Pressable>
+            ) : null}
+
+            {typeof openDataManagementView === 'function' ? (
+              <Pressable
+                onPress={openDataManagementView}
+                style={[
+                  styles.secondaryActionBtn,
+                  {
+                    backgroundColor: colors.background,
+                    borderColor: colors.borderStrong,
+                  },
+                ]}
+              >
+                <VectorIcon name="layers" size={15} color={colors.primary} />
+                <Text
+                  style={[styles.secondaryActionText, { color: colors.text }]}
+                >
+                  Profile & Backup
+                </Text>
+              </Pressable>
+            ) : null}
 
             {selectedProject && typeof onOpenWorkspace === 'function' ? (
               <Pressable
@@ -579,7 +620,7 @@ export default function ProjectSelectionScreen({
               No Projects Found
             </Text>
             <Text style={[styles.stateDesc, { color: colors.textSecondary }]}>
-              You do not have any QA projects in your Qavora workspace yet. Create your first project to begin managing QA cycles, test cases, and defects.
+              You do not have any QA projects in your Qavora workspace yet. Create your first project, import a JSON backup, or manage account-wide QA checklists.
             </Text>
             <Pressable
               onPress={openCreateProjectModal}
@@ -598,6 +639,63 @@ export default function ProjectSelectionScreen({
                 Create Your First Project
               </Text>
             </Pressable>
+
+            <View
+              style={{
+                flexDirection: 'row',
+                flexWrap: 'wrap',
+                justifyContent: 'center',
+                gap: 8,
+                marginTop: 6,
+              }}
+            >
+              {typeof openDataManagementView === 'function' ? (
+                <Pressable
+                  onPress={openDataManagementView}
+                  style={[
+                    styles.secondaryActionBtn,
+                    {
+                      backgroundColor: colors.surfaceAccent,
+                      borderColor: colors.primary,
+                    },
+                  ]}
+                >
+                  <VectorIcon name="layers" size={15} color={colors.primary} />
+                  <Text
+                    style={[
+                      styles.secondaryActionText,
+                      { color: colors.primary },
+                    ]}
+                  >
+                    Import Backup & Data Management
+                  </Text>
+                </Pressable>
+              ) : null}
+
+              {typeof openChecklistsView === 'function' ? (
+                <Pressable
+                  onPress={openChecklistsView}
+                  style={[
+                    styles.secondaryActionBtn,
+                    {
+                      backgroundColor: colors.background,
+                      borderColor: colors.borderStrong,
+                    },
+                  ]}
+                >
+                  <VectorIcon
+                    name="clipboard"
+                    size={15}
+                    color={colors.primary}
+                  />
+                  <Text
+                    style={[styles.secondaryActionText, { color: colors.text }]}
+                  >
+                    Account QA Checklists
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
           </View>
         ) : null}
 
@@ -1030,16 +1128,18 @@ const styles = StyleSheet.create({
   },
   userStrip: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 10,
     borderWidth: 1,
-    gap: 10,
+    gap: 8,
   },
   userStripInfo: {
     flex: 1,
+    minWidth: 150,
   },
   userStripName: {
     fontSize: 13,
@@ -1103,6 +1203,7 @@ const styles = StyleSheet.create({
   },
   activeBannerTop: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
@@ -1402,6 +1503,7 @@ const styles = StyleSheet.create({
   },
   cardFooterRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     borderTopWidth: 1,
     paddingTop: 12,
@@ -1409,17 +1511,18 @@ const styles = StyleSheet.create({
   },
   selectBtn: {
     flex: 1,
+    minWidth: 145,
     minHeight: 42,
     borderRadius: 10,
     borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     gap: 6,
   },
   selectBtnText: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: '700',
   },
   detailsBtn: {

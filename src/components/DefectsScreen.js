@@ -2164,17 +2164,22 @@ const styles = StyleSheet.create({
   },
   projectStrip: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 8,
     borderBottomWidth: 1,
+    columnGap: 8,
+    rowGap: 4,
   },
   projectStripLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     flex: 1,
+    flexShrink: 1,
+    minWidth: 140,
   },
   projectDot: {
     width: 8,
@@ -2184,7 +2189,7 @@ const styles = StyleSheet.create({
   projectStripName: {
     fontSize: 13,
     fontWeight: '800',
-    maxWidth: 190,
+    flexShrink: 1,
   },
   projectStatusBadge: {
     paddingHorizontal: 7,
@@ -2289,14 +2294,17 @@ const styles = StyleSheet.create({
   },
   kpiRow: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
+    flexWrap: 'wrap',
+    paddingHorizontal: 14,
     gap: 6,
     marginBottom: 10,
   },
   kpiChip: {
     flex: 1,
+    minWidth: 58,
     alignItems: 'center',
     paddingVertical: 6,
+    paddingHorizontal: 4,
     borderRadius: 9,
   },
   kpiVal: {
@@ -2304,12 +2312,13 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   kpiLabel: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: '700',
+    textAlign: 'center',
   },
   searchRow: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     gap: 8,
     marginBottom: 10,
   },
@@ -2332,7 +2341,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 14,
+    paddingHorizontal: 13,
     height: 42,
     borderRadius: 11,
     gap: 5,
@@ -2343,7 +2352,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   filterRow: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     gap: 8,
   },
   filterChip: {
@@ -2384,8 +2393,10 @@ const styles = StyleSheet.create({
   },
   cardTopRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 6,
     marginBottom: 8,
   },
   idAndSev: {
@@ -2425,8 +2436,10 @@ const styles = StyleSheet.create({
   },
   cardFooter: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 6,
     paddingTop: 10,
     borderTopWidth: 1,
   },
@@ -2499,6 +2512,7 @@ const styles = StyleSheet.create({
   },
   detailHeaderTags: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: 8,
     marginBottom: 4,
