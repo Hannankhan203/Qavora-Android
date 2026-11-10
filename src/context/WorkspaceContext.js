@@ -28,6 +28,10 @@ import {
   fetchChecklists,
 } from '../services/checklistService.js';
 import {
+  subscribeToSyncEvents,
+  subscribeToReconnectSyncResults,
+} from '../services/offlineSyncService.js';
+import {
   INITIAL_SUITES,
   INITIAL_TEST_CASES,
   INITIAL_TEST_RUNS,
@@ -1226,8 +1230,40 @@ export function WorkspaceProvider({ children }) {
       })
       .catch(() => {});
 
+    const unsubSyncEvents = subscribeToSyncEvents((evt) => {
+      if (!mounted) return;
+      if (
+        evt &&
+        (evt.entityType === 'checklist' ||
+          evt.type === 'sync_completed' ||
+          evt.type === 'conflict_resolved' ||
+          evt.type === 'operation_discarded')
+      ) {
+        getCachedChecklistsForUser(resolvedUserId)
+          .then((cached) => {
+            if (mounted && Array.isArray(cached)) {
+              setChecklists(cached);
+            }
+          })
+          .catch(() => {});
+      }
+    });
+
+    const unsubReconnect = subscribeToReconnectSyncResults((payload) => {
+      if (!mounted || !payload || payload.userId !== resolvedUserId) return;
+      fetchChecklists({ userId: resolvedUserId })
+        .then((res) => {
+          if (mounted && res && res.ok && Array.isArray(res.checklists)) {
+            setChecklists(res.checklists);
+          }
+        })
+        .catch(() => {});
+    });
+
     return () => {
       mounted = false;
+      unsubSyncEvents();
+      unsubReconnect();
     };
   }, [user && (user.userId || user.id || user._id)]);
 

@@ -30,6 +30,16 @@ import {
   normalizeProjectRecord,
   extractSuiteTestCases,
 } from './projectService.js';
+import {
+  fetchChecklistById as fetchChecklistByIdApi,
+  createChecklist as createChecklistApi,
+  updateChecklist as updateChecklistApi,
+  deleteChecklist as deleteChecklistApi,
+  cacheChecklistOffline,
+  removeCachedChecklistOffline,
+  getCachedChecklistById,
+  normalizeChecklistRecord,
+} from './checklistService.js';
 
 export const OFFLINE_PROJECTS_CACHE_PREFIX = '@qavora_offline_projects_cache_v1:';
 export const PENDING_PROJECT_OPS_PREFIX = '@qavora_pending_project_ops_v1:';
@@ -93,6 +103,15 @@ function getStorage() {
     return customSyncStorageAdapter;
   }
   return AsyncStorage;
+}
+
+/**
+ * Returns the currently configured custom storage adapter (or null when using AsyncStorage).
+ *
+ * @returns {object | null}
+ */
+export function getOfflineSyncStorageAdapter() {
+  return customSyncStorageAdapter;
 }
 
 function getNetInfo() {
@@ -1187,11 +1206,22 @@ export function buildOperationIdempotencyKey({
 }
 
 /**
+ * Computes a deterministic idempotency key for a checklist mutation.
+ */
+export function buildChecklistOperationIdempotencyKey({
+  userId,
+  checklistId,
+  operationType = 'UPDATE',
+}) {
+  return `chk_${userId}_${checklistId}_checklist_${operationType}`;
+}
+
+/**
  * Sorts queued operations by dependency rank and monotonic sequence number:
- * 1. Project CREATE
- * 2. Project UPDATE / STATUS_CHANGE
+ * 1. Project / Checklist CREATE
+ * 2. Project / Checklist UPDATE / STATUS_CHANGE
  * 3. Child data updates (`data`, `testPlan`, `testSuites`, `testCases`, `testRuns`, `executions`, `defects`)
- * 4. Project DELETE
+ * 4. Project / Checklist DELETE
  *
  * @param {Array<object>} ops
  * @returns {Array<object>}
@@ -1200,13 +1230,18 @@ export function sortProjectOperations(ops = []) {
   const getRank = (op) => {
     if (!op) return 99;
     if (op.entityType === 'project' && op.operationType === 'CREATE') return 1;
+    if (op.entityType === 'checklist' && op.operationType === 'CREATE') return 1;
     if (
       op.entityType === 'project' &&
       (op.operationType === 'UPDATE' || op.operationType === 'STATUS_CHANGE')
     ) {
       return 2;
     }
+    if (op.entityType === 'checklist' && op.operationType === 'UPDATE') {
+      return 2;
+    }
     if (op.entityType === 'project' && op.operationType === 'DELETE') return 4;
+    if (op.entityType === 'checklist' && op.operationType === 'DELETE') return 4;
     return 3;
   };
 
@@ -1226,7 +1261,7 @@ export function sortProjectOperations(ops = []) {
 }
 
 /**
- * Reads all pending/queued project operations for a specific user.
+ * Reads all pending/queued operations for a specific user.
  *
  * @param {string} userId
  * @returns {Promise<Array<object>>}
@@ -1244,6 +1279,17 @@ export async function getPendingProjectOperations(userId) {
     : [];
 
   return sortProjectOperations(safeList);
+}
+
+/**
+ * Reads all pending/queued checklist operations (`entityType === 'checklist'`) for a specific user.
+ *
+ * @param {string} userId
+ * @returns {Promise<Array<object>>}
+ */
+export async function getPendingChecklistOperations(userId) {
+  const allOps = await getPendingProjectOperations(userId);
+  return allOps.filter((op) => op && op.entityType === 'checklist');
 }
 
 async function savePendingProjectOperations(userId, operations) {
@@ -1307,6 +1353,354 @@ async function applyMutationToOfflineCache(userId, mutation) {
     pendingSync: true,
     pendingCreation: Boolean(existing && existing._pendingCreation),
   });
+}
+
+/**
+ * Applies a queued checklist mutation optimistically to the user's offline checklist cache
+ * so offline checklist creations, edits, item toggles, and deletions persist across restarts.
+ */
+async function applyChecklistMutationToOfflineCache(userId, mutation) {
+  const {
+    checklistId,
+    operationType,
+    payload,
+    expectedUpdatedAt,
+    id: opId,
+    status: opStatus,
+  } = mutation;
+  if (!userId || !checklistId) return null;
+
+  if (operationType === 'DELETE') {
+    await removeCachedChecklistOffline(checklistId, userId);
+    return null;
+  }
+
+  const existing = await getCachedChecklistById(checklistId, userId, true);
+  const nowIso = new Date().toISOString();
+
+  if (operationType === 'CREATE') {
+    const createdRecord = normalizeChecklistRecord({
+      ...(existing || {}),
+      ...(payload || {}),
+      id: checklistId,
+      userId,
+      createdAt:
+        (payload && payload.createdAt) ||
+        (existing && existing.createdAt) ||
+        nowIso,
+      updatedAt:
+        (payload && payload.updatedAt) ||
+        (existing && existing.updatedAt) ||
+        nowIso,
+      _pendingSync: true,
+      _pendingCreation: true,
+      _syncStatus: opStatus || 'pending',
+      _syncOpId: opId || null,
+      _syncError: null,
+      _conflictDetails: null,
+    });
+    return cacheChecklistOffline(createdRecord, userId, {
+      pendingSync: true,
+      pendingCreation: true,
+      syncStatus: opStatus || 'pending',
+      syncOpId: opId || null,
+      syncError: null,
+      conflictDetails: null,
+    });
+  }
+
+  if (!existing && (!payload || typeof payload !== 'object')) {
+    return null;
+  }
+
+  const baselineUpdatedAt =
+    (existing && (existing._serverUpdatedAt || existing.updatedAt)) ||
+    expectedUpdatedAt ||
+    null;
+
+  const mergedRecord = normalizeChecklistRecord({
+    ...(existing || { id: checklistId, title: 'Offline Checklist' }),
+    ...(payload || {}),
+    id: checklistId,
+    userId,
+    updatedAt: baselineUpdatedAt || nowIso,
+    _serverUpdatedAt: baselineUpdatedAt,
+    _pendingSync: true,
+    _pendingCreation: Boolean(existing && existing._pendingCreation),
+    _syncStatus: opStatus || 'pending',
+    _syncOpId: opId || (existing && existing._syncOpId) || null,
+    _syncError: null,
+    _conflictDetails: null,
+  });
+
+  return cacheChecklistOffline(mergedRecord, userId, {
+    pendingSync: true,
+    pendingCreation: Boolean(existing && existing._pendingCreation),
+    syncStatus: opStatus || 'pending',
+    syncOpId: opId || (existing && existing._syncOpId) || null,
+    serverUpdatedAt: baselineUpdatedAt,
+    syncError: null,
+    conflictDetails: null,
+  });
+}
+
+/**
+ * Queues a checklist mutation (`CREATE`, `UPDATE`, `DELETE`, or item mutations)
+ * into the existing persistent per-user offline queue (`@qavora_pending_project_ops_v1:<userId>`)
+ * with coalescing and dependency ordering.
+ *
+ * @param {object} mutation
+ * @param {string} mutation.userId
+ * @param {string} mutation.checklistId
+ * @param {string | null} [mutation.projectId=null]
+ * @param {'CREATE' | 'UPDATE' | 'DELETE'} [mutation.operationType='UPDATE']
+ * @param {string | null} [mutation.mutationSubType=null]
+ * @param {object} [mutation.payload={}]
+ * @param {string | null} [mutation.expectedUpdatedAt=null]
+ * @param {string} [mutation.description='']
+ * @returns {Promise<object>}
+ */
+export async function queueChecklistMutation({
+  userId,
+  checklistId,
+  projectId = null,
+  operationType = 'UPDATE',
+  mutationSubType = null,
+  payload = {},
+  expectedUpdatedAt = null,
+  description = '',
+} = {}) {
+  const targetUserId = String(userId || '').trim();
+  const cleanChecklistId = String(checklistId || '').trim();
+
+  if (!targetUserId) {
+    throw new Error('userId is required to queue an offline checklist mutation.');
+  }
+  if (!cleanChecklistId) {
+    throw new Error('checklistId is required to queue an offline checklist mutation.');
+  }
+
+  const nowIso = new Date().toISOString();
+  const idempotencyKey = buildChecklistOperationIdempotencyKey({
+    userId: targetUserId,
+    checklistId: cleanChecklistId,
+    operationType,
+  });
+
+  const existingOps = await getPendingProjectOperations(targetUserId);
+
+  // 1. Check if this checklist was created offline and not yet synced
+  const pendingCreateIdx = existingOps.findIndex(
+    (op) =>
+      op.entityType === 'checklist' &&
+      (op.checklistId === cleanChecklistId || op.entityId === cleanChecklistId) &&
+      op.operationType === 'CREATE' &&
+      (op.status === 'pending' || op.status === 'failed')
+  );
+
+  if (pendingCreateIdx !== -1) {
+    const pendingCreateOp = existingOps[pendingCreateIdx];
+
+    // Case 1A: Deleting an offline-created checklist before it ever synced to the server
+    // cancels out the pending CREATE and any queued operations for that checklist!
+    if (operationType === 'DELETE') {
+      const remainingOps = existingOps.filter(
+        (op) =>
+          !(
+            op.entityType === 'checklist' &&
+            (op.checklistId === cleanChecklistId ||
+              op.entityId === cleanChecklistId)
+          )
+      );
+      await savePendingProjectOperations(targetUserId, remainingOps);
+      await removeCachedChecklistOffline(cleanChecklistId, targetUserId);
+      notifySyncListeners({
+        type: 'checklist_mutation_cancelled_out',
+        entityType: 'checklist',
+        userId: targetUserId,
+        checklistId: cleanChecklistId,
+      });
+      return {
+        cancelledOut: true,
+        dequeuedId: pendingCreateOp.id,
+        checklistId: cleanChecklistId,
+      };
+    }
+
+    // Case 1B: Updating metadata or items of an offline-created checklist merges directly into CREATE
+    if (operationType === 'UPDATE') {
+      const mergedPayload = {
+        ...(pendingCreateOp.payload || {}),
+        ...(payload || {}),
+        id: cleanChecklistId,
+      };
+      // Remove internal tracking keys from CREATE payload if present
+      delete mergedPayload.deletedItemIds;
+      delete mergedPayload.expectedUpdatedAt;
+
+      const mergedCreateOp = {
+        ...pendingCreateOp,
+        projectId:
+          mergedPayload.projectId !== undefined
+            ? mergedPayload.projectId
+            : pendingCreateOp.projectId || projectId || null,
+        payload: mergedPayload,
+        updatedAt: nowIso,
+        status: 'pending',
+        retryCount: 0,
+        nextRetryAt: null,
+        lastError: null,
+      };
+
+      const updatedList = [...existingOps];
+      updatedList[pendingCreateIdx] = mergedCreateOp;
+      await savePendingProjectOperations(targetUserId, updatedList);
+      await applyChecklistMutationToOfflineCache(targetUserId, {
+        checklistId: cleanChecklistId,
+        operationType: 'CREATE',
+        payload: mergedCreateOp.payload,
+        id: mergedCreateOp.id,
+        status: 'pending',
+      });
+      notifySyncListeners({
+        type: 'checklist_mutation_coalesced',
+        entityType: 'checklist',
+        userId: targetUserId,
+        checklistId: cleanChecklistId,
+        operation: mergedCreateOp,
+      });
+      return mergedCreateOp;
+    }
+  }
+
+  // 2. Check for an existing pending/failed operation with the same idempotencyKey
+  //    (e.g., multiple offline edits or item completion toggles on the same checklist)
+  const matchingIdx = existingOps.findIndex(
+    (op) =>
+      op.idempotencyKey === idempotencyKey &&
+      (op.status === 'pending' || op.status === 'failed')
+  );
+
+  if (matchingIdx !== -1) {
+    const existingOp = existingOps[matchingIdx];
+    const prevDeletedIds = Array.isArray(existingOp.payload?.deletedItemIds)
+      ? existingOp.payload.deletedItemIds
+      : [];
+    const nextDeletedIds = Array.isArray(payload?.deletedItemIds)
+      ? payload.deletedItemIds
+      : [];
+    const combinedDeletedIds = Array.from(
+      new Set([...prevDeletedIds, ...nextDeletedIds])
+    );
+
+    const mergedPayload =
+      payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? {
+            ...(existingOp.payload || {}),
+            ...payload,
+            ...(combinedDeletedIds.length > 0
+              ? { deletedItemIds: combinedDeletedIds }
+              : {}),
+          }
+        : payload;
+
+    const coalescedOp = {
+      ...existingOp,
+      entityType: 'checklist',
+      checklistId: cleanChecklistId,
+      entityId: cleanChecklistId,
+      projectId:
+        mergedPayload && mergedPayload.projectId !== undefined
+          ? mergedPayload.projectId
+          : existingOp.projectId || projectId || null,
+      mutationSubType:
+        mutationSubType || existingOp.mutationSubType || operationType.toLowerCase(),
+      payload: mergedPayload,
+      // Always preserve the earliest baseline expectedUpdatedAt so server conflict detection stays accurate
+      expectedUpdatedAt: existingOp.expectedUpdatedAt || expectedUpdatedAt || null,
+      description: description || existingOp.description || '',
+      updatedAt: nowIso,
+      status: 'pending',
+      retryCount: 0,
+      nextRetryAt: null,
+      lastError: null,
+    };
+
+    const nextOps = [...existingOps];
+    nextOps[matchingIdx] = coalescedOp;
+    await savePendingProjectOperations(targetUserId, nextOps);
+    await applyChecklistMutationToOfflineCache(targetUserId, coalescedOp);
+
+    notifySyncListeners({
+      type: 'checklist_mutation_coalesced',
+      entityType: 'checklist',
+      userId: targetUserId,
+      checklistId: cleanChecklistId,
+      operation: coalescedOp,
+    });
+    return coalescedOp;
+  }
+
+  // 3. If queueing a checklist DELETE for a server-synced checklist, drop any unsynced
+  //    UPDATE operations for that checklist so we don't send obsolete PATCH requests
+  let filteredOps = existingOps;
+  if (operationType === 'DELETE') {
+    filteredOps = existingOps.filter(
+      (op) =>
+        !(
+          op.entityType === 'checklist' &&
+          (op.checklistId === cleanChecklistId ||
+            op.entityId === cleanChecklistId) &&
+          op.status !== 'syncing'
+        )
+    );
+  }
+
+  // 4. Create new durable queue operation
+  const seq = nextMonotonicSeq();
+  const record = {
+    id: `cop_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    idempotencyKey,
+    seq,
+    userId: targetUserId,
+    projectId:
+      projectId ||
+      (payload && payload.projectId ? String(payload.projectId) : null),
+    checklistId: cleanChecklistId,
+    entityType: 'checklist',
+    entityId: cleanChecklistId,
+    operationType,
+    mutationSubType: mutationSubType || operationType.toLowerCase(),
+    payload: payload || {},
+    expectedUpdatedAt: expectedUpdatedAt || null,
+    description:
+      description ||
+      `${operationType} checklist (${cleanChecklistId})`,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    retryCount: 0,
+    maxRetries: DEFAULT_MAX_RETRIES,
+    backoffDelayMs: BASE_BACKOFF_MS,
+    nextRetryAt: null,
+    status: 'pending',
+    requiresManualResolution: false,
+    conflictDetails: null,
+    lastError: null,
+  };
+
+  const nextOps = sortProjectOperations([...filteredOps, record]);
+  await savePendingProjectOperations(targetUserId, nextOps);
+  await applyChecklistMutationToOfflineCache(targetUserId, record);
+
+  notifySyncListeners({
+    type: 'checklist_mutation_queued',
+    entityType: 'checklist',
+    userId: targetUserId,
+    checklistId: cleanChecklistId,
+    operation: record,
+  });
+
+  return record;
 }
 
 /**
@@ -1377,7 +1771,7 @@ export async function queueProjectMutation({
     // cancels out the pending CREATE and any queued child operations for that project!
     if (normalizedEntityType === 'project' && operationType === 'DELETE') {
       const remainingOps = existingOps.filter(
-        (op) => op.projectId !== cleanProjectId
+        (op) => op.projectId !== cleanProjectId || op.entityType === 'checklist'
       );
       await savePendingProjectOperations(targetUserId, remainingOps);
       await removeCachedProjectOffline(cleanProjectId, targetUserId);
@@ -1476,6 +1870,7 @@ export async function queueProjectMutation({
   if (normalizedEntityType === 'project' && operationType === 'DELETE') {
     filteredOps = existingOps.filter(
       (op) =>
+        op.entityType === 'checklist' ||
         op.projectId !== cleanProjectId ||
         op.status === 'syncing'
     );
@@ -1694,7 +2089,8 @@ export async function dequeueProjectOperationIfLockValid(
 // ============================================================================
 
 /**
- * Computes the current offline synchronization summary for a user.
+ * Computes the current offline synchronization summary for a user,
+ * including both project operations and checklist operations.
  *
  * @param {string} userId
  * @returns {Promise<object>}
@@ -1720,6 +2116,12 @@ export async function getProjectSyncStatus(userId) {
       conflictCount: 0,
       failedCount: 0,
       operations: [],
+      checklistOperations: [],
+      totalChecklistQueued: 0,
+      checklistPendingCount: 0,
+      checklistSyncingCount: 0,
+      checklistConflictCount: 0,
+      checklistFailedCount: 0,
     };
   }
 
@@ -1731,6 +2133,20 @@ export async function getProjectSyncStatus(userId) {
   const syncingCount = ops.filter((o) => o.status === 'syncing').length;
   const conflictCount = ops.filter((o) => o.status === 'conflict').length;
   const failedCount = ops.filter((o) => o.status === 'failed').length;
+
+  const checklistOps = ops.filter((o) => o.entityType === 'checklist');
+  const checklistPendingCount = checklistOps.filter(
+    (o) => o.status === 'pending'
+  ).length;
+  const checklistSyncingCount = checklistOps.filter(
+    (o) => o.status === 'syncing'
+  ).length;
+  const checklistConflictCount = checklistOps.filter(
+    (o) => o.status === 'conflict'
+  ).length;
+  const checklistFailedCount = checklistOps.filter(
+    (o) => o.status === 'failed'
+  ).length;
 
   return {
     online,
@@ -1748,14 +2164,62 @@ export async function getProjectSyncStatus(userId) {
     conflictCount,
     failedCount,
     operations: ops,
+    checklistOperations: checklistOps,
+    totalChecklistQueued: checklistOps.length,
+    checklistPendingCount,
+    checklistSyncingCount,
+    checklistConflictCount,
+    checklistFailedCount,
   };
 }
 
 /**
- * Executes a single queued project operation against the backend API.
+ * Executes a single queued project or checklist operation against the backend API.
  */
 async function executeQueuedOperationAgainstBackend(op, options = {}) {
-  const { projectId, entityType, operationType, payload, expectedUpdatedAt } = op;
+  const {
+    projectId,
+    checklistId,
+    entityId,
+    entityType,
+    operationType,
+    payload,
+    expectedUpdatedAt,
+    userId,
+  } = op;
+
+  if (entityType === 'checklist') {
+    const targetChecklistId = String(checklistId || entityId || '').trim();
+    const checklistOptions = {
+      ...options,
+      skipOfflineQueue: true,
+      userId,
+    };
+
+    if (operationType === 'CREATE') {
+      const createPayload = {
+        ...(payload || {}),
+        id: targetChecklistId,
+      };
+      return createChecklistApi(createPayload, checklistOptions);
+    }
+
+    if (operationType === 'UPDATE') {
+      const updatePayload = {
+        ...(payload || {}),
+        ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}),
+      };
+      return updateChecklistApi(
+        targetChecklistId,
+        updatePayload,
+        checklistOptions
+      );
+    }
+
+    if (operationType === 'DELETE') {
+      return deleteChecklistApi(targetChecklistId, checklistOptions);
+    }
+  }
 
   if (entityType === 'project' && operationType === 'CREATE') {
     const createPayload = {
@@ -1789,18 +2253,18 @@ async function executeQueuedOperationAgainstBackend(op, options = {}) {
 }
 
 /**
- * Processes all pending project operations for `userId` in dependency order.
+ * Processes all pending project and checklist operations for `userId` in dependency order.
  *
  * Guarantees:
  * - Exclusive per-user sync lock prevents concurrent duplicate executions
- * - Chained `expectedUpdatedAt` advancement across operations on the same project
+ * - Chained `expectedUpdatedAt` advancement across operations on the same project or checklist
  * - HTTP 409 conflicts are captured (`status: 'conflict'`, `requiresManualResolution: true`)
  *   and never silently overwrite server data
  * - Network/5xx errors retain operations in the queue with backoff retry metadata
  *
  * @param {string} userId
  * @param {object} [options]
- * @returns {Promise<{ synced: number, failed: number, conflicts: number, skipped?: boolean, reason?: string, updatedProjects: Array<object> }>}
+ * @returns {Promise<{ synced: number, failed: number, conflicts: number, skipped?: boolean, reason?: string, updatedProjects: Array<object>, updatedChecklists: Array<object> }>}
  */
 export async function processProjectSyncQueue(userId, options = {}) {
   const targetUserId = String(userId || '').trim();
@@ -1812,6 +2276,7 @@ export async function processProjectSyncQueue(userId, options = {}) {
       skipped: true,
       reason: 'missing_user_id',
       updatedProjects: [],
+      updatedChecklists: [],
     };
   }
 
@@ -1828,6 +2293,7 @@ export async function processProjectSyncQueue(userId, options = {}) {
       skipped: true,
       reason: 'user_mismatch',
       updatedProjects: [],
+      updatedChecklists: [],
     };
   }
 
@@ -1839,6 +2305,7 @@ export async function processProjectSyncQueue(userId, options = {}) {
       skipped: true,
       reason: 'offline',
       updatedProjects: [],
+      updatedChecklists: [],
     };
   }
 
@@ -1851,6 +2318,7 @@ export async function processProjectSyncQueue(userId, options = {}) {
       skipped: true,
       reason: 'already_syncing',
       updatedProjects: [],
+      updatedChecklists: [],
     };
   }
 
@@ -1858,6 +2326,7 @@ export async function processProjectSyncQueue(userId, options = {}) {
   let failed = 0;
   let conflicts = 0;
   const updatedProjectsMap = new Map();
+  const updatedChecklistsMap = new Map();
 
   notifySyncListeners({
     type: 'sync_started',
@@ -1891,21 +2360,27 @@ export async function processProjectSyncQueue(userId, options = {}) {
         failed: 0,
         conflicts: 0,
         updatedProjects: [],
+        updatedChecklists: [],
       };
     }
 
-    // Track projects that encountered a failure or conflict during this pass
-    // so dependent operations on the same project don't execute out of order
+    // Track projects and checklists that encountered a failure or conflict during this pass
+    // so dependent operations on the same entity don't execute out of order
     const haltedProjectIds = new Set();
-    // Pre-populate haltedProjectIds with any projects that ALREADY have an unresolved conflict
+    const haltedChecklistIds = new Set();
     allOps.forEach((op) => {
       if (op.status === 'conflict' || op.requiresManualResolution) {
-        haltedProjectIds.add(op.projectId);
+        if (op.entityType === 'checklist') {
+          haltedChecklistIds.add(String(op.checklistId || op.entityId || ''));
+        } else if (op.projectId) {
+          haltedProjectIds.add(op.projectId);
+        }
       }
     });
 
-    // Track chained updatedAt advancement per project within this sync pass
+    // Track chained updatedAt advancement per project and per checklist within this sync pass
     const latestUpdatedAtByProject = new Map();
+    const latestUpdatedAtByChecklist = new Map();
 
     for (const op of eligibleOps) {
       if (isClientOffline() && !options.ignoreOfflineCheck) {
@@ -1925,17 +2400,29 @@ export async function processProjectSyncQueue(userId, options = {}) {
         break;
       }
 
-      if (haltedProjectIds.has(op.projectId)) {
+      const isChecklistOp = op.entityType === 'checklist';
+      const targetChecklistId = isChecklistOp
+        ? String(op.checklistId || op.entityId || '').trim()
+        : '';
+
+      if (isChecklistOp) {
+        if (haltedChecklistIds.has(targetChecklistId)) {
+          continue;
+        }
+      } else if (haltedProjectIds.has(op.projectId)) {
         continue;
       }
 
-      // Advance expectedUpdatedAt if a preceding operation in this pass updated the same project
+      // Advance expectedUpdatedAt if a preceding operation in this pass updated the same entity
       const effectiveOp = {
         ...op,
-        expectedUpdatedAt:
-          latestUpdatedAtByProject.get(op.projectId) ||
-          op.expectedUpdatedAt ||
-          null,
+        expectedUpdatedAt: isChecklistOp
+          ? latestUpdatedAtByChecklist.get(targetChecklistId) ||
+            op.expectedUpdatedAt ||
+            null
+          : latestUpdatedAtByProject.get(op.projectId) ||
+            op.expectedUpdatedAt ||
+            null,
       };
 
       const result = await executeQueuedOperationAgainstBackend(
@@ -1960,6 +2447,223 @@ export async function processProjectSyncQueue(userId, options = {}) {
         break;
       }
 
+      // ======================================================================
+      // A. CHECKLIST OPERATION RESULT HANDLING
+      // ======================================================================
+      if (isChecklistOp) {
+        if (result.ok) {
+          await dequeueProjectOperationIfLockValid(op.id, targetUserId, lock);
+          synced += 1;
+
+          if (op.operationType === 'DELETE') {
+            await removeCachedChecklistOffline(targetChecklistId, targetUserId);
+            latestUpdatedAtByChecklist.delete(targetChecklistId);
+          } else if (result.checklist) {
+            const syncedChecklist = result.checklist;
+            if (syncedChecklist.updatedAt) {
+              latestUpdatedAtByChecklist.set(
+                targetChecklistId,
+                syncedChecklist.updatedAt
+              );
+            }
+            const cachedClean = await cacheChecklistOffline(
+              syncedChecklist,
+              targetUserId,
+              {
+                pendingSync: false,
+                pendingCreation: false,
+                syncStatus: 'synced',
+                syncOpId: null,
+                syncError: null,
+                conflictDetails: null,
+                serverUpdatedAt: syncedChecklist.updatedAt || null,
+              }
+            );
+            updatedChecklistsMap.set(
+              syncedChecklist.id,
+              cachedClean || syncedChecklist
+            );
+          }
+          continue;
+        }
+
+        // If DELETE returns 404, the checklist is already gone on the server; treat as synced
+        if (op.operationType === 'DELETE' && result.status === 404) {
+          await dequeueProjectOperationIfLockValid(op.id, targetUserId, lock);
+          await removeCachedChecklistOffline(targetChecklistId, targetUserId);
+          latestUpdatedAtByChecklist.delete(targetChecklistId);
+          synced += 1;
+          continue;
+        }
+
+        // If CREATE returns 409 (already created by an earlier interrupted request), fetch latest & dequeue
+        if (
+          op.operationType === 'CREATE' &&
+          (result.status === 409 || result.isConflict)
+        ) {
+          const fetched = await fetchChecklistByIdApi(targetChecklistId, {
+            ...(options.apiOptions || {}),
+            userId: targetUserId,
+            ignorePendingLocal: true,
+          });
+          if (fetched.ok && fetched.checklist) {
+            await dequeueProjectOperationIfLockValid(op.id, targetUserId, lock);
+            const cachedClean = await cacheChecklistOffline(
+              fetched.checklist,
+              targetUserId,
+              {
+                pendingSync: false,
+                pendingCreation: false,
+                syncStatus: 'synced',
+                syncOpId: null,
+                syncError: null,
+                conflictDetails: null,
+                serverUpdatedAt: fetched.checklist.updatedAt || null,
+              }
+            );
+            if (fetched.checklist.updatedAt) {
+              latestUpdatedAtByChecklist.set(
+                targetChecklistId,
+                fetched.checklist.updatedAt
+              );
+            }
+            updatedChecklistsMap.set(
+              fetched.checklist.id,
+              cachedClean || fetched.checklist
+            );
+            synced += 1;
+            continue;
+          }
+        }
+
+        // Handle HTTP 409 Optimistic Concurrency Conflict safely (never overwrite server data)
+        if (result.status === 409 || result.isConflict) {
+          let serverChecklist = result.serverChecklist || null;
+          if (!serverChecklist) {
+            try {
+              const latestRes = await fetchChecklistByIdApi(targetChecklistId, {
+                ...(options.apiOptions || {}),
+                userId: targetUserId,
+                ignorePendingLocal: true,
+              });
+              if (latestRes.ok && latestRes.checklist) {
+                serverChecklist = latestRes.checklist;
+              }
+            } catch {
+              // Ignore secondary fetch error
+            }
+          }
+
+          const conflictMessage =
+            result.error ||
+            'Conflict: Checklist was modified on the server since your offline edits began.';
+          const conflictDetails = {
+            detectedAt: new Date().toISOString(),
+            expectedUpdatedAt: effectiveOp.expectedUpdatedAt || null,
+            currentUpdatedAt:
+              result.currentUpdatedAt ||
+              (serverChecklist && serverChecklist.updatedAt) ||
+              null,
+            serverChecklist,
+            localPayload: op.payload,
+            message: conflictMessage,
+          };
+
+          const currentOps = await getPendingProjectOperations(targetUserId);
+          const updatedOps = currentOps.map((item) => {
+            if (item.id !== op.id) return item;
+            return {
+              ...item,
+              status: 'conflict',
+              requiresManualResolution: true,
+              updatedAt: new Date().toISOString(),
+              lastError: conflictMessage,
+              conflictDetails,
+            };
+          });
+          await savePendingProjectOperations(targetUserId, updatedOps);
+
+          const cachedLocal = await getCachedChecklistById(
+            targetChecklistId,
+            targetUserId,
+            true
+          );
+          if (cachedLocal) {
+            await cacheChecklistOffline(cachedLocal, targetUserId, {
+              pendingSync: true,
+              pendingCreation: Boolean(cachedLocal._pendingCreation),
+              syncStatus: 'conflict',
+              syncOpId: op.id,
+              syncError: conflictMessage,
+              conflictDetails,
+            });
+          }
+
+          haltedChecklistIds.add(targetChecklistId);
+          conflicts += 1;
+          continue;
+        }
+
+        // Handle HTTP 401 Unauthorized: halt sync pass without losing pending operations
+        if (result.status === 401) {
+          break;
+        }
+
+        // Handle Network / 5xx / 4xx error: keep in queue with retry count and backoff
+        const currentOps = await getPendingProjectOperations(targetUserId);
+        const nextRetryCount = (op.retryCount || 0) + 1;
+        const maxRetries = op.maxRetries || DEFAULT_MAX_RETRIES;
+        const delayMs = Math.min(
+          BASE_BACKOFF_MS * Math.pow(2, Math.max(0, nextRetryCount - 1)),
+          MAX_BACKOFF_MS
+        );
+        const reachedMax =
+          nextRetryCount >= maxRetries ||
+          (result.status >= 400 &&
+            result.status < 500 &&
+            result.status !== 408 &&
+            result.status !== 429);
+        const lastErrorMsg =
+          result.error || 'Temporary network or server synchronization error.';
+
+        const updatedOps = currentOps.map((item) => {
+          if (item.id !== op.id) return item;
+          return {
+            ...item,
+            retryCount: nextRetryCount,
+            backoffDelayMs: delayMs,
+            nextRetryAt: new Date(Date.now() + delayMs).toISOString(),
+            status: reachedMax ? 'failed' : 'pending',
+            updatedAt: new Date().toISOString(),
+            lastError: lastErrorMsg,
+          };
+        });
+
+        await savePendingProjectOperations(targetUserId, updatedOps);
+
+        const cachedLocal = await getCachedChecklistById(
+          targetChecklistId,
+          targetUserId,
+          true
+        );
+        if (cachedLocal) {
+          await cacheChecklistOffline(cachedLocal, targetUserId, {
+            pendingSync: true,
+            pendingCreation: Boolean(cachedLocal._pendingCreation),
+            syncStatus: reachedMax ? 'failed' : 'pending',
+            syncOpId: op.id,
+            syncError: lastErrorMsg,
+          });
+        }
+
+        haltedChecklistIds.add(targetChecklistId);
+        failed += 1;
+        continue;
+      }
+
+      // ======================================================================
+      // B. PROJECT OPERATION RESULT HANDLING
+      // ======================================================================
       if (result.ok) {
         await dequeueProjectOperationIfLockValid(op.id, targetUserId, lock);
         synced += 1;
@@ -2112,6 +2816,7 @@ export async function processProjectSyncQueue(userId, options = {}) {
       failed,
       conflicts,
       updatedProjects: Array.from(updatedProjectsMap.values()),
+      updatedChecklists: Array.from(updatedChecklistsMap.values()),
     };
   } finally {
     await releaseSyncLock(targetUserId, lock);
@@ -2128,6 +2833,78 @@ export async function processProjectSyncQueue(userId, options = {}) {
 // ============================================================================
 // 5. CONFLICT RESOLUTION, RETRY & MANUAL QUEUE CONTROLS
 // ============================================================================
+
+/**
+ * Merges a user's queued local checklist payload onto the latest authoritative
+ * server checklist without losing newly added server checklist items or the
+ * user's offline item edits / completions / deletions.
+ */
+function buildMergedChecklistPayloadForConflict(serverChecklist, op) {
+  const localPayload = (op && op.payload) || {};
+  if (!serverChecklist || typeof serverChecklist !== 'object') {
+    return localPayload;
+  }
+
+  const deletedIdsSet = new Set(
+    (Array.isArray(localPayload.deletedItemIds)
+      ? localPayload.deletedItemIds
+      : []
+    ).map((id) => String(id))
+  );
+
+  const merged = {
+    ...serverChecklist,
+    ...localPayload,
+  };
+  delete merged.deletedItemIds;
+  delete merged.expectedUpdatedAt;
+
+  if (Array.isArray(localPayload.items)) {
+    const serverItems = Array.isArray(serverChecklist.items)
+      ? serverChecklist.items
+      : [];
+    const itemMap = new Map();
+
+    serverItems.forEach((item) => {
+      if (!item || !item.id) return;
+      const itemId = String(item.id);
+      if (deletedIdsSet.has(itemId)) return;
+      itemMap.set(itemId, item);
+    });
+
+    localPayload.items.forEach((localItem) => {
+      if (!localItem || !localItem.id) return;
+      const itemId = String(localItem.id);
+      if (deletedIdsSet.has(itemId)) return;
+      const existingServerItem = itemMap.get(itemId);
+      if (existingServerItem) {
+        itemMap.set(itemId, {
+          ...existingServerItem,
+          ...localItem,
+        });
+      } else {
+        itemMap.set(itemId, localItem);
+      }
+    });
+
+    const mergedItems = Array.from(itemMap.values());
+    merged.items = mergedItems;
+
+    if (localPayload.status !== 'Archived') {
+      const total = mergedItems.length;
+      const completedCount = mergedItems.filter((it) => Boolean(it.completed))
+        .length;
+      merged.status =
+        total > 0 && completedCount === total
+          ? 'Completed'
+          : completedCount > 0
+          ? 'In Progress'
+          : 'Draft';
+    }
+  }
+
+  return merged;
+}
 
 /**
  * Merges a user's queued local payload onto the latest authoritative server
@@ -2239,12 +3016,12 @@ function buildMergedPayloadForConflict(serverProject, op) {
 }
 
 /**
- * Resolves an HTTP 409 synchronization conflict on a queued project operation.
+ * Resolves an HTTP 409 synchronization conflict on a queued project or checklist operation.
  *
  * Supported `resolution` modes:
  * - `'keep_server'` / `'discard_local'`: Discards the conflicted local mutation
- *   and refreshes the local cache with the authoritative server project.
- * - `'merge'` / `'keep_local'`: Fetches the latest server project (`updatedAt`),
+ *   and refreshes the local cache with the authoritative server record.
+ * - `'merge'` / `'keep_local'`: Fetches the latest server record (`updatedAt`),
  *   rebases/merges the user's offline changes onto the latest `expectedUpdatedAt`,
  *   and immediately synchronizes with the backend.
  *
@@ -2279,6 +3056,164 @@ export async function resolveProjectConflict(
 
   const normalizedRes = String(resolution || '').toLowerCase();
 
+  // ==========================================================================
+  // CHECKLIST CONFLICT RESOLUTION
+  // ==========================================================================
+  if (targetOp.entityType === 'checklist') {
+    const targetChecklistId = String(
+      targetOp.checklistId || targetOp.entityId || ''
+    ).trim();
+
+    if (normalizedRes === 'keep_server' || normalizedRes === 'discard_local') {
+      await dequeueProjectOperation(cleanOpId, targetUserId);
+
+      let authoritativeChecklist =
+        targetOp.conflictDetails && targetOp.conflictDetails.serverChecklist
+          ? targetOp.conflictDetails.serverChecklist
+          : null;
+
+      if (!isClientOffline()) {
+        const fetched = await fetchChecklistByIdApi(targetChecklistId, {
+          ...(options.apiOptions || {}),
+          userId: targetUserId,
+          ignorePendingLocal: true,
+        });
+        if (fetched.ok && fetched.checklist) {
+          authoritativeChecklist = fetched.checklist;
+        }
+      }
+
+      if (authoritativeChecklist) {
+        authoritativeChecklist = await cacheChecklistOffline(
+          authoritativeChecklist,
+          targetUserId,
+          {
+            pendingSync: false,
+            pendingCreation: false,
+            syncStatus: 'synced',
+            syncOpId: null,
+            syncError: null,
+            conflictDetails: null,
+            serverUpdatedAt: authoritativeChecklist.updatedAt || null,
+          }
+        );
+      }
+
+      notifySyncListeners({
+        type: 'conflict_resolved',
+        entityType: 'checklist',
+        resolution: 'keep_server',
+        userId: targetUserId,
+        checklistId: targetChecklistId,
+      });
+
+      return {
+        ok: true,
+        resolution: 'keep_server',
+        checklistId: targetChecklistId,
+        checklist: authoritativeChecklist,
+      };
+    }
+
+    if (normalizedRes === 'merge' || normalizedRes === 'keep_local') {
+      let latestServerChecklist =
+        targetOp.conflictDetails && targetOp.conflictDetails.serverChecklist
+          ? targetOp.conflictDetails.serverChecklist
+          : null;
+
+      if (!isClientOffline()) {
+        const fetched = await fetchChecklistByIdApi(targetChecklistId, {
+          ...(options.apiOptions || {}),
+          userId: targetUserId,
+          ignorePendingLocal: true,
+        });
+        if (fetched.ok && fetched.checklist) {
+          latestServerChecklist = fetched.checklist;
+        }
+      }
+
+      const latestServerUpdatedAt =
+        (latestServerChecklist && latestServerChecklist.updatedAt) ||
+        (targetOp.conflictDetails &&
+          targetOp.conflictDetails.currentUpdatedAt) ||
+        null;
+
+      const nextPayload =
+        normalizedRes === 'merge' && latestServerChecklist
+          ? buildMergedChecklistPayloadForConflict(
+              latestServerChecklist,
+              targetOp
+            )
+          : { ...(targetOp.payload || {}) };
+      delete nextPayload.deletedItemIds;
+      delete nextPayload.expectedUpdatedAt;
+
+      const updatedOps = existingOps.map((item) => {
+        if (item.id !== cleanOpId) return item;
+        return {
+          ...item,
+          payload: nextPayload,
+          expectedUpdatedAt: latestServerUpdatedAt,
+          status: 'pending',
+          requiresManualResolution: false,
+          conflictDetails: null,
+          retryCount: 0,
+          nextRetryAt: null,
+          lastError: null,
+          updatedAt: new Date().toISOString(),
+        };
+      });
+
+      await savePendingProjectOperations(targetUserId, updatedOps);
+      await applyChecklistMutationToOfflineCache(targetUserId, {
+        checklistId: targetChecklistId,
+        operationType: targetOp.operationType,
+        payload: nextPayload,
+        expectedUpdatedAt: latestServerUpdatedAt,
+        id: cleanOpId,
+        status: 'pending',
+      });
+
+      let syncResult = null;
+      if (!isClientOffline()) {
+        syncResult = await processProjectSyncQueue(targetUserId, {
+          ...options,
+          ignoreBackoff: true,
+        });
+      }
+
+      const refreshedChecklist = await getCachedChecklistById(
+        targetChecklistId,
+        targetUserId,
+        true
+      );
+
+      notifySyncListeners({
+        type: 'conflict_resolved',
+        entityType: 'checklist',
+        resolution: normalizedRes,
+        userId: targetUserId,
+        checklistId: targetChecklistId,
+      });
+
+      return {
+        ok: true,
+        resolution: normalizedRes,
+        checklistId: targetChecklistId,
+        checklist: refreshedChecklist,
+        syncResult,
+      };
+    }
+
+    return {
+      ok: false,
+      error: `Unsupported conflict resolution strategy: "${resolution}".`,
+    };
+  }
+
+  // ==========================================================================
+  // PROJECT CONFLICT RESOLUTION
+  // ==========================================================================
   // Option A: Accept Server Version / Discard Local Conflicting Operation
   if (normalizedRes === 'keep_server' || normalizedRes === 'discard_local') {
     await dequeueProjectOperation(cleanOpId, targetUserId);
@@ -2402,6 +3337,11 @@ export async function resolveProjectConflict(
 }
 
 /**
+ * Alias for resolving checklist conflicts via the shared queue conflict resolver.
+ */
+export const resolveChecklistConflict = resolveProjectConflict;
+
+/**
  * Resets a failed or backoff-delayed operation to `'pending'` and triggers a sync pass.
  *
  * @param {string} opId
@@ -2416,8 +3356,8 @@ export async function retryProjectOperation(opId, userId, options = {}) {
   }
 
   const existingOps = await getPendingProjectOperations(targetUserId);
-  const found = existingOps.some((op) => op.id === cleanOpId);
-  if (!found) {
+  const targetOp = existingOps.find((op) => op.id === cleanOpId);
+  if (!targetOp) {
     return { ok: false, error: 'Operation not found in queue.' };
   }
 
@@ -2435,6 +3375,26 @@ export async function retryProjectOperation(opId, userId, options = {}) {
   );
 
   await savePendingProjectOperations(targetUserId, updatedOps);
+
+  if (targetOp.entityType === 'checklist') {
+    const targetChecklistId = String(
+      targetOp.checklistId || targetOp.entityId || ''
+    ).trim();
+    const cachedChk = await getCachedChecklistById(
+      targetChecklistId,
+      targetUserId,
+      true
+    );
+    if (cachedChk) {
+      await cacheChecklistOffline(cachedChk, targetUserId, {
+        pendingSync: true,
+        pendingCreation: Boolean(cachedChk._pendingCreation),
+        syncStatus: 'pending',
+        syncOpId: cleanOpId,
+        syncError: null,
+      });
+    }
+  }
 
   if (!isClientOffline()) {
     const syncRes = await processProjectSyncQueue(targetUserId, {
@@ -2498,12 +3458,46 @@ export async function retryFailedProjectOperations(userId, options = {}) {
  * @param {string} userId
  */
 export async function discardProjectOperation(opId, userId) {
-  const removed = await dequeueProjectOperation(opId, userId);
+  const targetUserId = String(userId || '').trim();
+  const cleanOpId = String(opId || '').trim();
+  if (!targetUserId || !cleanOpId) {
+    return { ok: false };
+  }
+
+  const existingOps = await getPendingProjectOperations(targetUserId);
+  const targetOp = existingOps.find((op) => op.id === cleanOpId);
+  const removed = await dequeueProjectOperation(cleanOpId, targetUserId);
+
+  if (removed && targetOp && targetOp.entityType === 'checklist') {
+    const targetChecklistId = String(
+      targetOp.checklistId || targetOp.entityId || ''
+    ).trim();
+    if (targetOp.operationType === 'CREATE') {
+      await removeCachedChecklistOffline(targetChecklistId, targetUserId);
+    } else {
+      const cachedChk = await getCachedChecklistById(
+        targetChecklistId,
+        targetUserId,
+        true
+      );
+      if (cachedChk) {
+        await cacheChecklistOffline(cachedChk, targetUserId, {
+          pendingSync: false,
+          pendingCreation: false,
+          syncStatus: 'synced',
+          syncOpId: null,
+          syncError: null,
+          conflictDetails: null,
+        });
+      }
+    }
+  }
+
   if (removed) {
     notifySyncListeners({
       type: 'operation_discarded',
-      userId,
-      operationId: opId,
+      userId: targetUserId,
+      operationId: cleanOpId,
     });
   }
   return { ok: removed };
@@ -2511,6 +3505,7 @@ export async function discardProjectOperation(opId, userId) {
 
 export const offlineSyncService = {
   setOfflineSyncStorageAdapter,
+  getOfflineSyncStorageAdapter,
   setNetInfoAdapterForTesting,
   setAppStateAdapterForTesting,
   setReconnectDebounceMsForTesting,
@@ -2535,7 +3530,9 @@ export const offlineSyncService = {
   getCachedProjectsForUser,
   getCachedProjectById,
   queueProjectMutation,
+  queueChecklistMutation,
   getPendingProjectOperations,
+  getPendingChecklistOperations,
   dequeueProjectOperation,
   dequeueProjectOperationIfLockValid,
   acquireSyncLock,
@@ -2544,6 +3541,7 @@ export const offlineSyncService = {
   getProjectSyncStatus,
   processProjectSyncQueue,
   resolveProjectConflict,
+  resolveChecklistConflict,
   retryProjectOperation,
   retryFailedProjectOperations,
   discardProjectOperation,

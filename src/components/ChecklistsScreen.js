@@ -38,11 +38,23 @@ import {
   deleteChecklistItem,
   markAllChecklistItems,
 } from '../services/checklistService';
+import {
+  subscribeToSyncEvents,
+  retryProjectOperation,
+} from '../services/offlineSyncService';
 
 export default function ChecklistsScreen({ onBackToOverview }) {
   const { colors } = useTheme();
   const { user } = useAuth();
-  const { selectedProject, projects, isOfflineMode } = useProjects();
+  const {
+    selectedProject,
+    projects,
+    isOfflineMode,
+    syncStatus,
+    syncNow,
+    retryFailedSync,
+    resolveSyncConflict,
+  } = useProjects();
   const {
     showToast,
     checklists: workspaceChecklists,
@@ -122,7 +134,7 @@ export default function ChecklistsScreen({ onBackToOverview }) {
   const mutationLockRef = useRef(false);
 
   const syncChecklistsState = useCallback(
-    (nextList, persistCache = true) => {
+    (nextList, persistCache = false) => {
       const normalized = (Array.isArray(nextList) ? nextList : [])
         .map(normalizeChecklistRecord)
         .filter(Boolean);
@@ -132,14 +144,16 @@ export default function ChecklistsScreen({ onBackToOverview }) {
         setWorkspaceChecklists(owned);
       }
       if (persistCache && currentUserId) {
-        cacheChecklistsForUser(owned, currentUserId).catch(() => {});
+        cacheChecklistsForUser(owned, currentUserId, {
+          preservePending: true,
+        }).catch(() => {});
       }
       return owned;
     },
     [currentUserId, setWorkspaceChecklists]
   );
 
-  // Load checklists from backend `/api/checklists` with per-user cache fallback
+  // Load checklists from backend `/api/checklists` with per-user cache & pending-queue merge
   const loadChecklists = useCallback(
     async ({ silent = false } = {}) => {
       const gen = ++loadGenerationRef.current;
@@ -161,7 +175,7 @@ export default function ChecklistsScreen({ onBackToOverview }) {
       setAuthExpiredError(false);
 
       try {
-        // Hydrate from per-user cache first if list is empty so UI responds fast
+        // Hydrate from per-user cache + pending queue first so UI responds immediately
         const cached = await getCachedChecklistsForUser(currentUserId);
         if (gen !== loadGenerationRef.current) return;
 
@@ -169,8 +183,8 @@ export default function ChecklistsScreen({ onBackToOverview }) {
         if (gen !== loadGenerationRef.current) return;
 
         if (apiRes.ok) {
-          setIsFromOfflineCache(false);
-          syncChecklistsState(apiRes.checklists, true);
+          setIsFromOfflineCache(Boolean(apiRes.fromCache || apiRes.offlineFallback));
+          syncChecklistsState(apiRes.checklists, false);
         } else if (apiRes.isUnauthorized || apiRes.status === 401) {
           setAuthExpiredError(true);
           setErrorBanner(
@@ -211,6 +225,30 @@ export default function ChecklistsScreen({ onBackToOverview }) {
     loadChecklists();
   }, [loadChecklists]);
 
+  // Subscribe to offline queue / sync engine events so pending -> syncing -> synced / conflict / failed transitions update immediately
+  useEffect(() => {
+    if (!currentUserId) return undefined;
+    const unsubscribe = subscribeToSyncEvents((evt) => {
+      if (
+        evt &&
+        (evt.entityType === 'checklist' ||
+          evt.type === 'sync_started' ||
+          evt.type === 'sync_completed' ||
+          evt.type === 'conflict_resolved' ||
+          evt.type === 'operation_discarded')
+      ) {
+        getCachedChecklistsForUser(currentUserId)
+          .then((cached) => {
+            syncChecklistsState(cached, false);
+          })
+          .catch(() => {});
+      }
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [currentUserId, syncChecklistsState]);
+
   // Keep local state synchronized if workspaceChecklists changes externally (e.g. Data Import / Reset)
   useEffect(() => {
     if (Array.isArray(workspaceChecklists)) {
@@ -225,6 +263,44 @@ export default function ChecklistsScreen({ onBackToOverview }) {
       setScopeFilter('all');
     }
   }, [selectedProjectId, scopeFilter]);
+
+  // Map queued checklist operations by checklistId for instant UI lookup
+  const checklistQueueMap = useMemo(() => {
+    const map = new Map();
+    const ops = Array.isArray(syncStatus?.checklistOperations)
+      ? syncStatus.checklistOperations
+      : Array.isArray(syncStatus?.operations)
+      ? syncStatus.operations.filter((o) => o && o.entityType === 'checklist')
+      : [];
+    ops.forEach((op) => {
+      const cid = String(op.checklistId || op.entityId || '').trim();
+      if (cid) {
+        map.set(cid, op);
+      }
+    });
+    return map;
+  }, [syncStatus]);
+
+  const checklistQueueCounts = useMemo(() => {
+    const ops = Array.from(checklistQueueMap.values());
+    let pending = 0;
+    let syncing = 0;
+    let conflict = 0;
+    let failed = 0;
+    ops.forEach((op) => {
+      if (op.status === 'conflict' || op.requiresManualResolution) conflict += 1;
+      else if (op.status === 'failed') failed += 1;
+      else if (op.status === 'syncing' || syncStatus?.isSyncing) syncing += 1;
+      else pending += 1;
+    });
+    return {
+      total: ops.length,
+      pending,
+      syncing,
+      conflict,
+      failed,
+    };
+  }, [checklistQueueMap, syncStatus?.isSyncing]);
 
   // Scoped checklists (Project vs All Workspace)
   const scopedChecklists = useMemo(() => {
@@ -287,6 +363,106 @@ export default function ChecklistsScreen({ onBackToOverview }) {
     });
   }, [activeChecklist, itemFilterMode]);
 
+  const getChecklistSyncInfo = useCallback(
+    (chk) => {
+      if (!chk) {
+        return {
+          state: 'synced',
+          label: 'Synced',
+          bg: colors.successSoft,
+          fg: colors.success,
+          op: null,
+        };
+      }
+      const queuedOp = checklistQueueMap.get(String(chk.id || '')) || null;
+      const rawStatus =
+        (queuedOp && queuedOp.status) ||
+        chk._syncStatus ||
+        (chk._pendingSync || chk._pendingCreation ? 'pending' : 'synced');
+
+      if (
+        rawStatus === 'conflict' ||
+        (queuedOp && queuedOp.requiresManualResolution)
+      ) {
+        return {
+          state: 'conflict',
+          label: 'Conflict (409)',
+          bg: colors.dangerSoft,
+          fg: colors.danger,
+          op: queuedOp,
+          opId: (queuedOp && queuedOp.id) || chk._syncOpId || null,
+          error:
+            (queuedOp && queuedOp.lastError) ||
+            chk._syncError ||
+            'Checklist was modified on the server while you had pending changes.',
+          conflictDetails:
+            (queuedOp && queuedOp.conflictDetails) ||
+            chk._conflictDetails ||
+            null,
+        };
+      }
+
+      if (rawStatus === 'failed') {
+        return {
+          state: 'failed',
+          label: 'Sync Failed',
+          bg: colors.dangerSoft,
+          fg: colors.danger,
+          op: queuedOp,
+          opId: (queuedOp && queuedOp.id) || chk._syncOpId || null,
+          error:
+            (queuedOp && queuedOp.lastError) ||
+            chk._syncError ||
+            'Synchronization failed. Tap Retry to attempt sync again.',
+        };
+      }
+
+      if (
+        rawStatus === 'syncing' ||
+        (syncStatus?.isSyncing &&
+          (queuedOp || chk._pendingSync || chk._pendingCreation))
+      ) {
+        return {
+          state: 'syncing',
+          label: 'Syncing...',
+          bg: colors.infoSoft,
+          fg: colors.primary,
+          op: queuedOp,
+          opId: (queuedOp && queuedOp.id) || chk._syncOpId || null,
+        };
+      }
+
+      if (
+        rawStatus === 'pending' ||
+        queuedOp ||
+        chk._pendingSync ||
+        chk._pendingCreation
+      ) {
+        const isCreate =
+          Boolean(chk._pendingCreation) ||
+          Boolean(queuedOp && queuedOp.operationType === 'CREATE');
+        return {
+          state: 'pending',
+          label: isCreate ? 'Queued Create' : 'Pending Sync',
+          bg: colors.warningSoft,
+          fg: colors.warning,
+          op: queuedOp,
+          opId: (queuedOp && queuedOp.id) || chk._syncOpId || null,
+        };
+      }
+
+      return {
+        state: 'synced',
+        label: 'Synced',
+        bg: colors.successSoft,
+        fg: colors.success,
+        op: null,
+        opId: null,
+      };
+    },
+    [checklistQueueMap, colors, syncStatus?.isSyncing]
+  );
+
   // Refresh a single checklist from `GET /api/checklists/:id` when opened
   const handleSelectChecklist = async (checklist) => {
     if (!checklist || !checklist.id) return;
@@ -304,9 +480,51 @@ export default function ChecklistsScreen({ onBackToOverview }) {
           checklists.map((c) =>
             c.id === detailRes.checklist.id ? detailRes.checklist : c
           ),
-          true
+          false
         );
       }
+    }
+  };
+
+  const handleResolveChecklistConflict = async (opId, resolution) => {
+    if (!opId || !currentUserId || busyMutation) return;
+    setBusyMutation(true);
+    try {
+      const res = await resolveSyncConflict(opId, resolution);
+      const cached = await getCachedChecklistsForUser(currentUserId);
+      syncChecklistsState(cached, false);
+      if (res && res.ok) {
+        if (showToast) {
+          showToast(
+            resolution === 'keep_server'
+              ? 'Applied latest server version.'
+              : resolution === 'merge'
+              ? 'Merged offline checklist changes with server.'
+              : 'Applied local checklist changes.',
+            'success'
+          );
+        }
+      } else if (res && res.error) {
+        setErrorBanner(res.error);
+      }
+    } finally {
+      setBusyMutation(false);
+    }
+  };
+
+  const handleRetryChecklistOp = async (opId) => {
+    if (!currentUserId || busyMutation) return;
+    setBusyMutation(true);
+    try {
+      if (opId) {
+        await retryProjectOperation(opId, currentUserId);
+      } else if (typeof retryFailedSync === 'function') {
+        await retryFailedSync();
+      }
+      const cached = await getCachedChecklistsForUser(currentUserId);
+      syncChecklistsState(cached, false);
+    } finally {
+      setBusyMutation(false);
     }
   };
 
@@ -443,31 +661,22 @@ export default function ChecklistsScreen({ onBackToOverview }) {
         });
 
         if (res.ok && res.checklist) {
-          const nextList = [res.checklist, ...checklists];
-          syncChecklistsState(nextList, true);
+          const nextList = [
+            res.checklist,
+            ...checklists.filter((c) => c.id !== res.checklist.id),
+          ];
+          syncChecklistsState(nextList, false);
+          if (res.queuedOffline) {
+            setIsFromOfflineCache(true);
+          }
           setFormModalVisible(false);
           setActiveChecklistId(res.checklist.id);
           if (showToast) {
-            showToast(`Created checklist "${res.checklist.title}".`, 'success');
-          }
-        } else if (res.isNetworkError || isOfflineMode) {
-          // Safe per-user local cache fallback when offline
-          const offlineChecklist = normalizeChecklistRecord({
-            ...createPayload,
-            id: `chk_local_${Date.now()}`,
-            userId: currentUserId,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          });
-          const nextList = [offlineChecklist, ...checklists];
-          syncChecklistsState(nextList, true);
-          setIsFromOfflineCache(true);
-          setFormModalVisible(false);
-          setActiveChecklistId(offlineChecklist.id);
-          if (showToast) {
             showToast(
-              `Saved "${offlineChecklist.title}" to offline checklist cache.`,
-              'info'
+              res.queuedOffline
+                ? `Queued "${res.checklist.title}" for sync when online.`
+                : `Created checklist "${res.checklist.title}".`,
+              res.queuedOffline ? 'info' : 'success'
             );
           }
         } else {
@@ -484,47 +693,37 @@ export default function ChecklistsScreen({ onBackToOverview }) {
           targetRelease: formTargetRelease.trim(),
           projectId: targetProjId,
           projectName: targetProjName,
-          expectedUpdatedAt: existing?.updatedAt || undefined,
+          items: existing?.items || [],
+          expectedUpdatedAt:
+            existing?._serverUpdatedAt || existing?.updatedAt || undefined,
         };
 
         const res = await updateChecklist(editingChecklistId, updates, {
           userId: currentUserId,
+          existingChecklist: existing,
         });
 
         if (res.ok && res.checklist) {
           const nextList = checklists.map((c) =>
             c.id === editingChecklistId ? { ...c, ...res.checklist } : c
           );
-          syncChecklistsState(nextList, true);
+          syncChecklistsState(nextList, false);
+          if (res.queuedOffline) {
+            setIsFromOfflineCache(true);
+          }
           setFormModalVisible(false);
           if (showToast) {
-            showToast(`Updated checklist "${res.checklist.title}".`, 'success');
+            showToast(
+              res.queuedOffline
+                ? `Queued changes to "${res.checklist.title}" for sync.`
+                : `Updated checklist "${res.checklist.title}".`,
+              res.queuedOffline ? 'info' : 'success'
+            );
           }
-        } else if (res.isConflict && res.serverChecklist) {
-          const nextList = checklists.map((c) =>
-            c.id === editingChecklistId ? res.serverChecklist : c
-          );
-          syncChecklistsState(nextList, true);
+        } else if (res.isConflict) {
           setFormError(
-            'Conflict detected (HTTP 409): This checklist was modified on the server. Loaded latest server version.'
+            'Conflict detected (HTTP 409): This checklist was modified on the server. Close this dialog to review conflict resolution options.'
           );
-        } else if (res.isNetworkError || isOfflineMode) {
-          const updatedOffline = normalizeChecklistRecord({
-            ...existing,
-            ...updates,
-            id: editingChecklistId,
-            userId: currentUserId,
-            updatedAt: new Date().toISOString(),
-          });
-          const nextList = checklists.map((c) =>
-            c.id === editingChecklistId ? updatedOffline : c
-          );
-          syncChecklistsState(nextList, true);
-          setIsFromOfflineCache(true);
-          setFormModalVisible(false);
-          if (showToast) {
-            showToast('Updated checklist in offline cache.', 'info');
-          }
         } else {
           setFormError(res.error || 'Failed to update checklist.');
         }
@@ -545,16 +744,23 @@ export default function ChecklistsScreen({ onBackToOverview }) {
     setBusyMutation(true);
 
     try {
-      const res = await deleteChecklist(targetId);
-      if (res.ok || res.isNetworkError || isOfflineMode || res.status === 404) {
+      const res = await deleteChecklist(targetId, { userId: currentUserId });
+      if (res.ok || res.status === 404) {
         const nextList = checklists.filter((c) => c.id !== targetId);
-        syncChecklistsState(nextList, true);
+        syncChecklistsState(nextList, false);
         if (activeChecklistId === targetId) {
           setActiveChecklistId(null);
         }
         setDeleteTargetChecklist(null);
         if (showToast) {
-          showToast(`Deleted checklist "${targetTitle}".`, 'info');
+          showToast(
+            res.queuedOffline
+              ? res.cancelledOut
+                ? `Removed offline draft "${targetTitle}".`
+                : `Queued deletion of "${targetTitle}" for sync.`
+              : `Deleted checklist "${targetTitle}".`,
+            'info'
+          );
         }
       } else {
         setErrorBanner(res.error || 'Failed to delete checklist.');
@@ -574,24 +780,6 @@ export default function ChecklistsScreen({ onBackToOverview }) {
     mutationLockRef.current = true;
 
     const nextCompleted = !item.completed;
-    // Compute optimistic record
-    const optimisticItems = activeChecklist.items.map((it) =>
-      it.id === item.id
-        ? {
-            ...it,
-            completed: nextCompleted,
-            checked: nextCompleted,
-            status: nextCompleted ? 'Completed' : 'Pending',
-            completedAt: nextCompleted ? new Date().toISOString() : null,
-            updatedAt: new Date().toISOString(),
-          }
-        : it
-    );
-    const optimisticChecklist = normalizeChecklistRecord({
-      ...activeChecklist,
-      items: optimisticItems,
-      updatedAt: new Date().toISOString(),
-    });
 
     try {
       const res = await toggleChecklistItemCompletion(
@@ -606,29 +794,18 @@ export default function ChecklistsScreen({ onBackToOverview }) {
           checklists.map((c) =>
             c.id === activeChecklist.id ? res.checklist : c
           ),
-          true
+          false
         );
-      } else if (res.isConflict && res.serverChecklist) {
-        syncChecklistsState(
-          checklists.map((c) =>
-            c.id === activeChecklist.id ? res.serverChecklist : c
-          ),
-          true
-        );
+        if (res.queuedOffline) {
+          setIsFromOfflineCache(true);
+        }
+      } else if (res.isConflict) {
         if (showToast) {
           showToast(
-            'Server version was newer (409); refreshed checklist.',
+            'Conflict (409): Checklist was updated on the server. Review resolution options.',
             'warning'
           );
         }
-      } else if (res.isNetworkError || isOfflineMode) {
-        syncChecklistsState(
-          checklists.map((c) =>
-            c.id === activeChecklist.id ? optimisticChecklist : c
-          ),
-          true
-        );
-        setIsFromOfflineCache(true);
       } else {
         setErrorBanner(res.error || 'Failed to update checklist item.');
       }
@@ -671,30 +848,20 @@ export default function ChecklistsScreen({ onBackToOverview }) {
           checklists.map((c) =>
             c.id === activeChecklist.id ? res.checklist : c
           ),
-          true
+          false
         );
         setNewItemTitle('');
         setNewItemNotes('');
-        if (showToast) {
-          showToast('Checklist item added.', 'success');
+        if (res.queuedOffline) {
+          setIsFromOfflineCache(true);
         }
-      } else if (res.isNetworkError || isOfflineMode) {
-        const fallbackUpdated = normalizeChecklistRecord({
-          ...activeChecklist,
-          items: [...activeChecklist.items, newItemObj],
-          updatedAt: new Date().toISOString(),
-        });
-        syncChecklistsState(
-          checklists.map((c) =>
-            c.id === activeChecklist.id ? fallbackUpdated : c
-          ),
-          true
-        );
-        setNewItemTitle('');
-        setNewItemNotes('');
-        setIsFromOfflineCache(true);
         if (showToast) {
-          showToast('Item saved to offline checklist cache.', 'info');
+          showToast(
+            res.queuedOffline
+              ? 'Item queued for sync when online.'
+              : 'Checklist item added.',
+            res.queuedOffline ? 'info' : 'success'
+          );
         }
       } else {
         setErrorBanner(res.error || 'Failed to add checklist item.');
@@ -746,29 +913,20 @@ export default function ChecklistsScreen({ onBackToOverview }) {
           checklists.map((c) =>
             c.id === activeChecklist.id ? res.checklist : c
           ),
-          true
+          false
         );
         setEditingItem(null);
-        if (showToast) {
-          showToast('Updated checklist item.', 'success');
+        if (res.queuedOffline) {
+          setIsFromOfflineCache(true);
         }
-      } else if (res.isNetworkError || isOfflineMode) {
-        const nextItems = activeChecklist.items.map((it) =>
-          it.id === editingItem.id ? { ...it, ...itemUpdates, text: cleanTitle } : it
-        );
-        const fallbackChecklist = normalizeChecklistRecord({
-          ...activeChecklist,
-          items: nextItems,
-          updatedAt: new Date().toISOString(),
-        });
-        syncChecklistsState(
-          checklists.map((c) =>
-            c.id === activeChecklist.id ? fallbackChecklist : c
-          ),
-          true
-        );
-        setEditingItem(null);
-        setIsFromOfflineCache(true);
+        if (showToast) {
+          showToast(
+            res.queuedOffline
+              ? 'Step update queued for sync.'
+              : 'Updated checklist item.',
+            res.queuedOffline ? 'info' : 'success'
+          );
+        }
       } else {
         setErrorBanner(res.error || 'Failed to update checklist item.');
       }
@@ -795,25 +953,19 @@ export default function ChecklistsScreen({ onBackToOverview }) {
           checklists.map((c) =>
             c.id === activeChecklist.id ? res.checklist : c
           ),
-          true
+          false
         );
-        if (showToast) {
-          showToast('Removed checklist item.', 'info');
+        if (res.queuedOffline) {
+          setIsFromOfflineCache(true);
         }
-      } else if (res.isNetworkError || isOfflineMode) {
-        const nextItems = activeChecklist.items.filter((it) => it.id !== itemId);
-        const fallbackChecklist = normalizeChecklistRecord({
-          ...activeChecklist,
-          items: nextItems,
-          updatedAt: new Date().toISOString(),
-        });
-        syncChecklistsState(
-          checklists.map((c) =>
-            c.id === activeChecklist.id ? fallbackChecklist : c
-          ),
-          true
-        );
-        setIsFromOfflineCache(true);
+        if (showToast) {
+          showToast(
+            res.queuedOffline
+              ? 'Item removal queued for sync.'
+              : 'Removed checklist item.',
+            'info'
+          );
+        }
       } else {
         setErrorBanner(res.error || 'Failed to delete checklist item.');
       }
@@ -841,38 +993,19 @@ export default function ChecklistsScreen({ onBackToOverview }) {
           checklists.map((c) =>
             c.id === activeChecklist.id ? res.checklist : c
           ),
-          true
+          false
         );
+        if (res.queuedOffline) {
+          setIsFromOfflineCache(true);
+        }
         if (showToast) {
           showToast(
             completed
               ? 'All checklist items marked Complete.'
               : 'All checklist items reset to Pending.',
-            'success'
+            res.queuedOffline ? 'info' : 'success'
           );
         }
-      } else if (res.isNetworkError || isOfflineMode) {
-        const nowIso = new Date().toISOString();
-        const nextItems = activeChecklist.items.map((it) => ({
-          ...it,
-          completed,
-          checked: completed,
-          status: completed ? 'Completed' : 'Pending',
-          completedAt: completed ? nowIso : null,
-          updatedAt: nowIso,
-        }));
-        const fallbackChecklist = normalizeChecklistRecord({
-          ...activeChecklist,
-          items: nextItems,
-          updatedAt: nowIso,
-        });
-        syncChecklistsState(
-          checklists.map((c) =>
-            c.id === activeChecklist.id ? fallbackChecklist : c
-          ),
-          true
-        );
-        setIsFromOfflineCache(true);
       } else {
         setErrorBanner(res.error || 'Failed to update checklist items.');
       }
@@ -914,6 +1047,7 @@ export default function ChecklistsScreen({ onBackToOverview }) {
   if (activeChecklist) {
     const statusPalette = getStatusBadgeColors(activeChecklist.status);
     const priorityPalette = getPriorityBadgeColors(activeChecklist.priority);
+    const activeSyncInfo = getChecklistSyncInfo(activeChecklist);
     const linkedProjectObj = activeChecklist.projectId
       ? projects.find(
           (p) => String(p.id || p._id) === String(activeChecklist.projectId)
@@ -982,6 +1116,148 @@ export default function ChecklistsScreen({ onBackToOverview }) {
             </View>
           </View>
 
+          {/* Active Checklist Conflict / Failed Sync Resolution Banner */}
+          {activeSyncInfo.state === 'conflict' ? (
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: colors.dangerSoft,
+                  borderColor: colors.danger,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.statusBannerTitle,
+                  { color: colors.danger, marginBottom: 4 },
+                ]}
+              >
+                Server Conflict Detected (HTTP 409)
+              </Text>
+              <Text
+                style={[
+                  styles.statusBannerText,
+                  { color: colors.text, marginBottom: 10 },
+                ]}
+              >
+                {activeSyncInfo.error ||
+                  'This checklist was modified on the server while you had unsynchronized offline changes. Your local edits are preserved.'}
+              </Text>
+              <View style={styles.bulkActionsRow}>
+                <Pressable
+                  onPress={() =>
+                    handleResolveChecklistConflict(activeSyncInfo.opId, 'merge')
+                  }
+                  disabled={busyMutation || !activeSyncInfo.opId}
+                  style={[
+                    styles.secondaryBtn,
+                    {
+                      backgroundColor: colors.primary,
+                      borderColor: colors.primary,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.secondaryBtnText,
+                      { color: colors.textOnPrimary },
+                    ]}
+                  >
+                    Merge & Sync
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() =>
+                    handleResolveChecklistConflict(
+                      activeSyncInfo.opId,
+                      'keep_local'
+                    )
+                  }
+                  disabled={busyMutation || !activeSyncInfo.opId}
+                  style={[
+                    styles.secondaryBtn,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.primary,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[styles.secondaryBtnText, { color: colors.primary }]}
+                  >
+                    Keep Local
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() =>
+                    handleResolveChecklistConflict(
+                      activeSyncInfo.opId,
+                      'keep_server'
+                    )
+                  }
+                  disabled={busyMutation || !activeSyncInfo.opId}
+                  style={[
+                    styles.secondaryBtn,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.borderStrong,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[styles.secondaryBtnText, { color: colors.text }]}
+                  >
+                    Use Server Version
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : activeSyncInfo.state === 'failed' ? (
+            <View
+              style={[
+                styles.statusBanner,
+                {
+                  backgroundColor: colors.dangerSoft,
+                  borderColor: colors.danger,
+                },
+              ]}
+            >
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[styles.statusBannerTitle, { color: colors.danger }]}
+                >
+                  Checklist Synchronization Failed
+                </Text>
+                <Text
+                  style={[
+                    styles.statusBannerText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  {activeSyncInfo.error}
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => handleRetryChecklistOp(activeSyncInfo.opId)}
+                disabled={busyMutation}
+                style={[
+                  styles.retryBtn,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.danger,
+                  },
+                ]}
+              >
+                <Text style={[styles.retryBtnText, { color: colors.danger }]}>
+                  Retry Sync
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
           {/* Checklist Header & Progress Summary Card */}
           <View
             style={[
@@ -1018,6 +1294,16 @@ export default function ChecklistsScreen({ onBackToOverview }) {
               >
                 <Text style={[styles.badgeText, { color: colors.textSecondary }]}>
                   {activeChecklist.category}
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.badge,
+                  { backgroundColor: activeSyncInfo.bg },
+                ]}
+              >
+                <Text style={[styles.badgeText, { color: activeSyncInfo.fg }]}>
+                  {activeSyncInfo.label}
                 </Text>
               </View>
             </View>
@@ -2298,19 +2584,23 @@ export default function ChecklistsScreen({ onBackToOverview }) {
         </View>
 
         {/* Offline / Error / Auth Expiry Status Banner */}
-        {errorBanner || isFromOfflineCache ? (
+        {errorBanner || isFromOfflineCache || checklistQueueCounts.total > 0 ? (
           <View
             style={[
               styles.statusBanner,
               {
                 backgroundColor: authExpiredError
                   ? colors.dangerSoft
-                  : errorBanner
+                  : checklistQueueCounts.conflict > 0 || checklistQueueCounts.failed > 0
+                  ? colors.dangerSoft
+                  : errorBanner || checklistQueueCounts.pending > 0
                   ? colors.warningSoft
                   : colors.infoSoft,
                 borderColor: authExpiredError
                   ? colors.danger
-                  : errorBanner
+                  : checklistQueueCounts.conflict > 0 || checklistQueueCounts.failed > 0
+                  ? colors.danger
+                  : errorBanner || checklistQueueCounts.pending > 0
                   ? colors.warning
                   : colors.primary,
               },
@@ -2323,7 +2613,9 @@ export default function ChecklistsScreen({ onBackToOverview }) {
                   {
                     color: authExpiredError
                       ? colors.danger
-                      : errorBanner
+                      : checklistQueueCounts.conflict > 0 || checklistQueueCounts.failed > 0
+                      ? colors.danger
+                      : errorBanner || checklistQueueCounts.pending > 0
                       ? colors.warning
                       : colors.primary,
                   },
@@ -2331,6 +2623,14 @@ export default function ChecklistsScreen({ onBackToOverview }) {
               >
                 {authExpiredError
                   ? 'Authentication Required'
+                  : checklistQueueCounts.conflict > 0
+                  ? `Checklist Sync Conflict (${checklistQueueCounts.conflict})`
+                  : checklistQueueCounts.failed > 0
+                  ? `Checklist Sync Failed (${checklistQueueCounts.failed})`
+                  : checklistQueueCounts.syncing > 0
+                  ? `Syncing Queued Checklists (${checklistQueueCounts.syncing})...`
+                  : checklistQueueCounts.pending > 0
+                  ? `Pending Checklist Changes (${checklistQueueCounts.pending} Queued)`
                   : errorBanner
                   ? 'Checklist Sync Notice'
                   : 'Offline Checklist Cache Active'}
@@ -2339,20 +2639,56 @@ export default function ChecklistsScreen({ onBackToOverview }) {
                 style={[styles.statusBannerText, { color: colors.textSecondary }]}
               >
                 {errorBanner ||
-                  'Displaying user-scoped checklists from device cache. Changes will sync when backend connectivity is available.'}
+                  (checklistQueueCounts.conflict > 0
+                    ? 'One or more checklists have server conflicts (HTTP 409). Open the checklist to merge, keep local, or use the server version.'
+                    : checklistQueueCounts.failed > 0
+                    ? 'Some checklist mutations failed to synchronize. Tap Retry to re-submit queued changes safely.'
+                    : checklistQueueCounts.pending > 0
+                    ? isOfflineMode
+                      ? 'Offline checklist mutations are durably queued for your account and will synchronize automatically when online.'
+                      : 'Queued checklist mutations are ready to synchronize with /api/checklists.'
+                    : 'Displaying user-scoped checklists from device cache. Changes will sync when backend connectivity is available.')}
               </Text>
             </View>
-            <Pressable
-              onPress={() => loadChecklists({ silent: false })}
-              style={[
-                styles.retryBtn,
-                { backgroundColor: colors.surface, borderColor: colors.borderStrong },
-              ]}
-            >
-              <Text style={[styles.retryBtnText, { color: colors.text }]}>
-                Retry
-              </Text>
-            </Pressable>
+            {checklistQueueCounts.failed > 0 && !isOfflineMode ? (
+              <Pressable
+                onPress={() => handleRetryChecklistOp(null)}
+                disabled={busyMutation}
+                style={[
+                  styles.retryBtn,
+                  { backgroundColor: colors.surface, borderColor: colors.danger },
+                ]}
+              >
+                <Text style={[styles.retryBtnText, { color: colors.danger }]}>
+                  Retry Failed
+                </Text>
+              </Pressable>
+            ) : checklistQueueCounts.pending > 0 && !isOfflineMode && typeof syncNow === 'function' ? (
+              <Pressable
+                onPress={() => syncNow()}
+                disabled={busyMutation || syncStatus?.isSyncing}
+                style={[
+                  styles.retryBtn,
+                  { backgroundColor: colors.primary, borderColor: colors.primary },
+                ]}
+              >
+                <Text style={[styles.retryBtnText, { color: colors.textOnPrimary }]}>
+                  Sync Now
+                </Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={() => loadChecklists({ silent: false })}
+                style={[
+                  styles.retryBtn,
+                  { backgroundColor: colors.surface, borderColor: colors.borderStrong },
+                ]}
+              >
+                <Text style={[styles.retryBtnText, { color: colors.text }]}>
+                  Retry
+                </Text>
+              </Pressable>
+            )}
           </View>
         ) : null}
 
@@ -2678,6 +3014,7 @@ export default function ChecklistsScreen({ onBackToOverview }) {
             {filteredChecklists.map((chk) => {
               const statusPalette = getStatusBadgeColors(chk.status);
               const priorityPalette = getPriorityBadgeColors(chk.priority);
+              const syncInfo = getChecklistSyncInfo(chk);
               const linkedProj = chk.projectId
                 ? projects.find(
                     (p) => String(p.id || p._id) === String(chk.projectId)
@@ -2696,7 +3033,12 @@ export default function ChecklistsScreen({ onBackToOverview }) {
                     styles.checklistCard,
                     {
                       backgroundColor: colors.surface,
-                      borderColor: colors.border,
+                      borderColor:
+                        syncInfo.state === 'conflict' || syncInfo.state === 'failed'
+                          ? colors.danger
+                          : syncInfo.state === 'pending'
+                          ? colors.warning
+                          : colors.border,
                     },
                   ]}
                 >
@@ -2742,6 +3084,21 @@ export default function ChecklistsScreen({ onBackToOverview }) {
                           ]}
                         >
                           {chk.category}
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.badge,
+                          { backgroundColor: syncInfo.bg },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.badgeText,
+                            { color: syncInfo.fg },
+                          ]}
+                        >
+                          {syncInfo.label}
                         </Text>
                       </View>
                     </View>
@@ -2806,6 +3163,18 @@ export default function ChecklistsScreen({ onBackToOverview }) {
                       ]}
                     >
                       {chk.description}
+                    </Text>
+                  ) : null}
+
+                  {syncInfo.state === 'conflict' || syncInfo.state === 'failed' ? (
+                    <Text
+                      numberOfLines={2}
+                      style={[
+                        styles.cardDescription,
+                        { color: colors.danger, fontWeight: '600' },
+                      ]}
+                    >
+                      {syncInfo.error}
                     </Text>
                   ) : null}
 
