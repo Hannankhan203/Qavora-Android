@@ -1378,7 +1378,7 @@ export function WorkspaceProvider({ children }) {
     };
   }, [selectedProjectId]);
 
-  // Synchronize workspace state whenever selectedProject is refreshed from the server
+  // Synchronize workspace state whenever selectedProject is refreshed from the server or updated via promotion
   useEffect(() => {
     if (!selectedProject || !selectedProjectId) return;
     const synced = buildProjectWorkspaceState(selectedProject, null, user);
@@ -1401,6 +1401,12 @@ export function WorkspaceProvider({ children }) {
     selectedProject && selectedProject.name,
     selectedProject && selectedProject.version,
     selectedProject && selectedProject.environment,
+    selectedProject && selectedProject.testCaseCount,
+    selectedProject && selectedProject.promotedAt,
+    selectedProject && selectedProject.sourceChecklistId,
+    selectedProject &&
+      Array.isArray(selectedProject.testSuites) &&
+      selectedProject.testSuites.length,
   ]);
 
   // Persist project-scoped workspace data to AsyncStorage

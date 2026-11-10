@@ -37,6 +37,8 @@ import {
   updateChecklistItem,
   deleteChecklistItem,
   markAllChecklistItems,
+  buildChecklistPromotionPreview,
+  promoteChecklistToProject,
 } from '../services/checklistService';
 import {
   subscribeToSyncEvents,
@@ -49,6 +51,10 @@ export default function ChecklistsScreen({ onBackToOverview }) {
   const {
     selectedProject,
     projects,
+    selectProject,
+    updateProjectData,
+    refreshProjects,
+    getProject,
     isOfflineMode,
     syncStatus,
     syncNow,
@@ -57,6 +63,9 @@ export default function ChecklistsScreen({ onBackToOverview }) {
   } = useProjects();
   const {
     showToast,
+    setActiveTab,
+    openWorkspace,
+    reloadProjectDataFromBackend,
     checklists: workspaceChecklists,
     setChecklists: setWorkspaceChecklists,
   } = useWorkspace();
@@ -130,8 +139,21 @@ export default function ChecklistsScreen({ onBackToOverview }) {
   // Destructive Delete Confirmation Modal state
   const [deleteTargetChecklist, setDeleteTargetChecklist] = useState(null);
 
+  // Promote Checklist to Project Modal state
+  const [promoteModalVisible, setPromoteModalVisible] = useState(false);
+  const [promoteSourceChecklist, setPromoteSourceChecklist] = useState(null);
+  const [promoteTargetProjectId, setPromoteTargetProjectId] = useState('');
+  const [promoteTargetProjectDetail, setPromoteTargetProjectDetail] =
+    useState(null);
+  const [isLoadingPromotePreview, setIsLoadingPromotePreview] = useState(false);
+  const [isPromoting, setIsPromoting] = useState(false);
+  const [promoteProgressText, setPromoteProgressText] = useState('');
+  const [promoteError, setPromoteError] = useState(null);
+  const [promoteSuccessResult, setPromoteSuccessResult] = useState(null);
+
   const loadGenerationRef = useRef(0);
   const mutationLockRef = useRef(false);
+  const promoteLockRef = useRef(false);
 
   const syncChecklistsState = useCallback(
     (nextList, persistCache = false) => {
@@ -1015,6 +1037,279 @@ export default function ChecklistsScreen({ onBackToOverview }) {
     }
   };
 
+  // ============================================================================
+  // CHECKLIST-TO-PROJECT PROMOTION WORKFLOW
+  // ============================================================================
+  const availableProjects = useMemo(
+    () => (Array.isArray(projects) ? projects.filter((p) => p && (p.id || p._id)) : []),
+    [projects]
+  );
+
+  // Resolve target project object for preview
+  const resolvedPromoteTargetProject = useMemo(() => {
+    if (!promoteTargetProjectId) return null;
+    if (
+      promoteTargetProjectDetail &&
+      String(promoteTargetProjectDetail.id || promoteTargetProjectDetail._id) ===
+        String(promoteTargetProjectId)
+    ) {
+      return promoteTargetProjectDetail;
+    }
+    return (
+      availableProjects.find(
+        (p) => String(p.id || p._id) === String(promoteTargetProjectId)
+      ) || null
+    );
+  }, [
+    promoteTargetProjectId,
+    promoteTargetProjectDetail,
+    availableProjects,
+  ]);
+
+  // Live deterministic promotion preview for confirmation modal
+  const promotionPreview = useMemo(() => {
+    if (!promoteSourceChecklist || !resolvedPromoteTargetProject) {
+      return null;
+    }
+    return buildChecklistPromotionPreview(
+      promoteSourceChecklist,
+      resolvedPromoteTargetProject
+    );
+  }, [promoteSourceChecklist, resolvedPromoteTargetProject]);
+
+  // Load full project details (suites/phases) when destination project selection changes
+  useEffect(() => {
+    let active = true;
+    if (!promoteModalVisible || !promoteTargetProjectId) {
+      setPromoteTargetProjectDetail(null);
+      setIsLoadingPromotePreview(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    const baseProj = availableProjects.find(
+      (p) => String(p.id || p._id) === String(promoteTargetProjectId)
+    );
+    if (baseProj) {
+      setPromoteTargetProjectDetail(baseProj);
+    }
+
+    if (typeof getProject === 'function' && !isOfflineMode) {
+      setIsLoadingPromotePreview(true);
+      getProject(promoteTargetProjectId)
+        .then((res) => {
+          if (!active) return;
+          if (res && res.ok && res.project) {
+            setPromoteTargetProjectDetail(res.project);
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (active) {
+            setIsLoadingPromotePreview(false);
+          }
+        });
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [
+    promoteModalVisible,
+    promoteTargetProjectId,
+    availableProjects,
+    getProject,
+    isOfflineMode,
+  ]);
+
+  const openPromoteModal = useCallback(
+    (checklist) => {
+      if (!checklist) return;
+      const targetChecklist =
+        activeChecklist && String(activeChecklist.id) === String(checklist.id)
+          ? activeChecklist
+          : checklist;
+
+      setPromoteSourceChecklist(targetChecklist);
+      setPromoteError(null);
+      setPromoteSuccessResult(null);
+      setPromoteProgressText('');
+
+      // Default destination project: checklist's linked project -> active selected project -> first available project
+      const linkedId = targetChecklist.projectId
+        ? String(targetChecklist.projectId).trim()
+        : '';
+      const hasLinked =
+        linkedId &&
+        availableProjects.some(
+          (p) => String(p.id || p._id) === linkedId
+        );
+      const hasSelected =
+        selectedProjectId &&
+        availableProjects.some(
+          (p) => String(p.id || p._id) === selectedProjectId
+        );
+
+      const initialTargetId = hasLinked
+        ? linkedId
+        : hasSelected
+        ? selectedProjectId
+        : availableProjects.length > 0
+        ? String(availableProjects[0].id || availableProjects[0]._id)
+        : '';
+
+      setPromoteTargetProjectId(initialTargetId);
+      setPromoteModalVisible(true);
+    },
+    [activeChecklist, availableProjects, selectedProjectId]
+  );
+
+  const closePromoteModal = useCallback(() => {
+    if (isPromoting) return;
+    setPromoteModalVisible(false);
+    setPromoteSourceChecklist(null);
+    setPromoteError(null);
+    setPromoteSuccessResult(null);
+    setPromoteProgressText('');
+  }, [isPromoting]);
+
+  const handleSelectPromoteProject = useCallback((projectId) => {
+    if (!projectId) return;
+    setPromoteTargetProjectId(String(projectId));
+    setPromoteError(null);
+    setPromoteSuccessResult(null);
+  }, []);
+
+  const handleConfirmPromoteChecklist = useCallback(async () => {
+    if (
+      !promoteSourceChecklist ||
+      !promoteTargetProjectId ||
+      promoteLockRef.current ||
+      isPromoting
+    ) {
+      return;
+    }
+
+    promoteLockRef.current = true;
+    setIsPromoting(true);
+    setPromoteError(null);
+    setPromoteProgressText('Validating checklist and destination project...');
+
+    try {
+      const targetProj =
+        resolvedPromoteTargetProject || promoteTargetProjectId;
+
+      const res = await promoteChecklistToProject(
+        promoteSourceChecklist,
+        targetProj,
+        {
+          userId: currentUserId,
+          updateProjectDataFn:
+            typeof updateProjectData === 'function' ? updateProjectData : undefined,
+          onProgress: (stageText) => {
+            setPromoteProgressText(stageText);
+          },
+        }
+      );
+
+      if (res.ok && res.project) {
+        setPromoteTargetProjectDetail(res.project);
+        setPromoteSuccessResult({
+          project: res.project,
+          summary: res.summary || (res.preview && res.preview.stats) || {},
+          preview: res.preview,
+          queuedOffline: Boolean(res.queuedOffline),
+        });
+        setPromoteProgressText('');
+
+        // Refresh projects list in background when online so counts & suites stay in sync everywhere
+        if (typeof refreshProjects === 'function' && !res.queuedOffline) {
+          refreshProjects().catch(() => {});
+        }
+        if (
+          typeof reloadProjectDataFromBackend === 'function' &&
+          String(selectedProjectId) === String(res.project.id) &&
+          !res.queuedOffline
+        ) {
+          reloadProjectDataFromBackend(res.project.id).catch(() => {});
+        }
+
+        if (showToast) {
+          const addedCount =
+            (res.summary && res.summary.createdCaseCount) || 0;
+          showToast(
+            res.queuedOffline
+              ? `Promoted "${promoteSourceChecklist.title}" to "${res.project.name}" (queued for sync).`
+              : `Promoted "${promoteSourceChecklist.title}" to "${res.project.name}" (+${addedCount} test case${
+                  addedCount === 1 ? '' : 's'
+                }).`,
+            res.queuedOffline ? 'info' : 'success'
+          );
+        }
+      } else {
+        setPromoteError(
+          res.error ||
+            'Failed to promote checklist to the destination project. Please try again.'
+        );
+        if (showToast && res.alreadyPromoted) {
+          showToast(
+            res.error ||
+              'This checklist has already been promoted to the selected project.',
+            'warning'
+          );
+        }
+      }
+    } catch (err) {
+      setPromoteError(
+        (err && err.message) ||
+          'An unexpected error occurred while promoting the checklist.'
+      );
+    } finally {
+      promoteLockRef.current = false;
+      setIsPromoting(false);
+    }
+  }, [
+    promoteSourceChecklist,
+    promoteTargetProjectId,
+    isPromoting,
+    resolvedPromoteTargetProject,
+    currentUserId,
+    updateProjectData,
+    refreshProjects,
+    reloadProjectDataFromBackend,
+    selectedProjectId,
+    showToast,
+  ]);
+
+  const handleOpenPromotedProjectTestCases = useCallback(async () => {
+    const targetId =
+      (promoteSuccessResult &&
+        promoteSuccessResult.project &&
+        promoteSuccessResult.project.id) ||
+      promoteTargetProjectId;
+    if (!targetId) return;
+
+    setPromoteModalVisible(false);
+    setPromoteSuccessResult(null);
+    setPromoteError(null);
+
+    if (typeof selectProject === 'function') {
+      await selectProject(targetId);
+    }
+    if (typeof openWorkspace === 'function') {
+      openWorkspace('testcases');
+    } else if (typeof setActiveTab === 'function') {
+      setActiveTab('testcases');
+    }
+  }, [
+    promoteSuccessResult,
+    promoteTargetProjectId,
+    selectProject,
+    openWorkspace,
+    setActiveTab,
+  ]);
+
   const getPriorityBadgeColors = (priority) => {
     switch (priority) {
       case 'Critical':
@@ -1088,6 +1383,32 @@ export default function ChecklistsScreen({ onBackToOverview }) {
             </Pressable>
 
             <View style={styles.detailTopActions}>
+              <Pressable
+                onPress={() => openPromoteModal(activeChecklist)}
+                disabled={isPromoting}
+                style={[
+                  styles.smallActionBtn,
+                  {
+                    backgroundColor: colors.primary,
+                    borderColor: colors.primary,
+                  },
+                ]}
+              >
+                <VectorIcon
+                  name="layers"
+                  size={14}
+                  color={colors.textOnPrimary}
+                />
+                <Text
+                  style={[
+                    styles.smallActionBtnText,
+                    { color: colors.textOnPrimary },
+                  ]}
+                >
+                  Promote to Project
+                </Text>
+              </Pressable>
+
               <Pressable
                 onPress={() => openEditModal(activeChecklist)}
                 style={[
@@ -2408,6 +2729,988 @@ export default function ChecklistsScreen({ onBackToOverview }) {
             </View>
           </View>
         </Modal>
+
+        {/* Promote Checklist to Project Confirmation & Preview Modal */}
+        <Modal
+          visible={promoteModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={closePromoteModal}
+        >
+          <View style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}>
+            <View
+              style={[
+                styles.modalCard,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
+                <View style={styles.promoteModalHeaderRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.sectionKicker,
+                        { color: colors.primary, fontFamily: monoFontFamily },
+                      ]}
+                    >
+                      CHECKLIST-TO-PROJECT PROMOTION
+                    </Text>
+                    <Text
+                      style={[
+                        styles.modalTitle,
+                        { color: colors.text, marginBottom: 4 },
+                      ]}
+                    >
+                      Promote Checklist to Project
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={closePromoteModal}
+                    disabled={isPromoting}
+                    style={[
+                      styles.iconBtn,
+                      {
+                        backgroundColor: colors.background,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <VectorIcon name="x" size={16} color={colors.textSecondary} />
+                  </Pressable>
+                </View>
+
+                {/* Source Checklist Summary Box */}
+                {promoteSourceChecklist ? (
+                  <View
+                    style={[
+                      styles.promoteChecklistSummaryBox,
+                      {
+                        backgroundColor: colors.background,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.badgeRow}>
+                      <View
+                        style={[
+                          styles.badge,
+                          { backgroundColor: colors.surfaceAccent },
+                        ]}
+                      >
+                        <Text
+                          style={[styles.badgeText, { color: colors.primary }]}
+                        >
+                          {promoteSourceChecklist.category || 'General QA'}
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.badge,
+                          {
+                            backgroundColor: getPriorityBadgeColors(
+                              promoteSourceChecklist.priority
+                            ).bg,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.badgeText,
+                            {
+                              color: getPriorityBadgeColors(
+                                promoteSourceChecklist.priority
+                              ).fg,
+                            },
+                          ]}
+                        >
+                          {promoteSourceChecklist.priority || 'Medium'} Priority
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.badge,
+                          { backgroundColor: colors.surfaceMuted },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.badgeText,
+                            {
+                              color: colors.textSecondary,
+                              fontFamily: monoFontFamily,
+                            },
+                          ]}
+                        >
+                          {promoteSourceChecklist.completedItems || 0}/
+                          {promoteSourceChecklist.totalItems || 0} Done
+                        </Text>
+                      </View>
+                    </View>
+
+                    <Text
+                      style={[
+                        styles.cardTitle,
+                        { color: colors.text, marginTop: 6, marginBottom: 2 },
+                      ]}
+                    >
+                      {promoteSourceChecklist.title}
+                    </Text>
+                    {promoteSourceChecklist.description ? (
+                      <Text
+                        numberOfLines={2}
+                        style={[
+                          styles.cardDescription,
+                          { color: colors.textSecondary, marginBottom: 4 },
+                        ]}
+                      >
+                        {promoteSourceChecklist.description}
+                      </Text>
+                    ) : null}
+                    <Text
+                      style={[
+                        styles.metaLine,
+                        {
+                          color: colors.textMuted,
+                          fontFamily: monoFontFamily,
+                          marginBottom: 0,
+                        },
+                      ]}
+                    >
+                      Env: {promoteSourceChecklist.environment || 'Staging'}
+                      {promoteSourceChecklist.targetRelease
+                        ? ` · Release: ${promoteSourceChecklist.targetRelease}`
+                        : ''}{' '}
+                      · Original checklist is preserved unchanged
+                    </Text>
+                  </View>
+                ) : null}
+
+                {/* SUCCESS STATE */}
+                {promoteSuccessResult ? (
+                  <View
+                    style={[
+                      styles.promoteSuccessCard,
+                      {
+                        backgroundColor: colors.successSoft,
+                        borderColor: colors.success,
+                      },
+                    ]}
+                  >
+                    <View style={styles.promoteSuccessHeaderRow}>
+                      <VectorIcon
+                        name="check-circle"
+                        size={20}
+                        color={colors.success}
+                      />
+                      <Text
+                        style={[
+                          styles.statusBannerTitle,
+                          { color: colors.success, fontSize: 15, flex: 1 },
+                        ]}
+                      >
+                        {promoteSuccessResult.queuedOffline
+                          ? 'Promotion Queued for Offline Sync'
+                          : 'Checklist Promoted Successfully'}
+                      </Text>
+                    </View>
+
+                    <Text
+                      style={[
+                        styles.statusBannerText,
+                        { color: colors.text, marginTop: 6, marginBottom: 10 },
+                      ]}
+                    >
+                      Promoted{' '}
+                      <Text style={{ fontWeight: '700' }}>
+                        {promoteSourceChecklist?.title}
+                      </Text>{' '}
+                      into project{' '}
+                      <Text style={{ fontWeight: '700' }}>
+                        {promoteSuccessResult.project?.name}
+                      </Text>
+                      . The original checklist remains intact.
+                    </Text>
+
+                    <View style={styles.promoteStatsGrid}>
+                      <View
+                        style={[
+                          styles.promoteStatBox,
+                          {
+                            backgroundColor: colors.surface,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.promoteStatValue,
+                            { color: colors.primary, fontFamily: monoFontFamily },
+                          ]}
+                        >
+                          {promoteSuccessResult.summary?.totalPhaseCount || 1}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.promoteStatLabel,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          Phases Mapped
+                        </Text>
+                      </View>
+
+                      <View
+                        style={[
+                          styles.promoteStatBox,
+                          {
+                            backgroundColor: colors.surface,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.promoteStatValue,
+                            { color: colors.primary, fontFamily: monoFontFamily },
+                          ]}
+                        >
+                          {promoteSuccessResult.summary?.totalSuiteCount || 1}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.promoteStatLabel,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          Test Suites
+                        </Text>
+                      </View>
+
+                      <View
+                        style={[
+                          styles.promoteStatBox,
+                          {
+                            backgroundColor: colors.surface,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.promoteStatValue,
+                            { color: colors.success, fontFamily: monoFontFamily },
+                          ]}
+                        >
+                          +{promoteSuccessResult.summary?.createdCaseCount || 0}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.promoteStatLabel,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          Test Cases Added
+                        </Text>
+                      </View>
+
+                      <View
+                        style={[
+                          styles.promoteStatBox,
+                          {
+                            backgroundColor: colors.surface,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.promoteStatValue,
+                            { color: colors.text, fontFamily: monoFontFamily },
+                          ]}
+                        >
+                          {promoteSuccessResult.summary?.projectTotalCasesAfter ??
+                            promoteSuccessResult.project?.testCaseCount ??
+                            0}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.promoteStatLabel,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          Project Total Cases
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={[styles.modalActionsRow, { marginTop: 14 }]}>
+                      <Pressable
+                        onPress={closePromoteModal}
+                        style={[
+                          styles.modalCancelBtn,
+                          {
+                            backgroundColor: colors.surface,
+                            borderColor: colors.borderStrong,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[styles.modalCancelText, { color: colors.text }]}
+                        >
+                          Done
+                        </Text>
+                      </Pressable>
+
+                      <Pressable
+                        onPress={handleOpenPromotedProjectTestCases}
+                        style={[
+                          styles.modalConfirmBtn,
+                          {
+                            backgroundColor: colors.primary,
+                            flexDirection: 'row',
+                            gap: 6,
+                          },
+                        ]}
+                      >
+                        <VectorIcon
+                          name="layers"
+                          size={14}
+                          color={colors.textOnPrimary}
+                        />
+                        <Text
+                          style={[
+                            styles.modalConfirmText,
+                            { color: colors.textOnPrimary },
+                          ]}
+                        >
+                          Open Project Test Cases
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
+                  <>
+                    {/* Destination Project Selector */}
+                    <Text
+                      style={[
+                        styles.fieldLabel,
+                        { color: colors.textSecondary, marginTop: 4 },
+                      ]}
+                    >
+                      1. Select Destination QA Project *
+                    </Text>
+
+                    {availableProjects.length === 0 ? (
+                      <View
+                        style={[
+                          styles.errorAlert,
+                          {
+                            backgroundColor: colors.warningSoft,
+                            borderColor: colors.warning,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.errorAlertText,
+                            { color: colors.warning, marginBottom: 6 },
+                          ]}
+                        >
+                          No existing QA Projects found in your workspace. Create
+                          a project first to promote checklists into it.
+                        </Text>
+                        {onBackToOverview ? (
+                          <Pressable
+                            onPress={() => {
+                              closePromoteModal();
+                              onBackToOverview();
+                            }}
+                            style={[
+                              styles.secondaryHeaderBtn,
+                              {
+                                alignSelf: 'flex-start',
+                                backgroundColor: colors.surface,
+                                borderColor: colors.warning,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.secondaryHeaderBtnText,
+                                { color: colors.warning },
+                              ]}
+                            >
+                              Go to Projects
+                            </Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    ) : (
+                      <View style={styles.promoteProjectsList}>
+                        {availableProjects.map((proj) => {
+                          const pId = String(proj.id || proj._id);
+                          const isSelected =
+                            String(promoteTargetProjectId) === pId;
+                          const wasPromotedHere =
+                            promoteSourceChecklist &&
+                            (String(proj.sourceChecklistId || '') ===
+                              String(promoteSourceChecklist.id) ||
+                              (Array.isArray(proj.testSuites) &&
+                                proj.testSuites.some(
+                                  (s) =>
+                                    String(s.sourceChecklistId || '') ===
+                                    String(promoteSourceChecklist.id)
+                                )));
+
+                          return (
+                            <Pressable
+                              key={pId}
+                              onPress={() => handleSelectPromoteProject(pId)}
+                              disabled={isPromoting}
+                              style={[
+                                styles.promoteProjectOption,
+                                {
+                                  backgroundColor: isSelected
+                                    ? colors.surfaceAccent
+                                    : colors.background,
+                                  borderColor: isSelected
+                                    ? colors.primary
+                                    : colors.border,
+                                },
+                              ]}
+                            >
+                              <View
+                                style={[
+                                  styles.promoteRadioOuter,
+                                  {
+                                    borderColor: isSelected
+                                      ? colors.primary
+                                      : colors.borderStrong,
+                                  },
+                                ]}
+                              >
+                                {isSelected ? (
+                                  <View
+                                    style={[
+                                      styles.promoteRadioInner,
+                                      { backgroundColor: colors.primary },
+                                    ]}
+                                  />
+                                ) : null}
+                              </View>
+
+                              <View style={{ flex: 1 }}>
+                                <View style={styles.promoteProjectOptionTitleRow}>
+                                  <Text
+                                    style={[
+                                      styles.promoteProjectOptionName,
+                                      {
+                                        color: isSelected
+                                          ? colors.primary
+                                          : colors.text,
+                                      },
+                                    ]}
+                                  >
+                                    {proj.name}
+                                  </Text>
+                                  {wasPromotedHere ? (
+                                    <View
+                                      style={[
+                                        styles.badge,
+                                        { backgroundColor: colors.infoSoft },
+                                      ]}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.badgeText,
+                                          { color: colors.info },
+                                        ]}
+                                      >
+                                        Promoted
+                                      </Text>
+                                    </View>
+                                  ) : null}
+                                </View>
+                                <Text
+                                  style={[
+                                    styles.promoteProjectOptionMeta,
+                                    {
+                                      color: colors.textSecondary,
+                                      fontFamily: monoFontFamily,
+                                    },
+                                  ]}
+                                >
+                                  {proj.environment || 'Staging'} ·{' '}
+                                  {proj.version || 'v1.0.0'} ·{' '}
+                                  {proj.testCaseCount || 0} existing test cases
+                                </Text>
+                              </View>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    )}
+
+                    {/* Mapping Preview Card */}
+                    {promotionPreview && promotionPreview.valid ? (
+                      <View
+                        style={[
+                          styles.promotePreviewBox,
+                          {
+                            backgroundColor: colors.background,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                      >
+                        <View style={styles.promotePreviewHeaderRow}>
+                          <Text
+                            style={[
+                              styles.fieldLabel,
+                              { color: colors.text, marginBottom: 0 },
+                            ]}
+                          >
+                            2. Promotion Mapping Preview →{' '}
+                            {promotionPreview.targetProjectName}
+                          </Text>
+                          {isLoadingPromotePreview ? (
+                            <ActivityIndicator
+                              size="small"
+                              color={colors.primary}
+                            />
+                          ) : null}
+                        </View>
+
+                        {/* KPI Preview Grid */}
+                        <View style={styles.promoteStatsGrid}>
+                          <View
+                            style={[
+                              styles.promoteStatBox,
+                              {
+                                backgroundColor: colors.surface,
+                                borderColor: colors.border,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.promoteStatValue,
+                                {
+                                  color: colors.primary,
+                                  fontFamily: monoFontFamily,
+                                },
+                              ]}
+                            >
+                              {promotionPreview.stats.totalPhaseCount}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.promoteStatLabel,
+                                { color: colors.textSecondary },
+                              ]}
+                            >
+                              Phase
+                              {promotionPreview.stats.totalPhaseCount === 1
+                                ? ''
+                                : 's'}{' '}
+                              ({promotionPreview.stats.createdPhaseCount} new)
+                            </Text>
+                          </View>
+
+                          <View
+                            style={[
+                              styles.promoteStatBox,
+                              {
+                                backgroundColor: colors.surface,
+                                borderColor: colors.border,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.promoteStatValue,
+                                {
+                                  color: colors.primary,
+                                  fontFamily: monoFontFamily,
+                                },
+                              ]}
+                            >
+                              {promotionPreview.stats.totalSuiteCount}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.promoteStatLabel,
+                                { color: colors.textSecondary },
+                              ]}
+                            >
+                              Suite
+                              {promotionPreview.stats.totalSuiteCount === 1
+                                ? ''
+                                : 's'}{' '}
+                              ({promotionPreview.stats.createdSuiteCount} new)
+                            </Text>
+                          </View>
+
+                          <View
+                            style={[
+                              styles.promoteStatBox,
+                              {
+                                backgroundColor: colors.surface,
+                                borderColor: colors.border,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.promoteStatValue,
+                                {
+                                  color: colors.success,
+                                  fontFamily: monoFontFamily,
+                                },
+                              ]}
+                            >
+                              +{promotionPreview.stats.createdCaseCount}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.promoteStatLabel,
+                                { color: colors.textSecondary },
+                              ]}
+                            >
+                              New Cases ({promotionPreview.stats.passedCaseCount}{' '}
+                              Passed · {promotionPreview.stats.untestedCaseCount}{' '}
+                              Untested)
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Phase & Suite Structure Breakdown */}
+                        <View style={styles.promoteMappingList}>
+                          <Text
+                            style={[
+                              styles.promoteSubheading,
+                              { color: colors.textSecondary },
+                            ]}
+                          >
+                            Checklist Phases → Project Testing Phases:
+                          </Text>
+                          {promotionPreview.phasesSummary.map((ph) => (
+                            <View
+                              key={ph.id}
+                              style={[
+                                styles.promoteMappingItem,
+                                {
+                                  backgroundColor: colors.surface,
+                                  borderColor: colors.border,
+                                },
+                              ]}
+                            >
+                              <VectorIcon
+                                name="flag"
+                                size={13}
+                                color={colors.primary}
+                              />
+                              <Text
+                                style={[
+                                  styles.promoteMappingItemText,
+                                  { color: colors.text, flex: 1 },
+                                ]}
+                              >
+                                {ph.name}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.promoteMappingBadge,
+                                  {
+                                    color:
+                                      ph.action === 'created'
+                                        ? colors.success
+                                        : colors.info,
+                                    fontFamily: monoFontFamily,
+                                  },
+                                ]}
+                              >
+                                {ph.action === 'created'
+                                  ? '+ New Phase'
+                                  : 'Reused Phase'}
+                              </Text>
+                            </View>
+                          ))}
+
+                          <Text
+                            style={[
+                              styles.promoteSubheading,
+                              { color: colors.textSecondary, marginTop: 6 },
+                            ]}
+                          >
+                            Checklist Categories → Test Suites & Test Cases:
+                          </Text>
+                          {promotionPreview.suitesSummary.map((st) => (
+                            <View
+                              key={st.id}
+                              style={[
+                                styles.promoteMappingItem,
+                                {
+                                  backgroundColor: colors.surface,
+                                  borderColor: colors.border,
+                                },
+                              ]}
+                            >
+                              <VectorIcon
+                                name="folder"
+                                size={13}
+                                color={colors.primary}
+                              />
+                              <View style={{ flex: 1 }}>
+                                <Text
+                                  style={[
+                                    styles.promoteMappingItemText,
+                                    { color: colors.text },
+                                  ]}
+                                >
+                                  {st.name}
+                                </Text>
+                                <Text
+                                  style={[
+                                    styles.promoteMappingSubtext,
+                                    {
+                                      color: colors.textMuted,
+                                      fontFamily: monoFontFamily,
+                                    },
+                                  ]}
+                                >
+                                  Category: {st.category} · +{st.addedCaseCount}{' '}
+                                  test case{st.addedCaseCount === 1 ? '' : 's'}
+                                </Text>
+                              </View>
+                              <Text
+                                style={[
+                                  styles.promoteMappingBadge,
+                                  {
+                                    color:
+                                      st.action === 'created'
+                                        ? colors.success
+                                        : colors.info,
+                                    fontFamily: monoFontFamily,
+                                  },
+                                ]}
+                              >
+                                {st.action === 'created'
+                                  ? '+ New Suite'
+                                  : 'Update Suite'}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+
+                        {/* Empty Checklist Notice */}
+                        {promotionPreview.isEmptyChecklist ? (
+                          <View
+                            style={[
+                              styles.promoteInfoBanner,
+                              {
+                                backgroundColor: colors.infoSoft,
+                                borderColor: colors.info,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.promoteInfoBannerText,
+                                { color: colors.info },
+                              ]}
+                            >
+                              This checklist currently has 0 items. Promoting it
+                              will create its testing phase and category test
+                              suite shell in &ldquo;
+                              {promotionPreview.targetProjectName}&rdquo; without
+                              adding test cases.
+                            </Text>
+                          </View>
+                        ) : null}
+
+                        {/* Already Promoted / Duplicate Prevention Notice */}
+                        {promotionPreview.alreadyFullyPromoted ? (
+                          <View
+                            style={[
+                              styles.promoteInfoBanner,
+                              {
+                                backgroundColor: colors.warningSoft,
+                                borderColor: colors.warning,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.promoteInfoBannerText,
+                                { color: colors.warning },
+                              ]}
+                            >
+                              All verification items from this checklist have
+                              already been promoted to &ldquo;
+                              {promotionPreview.targetProjectName}&rdquo;.
+                              Duplicate promotion is blocked to prevent duplicate
+                              test cases. Select a different project or add new
+                              items to this checklist first.
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    ) : null}
+
+                    {/* Progress Indicator */}
+                    {isPromoting ? (
+                      <View
+                        style={[
+                          styles.promoteProgressBanner,
+                          {
+                            backgroundColor: colors.surfaceAccent,
+                            borderColor: colors.primary,
+                          },
+                        ]}
+                      >
+                        <ActivityIndicator
+                          size="small"
+                          color={colors.primary}
+                        />
+                        <Text
+                          style={[
+                            styles.promoteProgressText,
+                            { color: colors.primary },
+                          ]}
+                        >
+                          {promoteProgressText ||
+                            'Promoting checklist to project...'}
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    {/* Error Banner with Retry Action */}
+                    {promoteError ? (
+                      <View
+                        style={[
+                          styles.errorAlert,
+                          {
+                            backgroundColor: colors.dangerSoft,
+                            borderColor: colors.danger,
+                            marginTop: 8,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.errorAlertText,
+                            { color: colors.danger, marginBottom: 8 },
+                          ]}
+                        >
+                          {promoteError}
+                        </Text>
+                        {!promotionPreview?.alreadyFullyPromoted ? (
+                          <Pressable
+                            onPress={handleConfirmPromoteChecklist}
+                            disabled={isPromoting}
+                            style={[
+                              styles.retryBtn,
+                              {
+                                alignSelf: 'flex-start',
+                                backgroundColor: colors.surface,
+                                borderColor: colors.danger,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.retryBtnText,
+                                { color: colors.danger },
+                              ]}
+                            >
+                              Retry Promotion
+                            </Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    ) : null}
+
+                    {/* Modal Footer Actions */}
+                    <View style={styles.modalActionsRow}>
+                      <Pressable
+                        onPress={closePromoteModal}
+                        disabled={isPromoting}
+                        style={[
+                          styles.modalCancelBtn,
+                          {
+                            backgroundColor: colors.background,
+                            borderColor: colors.borderStrong,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.modalCancelText,
+                            { color: colors.text },
+                          ]}
+                        >
+                          Cancel
+                        </Text>
+                      </Pressable>
+
+                      <Pressable
+                        onPress={handleConfirmPromoteChecklist}
+                        disabled={
+                          isPromoting ||
+                          availableProjects.length === 0 ||
+                          !promoteTargetProjectId ||
+                          Boolean(
+                            promotionPreview &&
+                              promotionPreview.alreadyFullyPromoted
+                          )
+                        }
+                        style={[
+                          styles.modalConfirmBtn,
+                          {
+                            backgroundColor: colors.primary,
+                            flexDirection: 'row',
+                            gap: 6,
+                            opacity:
+                              isPromoting ||
+                              availableProjects.length === 0 ||
+                              !promoteTargetProjectId ||
+                              Boolean(
+                                promotionPreview &&
+                                  promotionPreview.alreadyFullyPromoted
+                              )
+                                ? 0.55
+                                : 1,
+                          },
+                        ]}
+                      >
+                        <VectorIcon
+                          name="layers"
+                          size={14}
+                          color={colors.textOnPrimary}
+                        />
+                        <Text
+                          style={[
+                            styles.modalConfirmText,
+                            { color: colors.textOnPrimary },
+                          ]}
+                        >
+                          {isPromoting
+                            ? 'Promoting...'
+                            : promotionPreview?.alreadyFullyPromoted
+                            ? 'Already Promoted'
+                            : 'Confirm & Promote'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </>
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
       </>
     );
   }
@@ -3104,6 +4407,36 @@ export default function ChecklistsScreen({ onBackToOverview }) {
                     </View>
 
                     <View style={styles.cardQuickButtons}>
+                      <Pressable
+                        onPress={(e) => {
+                          if (e && typeof e.stopPropagation === 'function') {
+                            e.stopPropagation();
+                          }
+                          openPromoteModal(chk);
+                        }}
+                        style={[
+                          styles.promoteCardBtn,
+                          {
+                            backgroundColor: colors.surfaceAccent,
+                            borderColor: colors.primary,
+                          },
+                        ]}
+                      >
+                        <VectorIcon
+                          name="layers"
+                          size={13}
+                          color={colors.primary}
+                        />
+                        <Text
+                          style={[
+                            styles.promoteCardBtnText,
+                            { color: colors.primary },
+                          ]}
+                        >
+                          Promote
+                        </Text>
+                      </Pressable>
+
                       <Pressable
                         onPress={(e) => {
                           if (e && typeof e.stopPropagation === 'function') {
@@ -3853,5 +5186,168 @@ const styles = StyleSheet.create({
   modalConfirmText: {
     fontSize: 13,
     fontWeight: '700',
+  },
+  promoteCardBtn: {
+    minHeight: 36,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+  },
+  promoteCardBtnText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
+  promoteModalHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginBottom: 8,
+  },
+  promoteChecklistSummaryBox: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 12,
+  },
+  promoteProjectsList: {
+    gap: 8,
+    marginBottom: 12,
+  },
+  promoteProjectOption: {
+    borderRadius: 12,
+    borderWidth: 1.5,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  promoteRadioOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  promoteRadioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  promoteProjectOptionTitleRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 2,
+  },
+  promoteProjectOptionName: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  promoteProjectOptionMeta: {
+    fontSize: 11,
+  },
+  promotePreviewBox: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 12,
+    gap: 10,
+  },
+  promotePreviewHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  promoteStatsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  promoteStatBox: {
+    flex: 1,
+    minWidth: 110,
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 10,
+  },
+  promoteStatValue: {
+    fontSize: 18,
+    fontWeight: '800',
+    marginBottom: 2,
+  },
+  promoteStatLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  promoteMappingList: {
+    gap: 6,
+  },
+  promoteSubheading: {
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
+  promoteMappingItem: {
+    borderRadius: 9,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  promoteMappingItemText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+  },
+  promoteMappingSubtext: {
+    fontSize: 11,
+    marginTop: 1,
+  },
+  promoteMappingBadge: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  promoteInfoBanner: {
+    borderRadius: 9,
+    borderWidth: 1,
+    padding: 10,
+  },
+  promoteInfoBannerText: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '600',
+  },
+  promoteProgressBanner: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  promoteProgressText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    flex: 1,
+  },
+  promoteSuccessCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+    marginTop: 4,
+  },
+  promoteSuccessHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
 });

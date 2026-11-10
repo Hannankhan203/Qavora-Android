@@ -33,13 +33,23 @@ import {
   apiDelete,
   ApiClientError,
 } from './apiClient.js';
-import { containsProhibitedKeys } from './projectService.js';
+import {
+  containsProhibitedKeys,
+  fetchProjectById,
+  updateProjectData,
+  buildDefaultTestPlan,
+  extractSuiteTestCases,
+  normalizeProject,
+} from './projectService.js';
 import {
   isClientOffline,
   getActiveSyncUser,
   getOfflineSyncStorageAdapter,
   getPendingChecklistOperations,
   queueChecklistMutation,
+  queueProjectMutation,
+  cacheProjectOffline,
+  getCachedProjectsForUser,
 } from './offlineSyncService.js';
 
 export const CHECKLISTS_ENDPOINT = '/api/checklists';
@@ -358,6 +368,24 @@ export function normalizeChecklistItem(rawItem, index = 0) {
       ? rawItem.priority
       : 'Medium',
     notes: typeof rawItem.notes === 'string' ? rawItem.notes.trim() : '',
+    description:
+      typeof rawItem.description === 'string' ? rawItem.description.trim() : '',
+    preconditions:
+      typeof rawItem.preconditions === 'string'
+        ? rawItem.preconditions.trim()
+        : '',
+    expectedResult:
+      typeof rawItem.expectedResult === 'string'
+        ? rawItem.expectedResult.trim()
+        : '',
+    phaseId:
+      typeof rawItem.phaseId === 'string' && rawItem.phaseId.trim()
+        ? rawItem.phaseId.trim()
+        : null,
+    phaseTitle:
+      typeof rawItem.phaseTitle === 'string' && rawItem.phaseTitle.trim()
+        ? rawItem.phaseTitle.trim()
+        : null,
     assignee:
       typeof rawItem.assignee === 'string' ? rawItem.assignee.trim() : '',
     completedAt: isCompleted
@@ -438,11 +466,60 @@ function extractRawChecklistItems(raw) {
   if (!raw || typeof raw !== 'object') {
     return [];
   }
+
+  const phaseMetaByItemId = new Map();
+  if (Array.isArray(raw.phases) && raw.phases.length > 0) {
+    raw.phases.forEach((phase, pIdx) => {
+      if (!phase || typeof phase !== 'object') return;
+      const resolvedPhaseId =
+        typeof phase.id === 'string' && phase.id.trim()
+          ? phase.id.trim()
+          : `phase_${pIdx + 1}`;
+      const resolvedPhaseTitle =
+        typeof phase.title === 'string' && phase.title.trim()
+          ? phase.title.trim()
+          : typeof phase.name === 'string' && phase.name.trim()
+          ? phase.name.trim()
+          : `Phase ${pIdx + 1}`;
+      const phaseItems = Array.isArray(phase.items)
+        ? phase.items
+        : Array.isArray(phase.tasks)
+        ? phase.tasks
+        : Array.isArray(phase.checks)
+        ? phase.checks
+        : [];
+      phaseItems.forEach((item) => {
+        if (item && typeof item === 'object' && item.id) {
+          phaseMetaByItemId.set(String(item.id).trim(), {
+            phaseId: item.phaseId || resolvedPhaseId,
+            phaseTitle: item.phaseTitle || resolvedPhaseTitle,
+            category:
+              item.category ||
+              phase.category ||
+              phase.title ||
+              phase.name ||
+              'General QA',
+          });
+        }
+      });
+    });
+  }
+
   if (
     Array.isArray(raw.items) &&
     (raw.items.length > 0 || !Array.isArray(raw.phases) || raw.phases.length === 0)
   ) {
-    return raw.items;
+    return raw.items.map((item) => {
+      if (!item || typeof item !== 'object') return item;
+      const meta = item.id ? phaseMetaByItemId.get(String(item.id).trim()) : null;
+      if (!meta) return item;
+      return {
+        ...item,
+        phaseId: item.phaseId || meta.phaseId,
+        phaseTitle: item.phaseTitle || meta.phaseTitle,
+        category: item.category || meta.category,
+      };
+    });
   }
   if (Array.isArray(raw.checklistItems) && raw.checklistItems.length > 0) {
     return raw.checklistItems;
@@ -452,8 +529,18 @@ function extractRawChecklistItems(raw) {
   }
   if (Array.isArray(raw.phases) && raw.phases.length > 0) {
     const flattened = [];
-    raw.phases.forEach((phase) => {
+    raw.phases.forEach((phase, pIdx) => {
       if (!phase || typeof phase !== 'object') return;
+      const resolvedPhaseId =
+        typeof phase.id === 'string' && phase.id.trim()
+          ? phase.id.trim()
+          : `phase_${pIdx + 1}`;
+      const resolvedPhaseTitle =
+        typeof phase.title === 'string' && phase.title.trim()
+          ? phase.title.trim()
+          : typeof phase.name === 'string' && phase.name.trim()
+          ? phase.name.trim()
+          : `Phase ${pIdx + 1}`;
       const phaseItems = Array.isArray(phase.items)
         ? phase.items
         : Array.isArray(phase.tasks)
@@ -465,7 +552,14 @@ function extractRawChecklistItems(raw) {
         if (item && typeof item === 'object') {
           flattened.push({
             ...item,
-            category: item.category || phase.title || phase.name || 'General QA',
+            phaseId: item.phaseId || resolvedPhaseId,
+            phaseTitle: item.phaseTitle || resolvedPhaseTitle,
+            category:
+              item.category ||
+              phase.category ||
+              phase.title ||
+              phase.name ||
+              'General QA',
           });
         }
       });
@@ -644,13 +738,100 @@ export function normalizeChecklistRecord(raw) {
     tags: rawTags,
   };
 
-  const phases = [
-    {
-      id: 'phase_main',
-      title: category || 'Checklist Items',
-      items: normalizedItems,
-    },
-  ];
+  const hasExplicitPhases =
+    Array.isArray(raw.phases) &&
+    raw.phases.length > 0 &&
+    (raw.phases.length > 1 ||
+      (raw.phases[0] &&
+        typeof raw.phases[0] === 'object' &&
+        raw.phases[0].id !== 'phase_main') ||
+      normalizedItems.some(
+        (it) =>
+          (it.phaseId && it.phaseId !== 'phase_main') ||
+          (it.phaseTitle &&
+            it.phaseTitle !== (category || 'Checklist Items'))
+      ));
+
+  let phases;
+  if (hasExplicitPhases) {
+    const phaseMap = new Map();
+    if (Array.isArray(raw.phases)) {
+      raw.phases.forEach((rawPhase, pIdx) => {
+        if (!rawPhase || typeof rawPhase !== 'object') return;
+        const pId =
+          typeof rawPhase.id === 'string' && rawPhase.id.trim()
+            ? rawPhase.id.trim()
+            : `phase_${pIdx + 1}`;
+        const pTitle =
+          typeof rawPhase.title === 'string' && rawPhase.title.trim()
+            ? rawPhase.title.trim()
+            : typeof rawPhase.name === 'string' && rawPhase.name.trim()
+            ? rawPhase.name.trim()
+            : `Phase ${pIdx + 1}`;
+        phaseMap.set(pId, {
+          id: pId,
+          title: pTitle,
+          description:
+            typeof rawPhase.description === 'string'
+              ? rawPhase.description.trim()
+              : '',
+          category:
+            typeof rawPhase.category === 'string' && rawPhase.category.trim()
+              ? rawPhase.category.trim()
+              : category || 'General QA',
+          items: [],
+        });
+      });
+    }
+
+    normalizedItems.forEach((item) => {
+      const targetPhaseId = item.phaseId || null;
+      const targetPhaseTitle = item.phaseTitle || null;
+      let matchedEntry = targetPhaseId ? phaseMap.get(targetPhaseId) : null;
+      if (!matchedEntry && targetPhaseTitle) {
+        for (const entry of phaseMap.values()) {
+          if (entry.title.toLowerCase() === targetPhaseTitle.toLowerCase()) {
+            matchedEntry = entry;
+            break;
+          }
+        }
+      }
+      if (!matchedEntry) {
+        if (phaseMap.size === 1) {
+          matchedEntry = Array.from(phaseMap.values())[0];
+        } else {
+          const fallbackId = targetPhaseId || 'phase_main';
+          const fallbackTitle =
+            targetPhaseTitle || category || 'Checklist Items';
+          if (!phaseMap.has(fallbackId)) {
+            phaseMap.set(fallbackId, {
+              id: fallbackId,
+              title: fallbackTitle,
+              description: '',
+              category: item.category || category || 'General QA',
+              items: [],
+            });
+          }
+          matchedEntry = phaseMap.get(fallbackId);
+        }
+      }
+      matchedEntry.items.push({
+        ...item,
+        phaseId: matchedEntry.id,
+        phaseTitle: matchedEntry.title,
+      });
+    });
+
+    phases = Array.from(phaseMap.values());
+  } else {
+    phases = [
+      {
+        id: 'phase_main',
+        title: category || 'Checklist Items',
+        items: normalizedItems,
+      },
+    ];
+  }
 
   const pendingSync = Boolean(raw._pendingSync);
   const pendingCreation = Boolean(raw._pendingCreation);
@@ -2970,6 +3151,1089 @@ export function computeChecklistsSummaryMetrics(checklists = []) {
   };
 }
 
+/**
+ * In-memory lock tracking active checklist-to-project promotion requests
+ * keyed by `${checklistId}:${targetProjectId}` to prevent accidental duplicate
+ * rapid/concurrent submissions.
+ */
+const inFlightPromotions = new Map();
+
+/**
+ * Maps a checklist priority (`Critical`, `High`, `Medium`, `Low`, or `P0`–`P3`)
+ * to the Qavora project test case priority format (`P0`–`P3`).
+ *
+ * @param {string} priority
+ * @returns {'P0' | 'P1' | 'P2' | 'P3'}
+ */
+export function mapChecklistPriorityToCasePriority(priority) {
+  const normalized = String(priority || '')
+    .trim()
+    .toLowerCase();
+  if (normalized === 'critical' || normalized === 'p0') return 'P0';
+  if (normalized === 'high' || normalized === 'p1') return 'P1';
+  if (normalized === 'low' || normalized === 'p3') return 'P3';
+  return 'P2';
+}
+
+/**
+ * Normalizes a checklist category or suite name into a clean suite category string.
+ *
+ * @param {string} category
+ * @returns {string}
+ */
+export function mapChecklistCategoryToSuiteCategory(category) {
+  if (typeof category === 'string' && category.trim()) {
+    return category.trim();
+  }
+  return 'General QA';
+}
+
+/**
+ * Extracts structured phases from a normalized or raw checklist record so that:
+ * - Multi-phase checklists preserve every defined phase and its items.
+ * - Single-phase or flat checklists map cleanly to a phase named after the checklist
+ *   title (or explicit phase title when different from generic `'phase_main'`).
+ * - Empty checklists still produce their phase and category structure for promotion.
+ *
+ * @param {object} checklist
+ * @returns {Array<{
+ *   sourcePhaseId: string,
+ *   title: string,
+ *   description: string,
+ *   category: string,
+ *   items: Array<object>
+ * }>}
+ */
+function extractStructuredChecklistPhases(checklist) {
+  const normalized = normalizeChecklistRecord(checklist) || checklist || {};
+  const checklistTitle =
+    typeof normalized.title === 'string' && normalized.title.trim()
+      ? normalized.title.trim()
+      : 'Promoted Checklist';
+  const checklistDescription =
+    typeof normalized.description === 'string' && normalized.description.trim()
+      ? normalized.description.trim()
+      : `Promoted from QA Checklist "${checklistTitle}".`;
+  const checklistCategory = mapChecklistCategoryToSuiteCategory(
+    normalized.category
+  );
+
+  const rawPhases = Array.isArray(checklist && checklist.phases)
+    ? checklist.phases
+    : Array.isArray(normalized.phases)
+    ? normalized.phases
+    : [];
+
+  const flatItems = Array.isArray(normalized.items) ? normalized.items : [];
+  const itemLookup = new Map();
+  flatItems.forEach((it) => {
+    if (it && it.id) {
+      itemLookup.set(String(it.id).trim(), it);
+    }
+  });
+
+  const hasMultipleOrCustomPhases =
+    rawPhases.length > 1 ||
+    (rawPhases.length === 1 &&
+      rawPhases[0] &&
+      typeof rawPhases[0] === 'object' &&
+      rawPhases[0].id &&
+      rawPhases[0].id !== 'phase_main') ||
+    flatItems.some(
+      (it) =>
+        (it.phaseId && it.phaseId !== 'phase_main') ||
+        (it.phaseTitle &&
+          it.phaseTitle !== checklistCategory &&
+          it.phaseTitle !== 'Checklist Items')
+    );
+
+  if (hasMultipleOrCustomPhases) {
+    const phaseGroups = new Map();
+
+    rawPhases.forEach((rawPhase, idx) => {
+      if (!rawPhase || typeof rawPhase !== 'object') return;
+      const pId =
+        typeof rawPhase.id === 'string' && rawPhase.id.trim()
+          ? rawPhase.id.trim()
+          : `phase_${idx + 1}`;
+      const rawPhaseTitle =
+        typeof rawPhase.title === 'string' && rawPhase.title.trim()
+          ? rawPhase.title.trim()
+          : typeof rawPhase.name === 'string' && rawPhase.name.trim()
+          ? rawPhase.name.trim()
+          : `Phase ${idx + 1}`;
+      const pTitle =
+        pId === 'phase_main' &&
+        (rawPhaseTitle === checklistCategory ||
+          rawPhaseTitle === 'Checklist Items')
+          ? `Checklist: ${checklistTitle}`
+          : rawPhaseTitle;
+      const pDesc =
+        typeof rawPhase.description === 'string' && rawPhase.description.trim()
+          ? rawPhase.description.trim()
+          : checklistDescription;
+      const pCategory = mapChecklistCategoryToSuiteCategory(
+        rawPhase.category || checklistCategory
+      );
+
+      if (!phaseGroups.has(pId)) {
+        phaseGroups.set(pId, {
+          sourcePhaseId: pId,
+          title: pTitle,
+          description: pDesc,
+          category: pCategory,
+          items: [],
+        });
+      }
+
+      const phaseItems = Array.isArray(rawPhase.items)
+        ? rawPhase.items
+        : Array.isArray(rawPhase.tasks)
+        ? rawPhase.tasks
+        : [];
+
+      phaseItems.forEach((rawIt, itIdx) => {
+        const normIt =
+          (rawIt && rawIt.id && itemLookup.get(String(rawIt.id).trim())) ||
+          normalizeChecklistItem(rawIt, itIdx);
+        if (!normIt) return;
+        const group = phaseGroups.get(pId);
+        if (!group.items.some((existing) => existing.id === normIt.id)) {
+          group.items.push({
+            ...normIt,
+            phaseId: pId,
+            phaseTitle: pTitle,
+            category: mapChecklistCategoryToSuiteCategory(
+              rawIt.category || normIt.category || pCategory
+            ),
+          });
+        }
+      });
+    });
+
+    // Also include any flat items that were not already placed into a phase group
+    const placedIds = new Set();
+    for (const grp of phaseGroups.values()) {
+      grp.items.forEach((it) => placedIds.add(it.id));
+    }
+
+    flatItems.forEach((item) => {
+      if (!item || placedIds.has(item.id)) return;
+      const pId = item.phaseId || 'phase_main';
+      const pTitle =
+        item.phaseTitle &&
+        item.phaseTitle !== checklistCategory &&
+        item.phaseTitle !== 'Checklist Items'
+          ? item.phaseTitle
+          : `Checklist: ${checklistTitle}`;
+      if (!phaseGroups.has(pId)) {
+        phaseGroups.set(pId, {
+          sourcePhaseId: pId,
+          title: pTitle,
+          description: checklistDescription,
+          category: mapChecklistCategoryToSuiteCategory(
+            item.category || checklistCategory
+          ),
+          items: [],
+        });
+      }
+      phaseGroups.get(pId).items.push({
+        ...item,
+        phaseId: pId,
+        phaseTitle: phaseGroups.get(pId).title,
+      });
+      placedIds.add(item.id);
+    });
+
+    if (phaseGroups.size > 0) {
+      return Array.from(phaseGroups.values());
+    }
+  }
+
+  return [
+    {
+      sourcePhaseId: 'phase_main',
+      title: `Checklist: ${checklistTitle}`,
+      description: checklistDescription,
+      category: checklistCategory,
+      items: flatItems.map((it) => ({
+        ...it,
+        phaseId: 'phase_main',
+        phaseTitle: `Checklist: ${checklistTitle}`,
+        category: mapChecklistCategoryToSuiteCategory(
+          it.category || checklistCategory
+        ),
+      })),
+    },
+  ];
+}
+
+/**
+ * Builds a deterministic, side-effect-free preview of promoting `checklist` into
+ * `targetProject`. Used both by the confirmation modal in `ChecklistsScreen` and
+ * by `promoteChecklistToProject()` to compute the exact phases, test suites,
+ * test cases, and summary statistics while preventing duplicate entity creation.
+ *
+ * Mapping Rules:
+ * - Checklist phases -> Project testing phases (`testPlan.phases` & `phases`)
+ * - Checklist categories -> Project test suites (`testSuites`, with both `cases` & `testCases`)
+ * - Checklist items -> Project test cases (`TC-XXX`), preserving title, description/notes,
+ *   preconditions/environment, priority (`Critical->P0`, `High->P1`, `Medium->P2`, `Low->P3`),
+ *   and completion status (`completed: true -> Passed`, `pending -> Untested`/`Not Run`).
+ *
+ * @param {object} checklist
+ * @param {object} targetProject
+ * @returns {object}
+ */
+export function buildChecklistPromotionPreview(checklist, targetProject) {
+  const normChecklist = normalizeChecklistRecord(checklist);
+  if (!normChecklist) {
+    return {
+      valid: false,
+      error: 'A valid checklist is required for promotion.',
+    };
+  }
+
+  const normProject =
+    targetProject && typeof targetProject === 'object'
+      ? normalizeProject(targetProject) || targetProject
+      : null;
+
+  if (!normProject || !normProject.id) {
+    return {
+      valid: false,
+      error: 'Please select a valid destination project.',
+    };
+  }
+
+  const checklistId = String(normChecklist.id).trim();
+  const checklistTitle = normChecklist.title || 'Untitled Checklist';
+  const checklistDescription =
+    normChecklist.description ||
+    `Promoted from QA Checklist "${checklistTitle}".`;
+  const checklistCategory = mapChecklistCategoryToSuiteCategory(
+    normChecklist.category
+  );
+  const checklistPriority = normChecklist.priority || 'Medium';
+  const checklistEnvironment =
+    normChecklist.environment || normProject.environment || 'Staging';
+  const checklistTargetRelease =
+    normChecklist.targetRelease || normProject.version || '';
+
+  const structuredPhases = extractStructuredChecklistPhases(checklist);
+
+  const existingTestPlan = buildDefaultTestPlan(normProject);
+  const existingPhases = Array.isArray(existingTestPlan.phases)
+    ? existingTestPlan.phases.map((p) => ({ ...p }))
+    : [];
+  const existingSuites = Array.isArray(normProject.testSuites)
+    ? normProject.testSuites.map((s) => {
+        const cases = extractSuiteTestCases(s).map((c) => ({ ...c }));
+        return {
+          ...s,
+          cases,
+          testCases: cases,
+        };
+      })
+    : [];
+
+  // Track all existing promoted item IDs and existing TC numbers
+  const existingItemKeys = new Set();
+  let maxCaseNum = 0;
+
+  existingSuites.forEach((suite) => {
+    const suiteCases = extractSuiteTestCases(suite);
+    suiteCases.forEach((tc) => {
+      if (!tc || typeof tc !== 'object') return;
+      const match = String(tc.id || '').match(/^TC-(\d+)$/i);
+      if (match) {
+        const parsed = parseInt(match[1], 10);
+        if (parsed > maxCaseNum) maxCaseNum = parsed;
+      }
+      if (
+        tc.sourceChecklistId &&
+        String(tc.sourceChecklistId) === checklistId &&
+        tc.sourceChecklistItemId
+      ) {
+        existingItemKeys.add(
+          `${checklistId}:${String(tc.sourceChecklistItemId)}`
+        );
+      }
+    });
+  });
+
+  let nextCaseNum = Math.max(maxCaseNum, existingSuites.reduce(
+    (sum, s) => sum + extractSuiteTestCases(s).length,
+    0
+  ));
+
+  const nextPhases = existingPhases.map((p) => ({ ...p }));
+  const nextSuites = existingSuites.map((s) => {
+    const clonedCases = extractSuiteTestCases(s).map((c) => ({ ...c }));
+    return {
+      ...s,
+      cases: clonedCases,
+      testCases: clonedCases,
+    };
+  });
+
+  const phasesSummary = [];
+  const suitesSummaryMap = new Map();
+  const casesToCreate = [];
+  const skippedDuplicateItems = [];
+
+  structuredPhases.forEach((srcPhase, phaseIdx) => {
+    const phaseTitle = srcPhase.title || `Checklist: ${checklistTitle}`;
+    const phaseKey = `${checklistId}:${srcPhase.sourcePhaseId}`;
+
+    // Check if this phase already exists in targetProject
+    let targetPhase = nextPhases.find(
+      (p) =>
+        (p.sourceChecklistId === checklistId &&
+          p.sourceChecklistPhaseId === srcPhase.sourcePhaseId) ||
+        (p.sourceChecklistId === checklistId &&
+          structuredPhases.length === 1) ||
+        String(p.name || p.title || '')
+          .trim()
+          .toLowerCase() === phaseTitle.trim().toLowerCase()
+    );
+
+    let phaseAction = 'reused';
+    if (!targetPhase) {
+      phaseAction = 'created';
+      const newPhaseId = `ph_chk_${checklistId.replace(/[^a-zA-Z0-9]/g, '').slice(-8)}_${
+        phaseIdx + 1
+      }`;
+      const phaseItemsTotal = srcPhase.items.length;
+      const phaseItemsDone = srcPhase.items.filter((it) => it.completed).length;
+      const phaseStatus =
+        phaseItemsTotal > 0 && phaseItemsDone === phaseItemsTotal
+          ? 'Completed'
+          : phaseItemsDone > 0
+          ? 'In Progress'
+          : 'Planned';
+
+      targetPhase = {
+        id: newPhaseId,
+        name: phaseTitle,
+        title: phaseTitle,
+        description:
+          srcPhase.description ||
+          checklistDescription ||
+          `Promoted from checklist "${checklistTitle}"`,
+        entryCriteria: `Checklist "${checklistTitle}" promoted to project (${checklistEnvironment}${
+          checklistTargetRelease ? ` • ${checklistTargetRelease}` : ''
+        }).`,
+        exitCriteria:
+          'All promoted checklist verification cases executed and passed.',
+        status: phaseStatus,
+        sourceChecklistId: checklistId,
+        sourceChecklistPhaseId: srcPhase.sourcePhaseId,
+        sourceChecklistTitle: checklistTitle,
+      };
+      nextPhases.push(targetPhase);
+    }
+
+    phasesSummary.push({
+      id: targetPhase.id,
+      name: targetPhase.name || targetPhase.title,
+      description: targetPhase.description,
+      action: phaseAction,
+      itemCount: srcPhase.items.length,
+      phaseKey,
+    });
+
+    // Group items in this phase by category -> testSuites
+    const categoriesInPhase = new Map();
+    if (srcPhase.items.length === 0) {
+      // Empty checklist / empty phase still ensures a category suite exists
+      const emptyCat = mapChecklistCategoryToSuiteCategory(
+        srcPhase.category || checklistCategory
+      );
+      categoriesInPhase.set(emptyCat, []);
+    } else {
+      srcPhase.items.forEach((item) => {
+        const cat = mapChecklistCategoryToSuiteCategory(
+          item.category || srcPhase.category || checklistCategory
+        );
+        if (!categoriesInPhase.has(cat)) {
+          categoriesInPhase.set(cat, []);
+        }
+        categoriesInPhase.get(cat).push(item);
+      });
+    }
+
+    for (const [catName, catItems] of categoriesInPhase.entries()) {
+      const desiredSuiteName =
+        structuredPhases.length > 1
+          ? `${phaseTitle} — ${catName}`
+          : `${checklistTitle} — ${catName}`;
+
+      let targetSuite = nextSuites.find(
+        (s) =>
+          (s.sourceChecklistId === checklistId &&
+            String(s.category || '').toLowerCase() === catName.toLowerCase() &&
+            (!s.phaseId || s.phaseId === targetPhase.id)) ||
+          String(s.name || s.title || '')
+            .trim()
+            .toLowerCase() === desiredSuiteName.trim().toLowerCase()
+      );
+
+      let suiteAction = 'reused';
+      if (!targetSuite) {
+        suiteAction = 'created';
+        const newSuiteId = `suite_chk_${checklistId
+          .replace(/[^a-zA-Z0-9]/g, '')
+          .slice(-8)}_${nextSuites.length + 1}`;
+        targetSuite = {
+          id: newSuiteId,
+          phaseId: targetPhase.id,
+          name: desiredSuiteName,
+          title: desiredSuiteName,
+          category: catName,
+          priority: mapChecklistPriorityToCasePriority(checklistPriority),
+          description:
+            checklistDescription ||
+            `Test suite promoted from checklist "${checklistTitle}" (${catName}).`,
+          sourceChecklistId: checklistId,
+          sourceChecklistTitle: checklistTitle,
+          environment: checklistEnvironment,
+          targetRelease: checklistTargetRelease,
+          cases: [],
+          testCases: [],
+        };
+        nextSuites.push(targetSuite);
+      }
+
+      const addedCasesForSuite = [];
+
+      catItems.forEach((item, itemIdx) => {
+        const itemKey = `${checklistId}:${String(item.id)}`;
+        const alreadyInSuite = targetSuite.cases.some(
+          (tc) =>
+            (tc.sourceChecklistId === checklistId &&
+              String(tc.sourceChecklistItemId) === String(item.id)) ||
+            String(tc.title || '')
+              .trim()
+              .toLowerCase() ===
+              String(item.title || item.text || '')
+                .trim()
+                .toLowerCase()
+        );
+
+        if (existingItemKeys.has(itemKey) || alreadyInSuite) {
+          skippedDuplicateItems.push({
+            id: item.id,
+            title: item.title || item.text,
+            category: catName,
+            phaseName: targetPhase.name,
+          });
+          return;
+        }
+
+        existingItemKeys.add(itemKey);
+        nextCaseNum += 1;
+        const caseId = `TC-${String(nextCaseNum).padStart(3, '0')}`;
+        const isCompleted = Boolean(item.completed || item.checked);
+        const mappedPriority = mapChecklistPriorityToCasePriority(
+          item.priority || checklistPriority
+        );
+        const itemTitle =
+          typeof item.title === 'string' && item.title.trim()
+            ? item.title.trim()
+            : typeof item.text === 'string' && item.text.trim()
+            ? item.text.trim()
+            : `Checklist Verification #${itemIdx + 1}`;
+        const itemNotes =
+          typeof item.notes === 'string' && item.notes.trim()
+            ? item.notes.trim()
+            : '';
+        const itemDescription =
+          typeof item.description === 'string' && item.description.trim()
+            ? item.description.trim()
+            : itemNotes
+            ? `${itemNotes} (Promoted from checklist "${checklistTitle}")`
+            : checklistDescription
+            ? `${itemTitle} — ${checklistDescription}`
+            : `Promoted from checklist "${checklistTitle}" (${catName}).`;
+        const itemPreconditions =
+          typeof item.preconditions === 'string' && item.preconditions.trim()
+            ? item.preconditions.trim()
+            : `Environment: ${checklistEnvironment}${
+                checklistTargetRelease
+                  ? ` | Target Release: ${checklistTargetRelease}`
+                  : ''
+              }`;
+        const itemExpectedResult =
+          typeof item.expectedResult === 'string' && item.expectedResult.trim()
+            ? item.expectedResult.trim()
+            : `Verification item "${itemTitle}" passes all acceptance criteria.`;
+
+        const newTestCase = {
+          id: caseId,
+          suiteId: targetSuite.id,
+          phaseId: targetPhase.id,
+          title: itemTitle,
+          description: itemDescription,
+          module: catName,
+          category: catName,
+          priority: mappedPriority,
+          severity:
+            mappedPriority === 'P0'
+              ? 'Critical'
+              : mappedPriority === 'P1'
+              ? 'Major'
+              : mappedPriority === 'P3'
+              ? 'Low'
+              : 'Medium',
+          type: 'Functional',
+          automationStatus: 'Manual',
+          preconditions: itemPreconditions,
+          expectedResult: itemExpectedResult,
+          steps: [
+            {
+              stepNumber: 1,
+              action: itemTitle,
+              expectedResult:
+                itemNotes ||
+                `Checklist item "${itemTitle}" verified successfully.`,
+            },
+          ],
+          assignee: item.assignee || 'QA Team',
+          environment: checklistEnvironment,
+          version: checklistTargetRelease || normProject.version || 'v1.0.0',
+          lastStatus: isCompleted ? 'Passed' : 'Untested',
+          status: isCompleted ? 'Passed' : 'Not Run',
+          notes: itemNotes,
+          sourceChecklistId: checklistId,
+          sourceChecklistTitle: checklistTitle,
+          sourceChecklistItemId: String(item.id),
+          sourceChecklistPhaseId: srcPhase.sourcePhaseId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        targetSuite.cases.push(newTestCase);
+        targetSuite.testCases = [...targetSuite.cases];
+        addedCasesForSuite.push(newTestCase);
+        casesToCreate.push(newTestCase);
+      });
+
+      const existingSummary = suitesSummaryMap.get(targetSuite.id);
+      if (existingSummary) {
+        existingSummary.addedCaseCount += addedCasesForSuite.length;
+        existingSummary.totalCaseCount = targetSuite.cases.length;
+      } else {
+        suitesSummaryMap.set(targetSuite.id, {
+          id: targetSuite.id,
+          name: targetSuite.name || targetSuite.title,
+          category: targetSuite.category || catName,
+          phaseId: targetSuite.phaseId,
+          phaseName: targetPhase.name || targetPhase.title,
+          action: suiteAction,
+          addedCaseCount: addedCasesForSuite.length,
+          totalCaseCount: targetSuite.cases.length,
+        });
+      }
+    }
+  });
+
+  // Compute updated project-wide test metrics across all suites
+  let totalCases = 0;
+  let passedTests = 0;
+  let failedTests = 0;
+  let blockedTests = 0;
+  let skippedTests = 0;
+  let notRunTests = 0;
+
+  nextSuites.forEach((suite) => {
+    const suiteCases = extractSuiteTestCases(suite);
+    suiteCases.forEach((tc) => {
+      totalCases += 1;
+      const st = String(tc.lastStatus || tc.status || 'Untested')
+        .trim()
+        .toLowerCase();
+      if (st === 'passed' || st === 'pass' || st === 'completed') {
+        passedTests += 1;
+      } else if (st === 'failed' || st === 'fail') {
+        failedTests += 1;
+      } else if (st === 'blocked') {
+        blockedTests += 1;
+      } else if (st === 'skipped') {
+        skippedTests += 1;
+      } else {
+        notRunTests += 1;
+      }
+    });
+  });
+
+  const executedTests = passedTests + failedTests + blockedTests + skippedTests;
+  const passRate =
+    executedTests > 0 ? Math.round((passedTests / executedTests) * 100) : 0;
+
+  const suitesSummary = Array.from(suitesSummaryMap.values());
+  const createdPhaseCount = phasesSummary.filter(
+    (p) => p.action === 'created'
+  ).length;
+  const reusedPhaseCount = phasesSummary.filter(
+    (p) => p.action === 'reused'
+  ).length;
+  const createdSuiteCount = suitesSummary.filter(
+    (s) => s.action === 'created'
+  ).length;
+  const reusedSuiteCount = suitesSummary.filter(
+    (s) => s.action === 'reused'
+  ).length;
+
+  const totalChecklistItems = Array.isArray(normChecklist.items)
+    ? normChecklist.items.length
+    : 0;
+  const isEmptyChecklist = totalChecklistItems === 0;
+
+  // Determine if this checklist was already completely promoted into this project
+  const alreadyFullyPromoted =
+    (!isEmptyChecklist &&
+      casesToCreate.length === 0 &&
+      skippedDuplicateItems.length > 0) ||
+    (isEmptyChecklist &&
+      createdPhaseCount === 0 &&
+      createdSuiteCount === 0 &&
+      (String(normProject.sourceChecklistId || '') === checklistId ||
+        existingPhases.some((p) => p.sourceChecklistId === checklistId) ||
+        existingSuites.some((s) => s.sourceChecklistId === checklistId)));
+
+  const promotedAt = new Date().toISOString();
+  const nextTestPlan = {
+    ...existingTestPlan,
+    objective:
+      existingTestPlan.objective ||
+      checklistDescription ||
+      `Validate functional, regression, and release readiness coverage for ${normProject.name}.`,
+    scope:
+      existingTestPlan.scope ||
+      `Core workflows, promoted checklist suites (${checklistTitle}), and defect verification.`,
+    phases: nextPhases,
+  };
+
+  const patchData = {
+    testPlan: nextTestPlan,
+    phases: nextPhases,
+    testSuites: nextSuites,
+    sourceChecklistId: checklistId,
+    promotedFromChecklistTitle: checklistTitle,
+    promotedAt,
+    testCaseCount: totalCases,
+    executedTests,
+    passedTests,
+    failedTests,
+    blockedTests,
+    skippedTests,
+    notRunTests,
+    passRate,
+  };
+
+  return {
+    valid: true,
+    checklistId,
+    checklistTitle,
+    checklistCategory,
+    checklistPriority,
+    checklistEnvironment,
+    checklistTargetRelease,
+    targetProjectId: String(normProject.id),
+    targetProjectName: normProject.name || 'Selected Project',
+    isEmptyChecklist,
+    alreadyFullyPromoted,
+    totalChecklistItems,
+    phasesSummary,
+    suitesSummary,
+    casesToCreate,
+    skippedDuplicateItems,
+    stats: {
+      createdPhaseCount,
+      reusedPhaseCount,
+      totalPhaseCount: phasesSummary.length,
+      createdSuiteCount,
+      reusedSuiteCount,
+      totalSuiteCount: suitesSummary.length,
+      createdCaseCount: casesToCreate.length,
+      passedCaseCount: casesToCreate.filter(
+        (c) => c.lastStatus === 'Passed'
+      ).length,
+      untestedCaseCount: casesToCreate.filter(
+        (c) => c.lastStatus !== 'Passed'
+      ).length,
+      skippedDuplicateCount: skippedDuplicateItems.length,
+      projectTotalCasesBefore: existingSuites.reduce(
+        (sum, s) => sum + extractSuiteTestCases(s).length,
+        0
+      ),
+      projectTotalCasesAfter: totalCases,
+      projectPassRateAfter: passRate,
+    },
+    patchData,
+  };
+}
+
+/**
+ * Promotes a QA checklist into an existing Qavora project without deleting or
+ * modifying the original checklist.
+ *
+ * Preserves the Qavora checklist-to-project mapping:
+ * - Checklist phases -> Project testing phases (`testPlan.phases` & `phases`)
+ * - Checklist categories -> Project test suites (`testSuites`)
+ * - Checklist items -> Project test cases (`TC-XXX`, preserving title, description,
+ *   notes, priority, environment, and completion status)
+ *
+ * Prevents both rapid concurrent duplicate submissions (`429 DUPLICATE_SUBMISSION`)
+ * and repeated duplicate entity creation (`409 ALREADY_PROMOTED`).
+ *
+ * @param {object | string} checklistOrId
+ * @param {object | string} targetProjectOrId
+ * @param {object} [options]
+ * @param {string} [options.userId]
+ * @param {Function} [options.updateProjectDataFn] - Optional `ProjectContext.updateProjectData` wrapper
+ * @param {Function} [options.onProgress] - Optional callback `(stage: string) => void`
+ * @returns {Promise<{
+ *   ok: boolean,
+ *   status: number,
+ *   project: object | null,
+ *   checklist: object | null,
+ *   preview: object | null,
+ *   summary: object | null,
+ *   queuedOffline?: boolean,
+ *   isDuplicatePromotion?: boolean,
+ *   isDuplicateSubmission?: boolean,
+ *   alreadyPromoted?: boolean,
+ *   error: string | null
+ * }>}
+ */
+export async function promoteChecklistToProject(
+  checklistOrId,
+  targetProjectOrId,
+  options = {}
+) {
+  const userId = String(
+    (options && options.userId) || getActiveSyncUser() || ''
+  ).trim();
+  const onProgress =
+    typeof options.onProgress === 'function' ? options.onProgress : null;
+
+  // 1. Resolve source checklist (read-only; never modifies or deletes the checklist)
+  const resolvedChecklist = await resolveTargetChecklist(checklistOrId, {
+    ...options,
+    userId,
+  });
+  if (!resolvedChecklist || !resolvedChecklist.id) {
+    return {
+      ok: false,
+      status: 400,
+      project: null,
+      checklist: null,
+      preview: null,
+      summary: null,
+      error: 'Unable to locate the selected checklist for promotion.',
+    };
+  }
+
+  // Keep raw phases if passed on input object
+  const sourceChecklist =
+    checklistOrId &&
+    typeof checklistOrId === 'object' &&
+    Array.isArray(checklistOrId.phases) &&
+    checklistOrId.phases.length > 1
+      ? {
+          ...resolvedChecklist,
+          phases: checklistOrId.phases,
+        }
+      : resolvedChecklist;
+
+  // 2. Resolve destination project
+  const rawProjectId =
+    targetProjectOrId && typeof targetProjectOrId === 'object'
+      ? targetProjectOrId.id || targetProjectOrId._id
+      : targetProjectOrId;
+  const cleanProjectId =
+    rawProjectId !== undefined && rawProjectId !== null
+      ? String(rawProjectId).trim()
+      : '';
+
+  if (!cleanProjectId) {
+    return {
+      ok: false,
+      status: 400,
+      project: null,
+      checklist: sourceChecklist,
+      preview: null,
+      summary: null,
+      error: 'Please select a destination project to promote this checklist.',
+    };
+  }
+
+  const lockKey = `${String(sourceChecklist.id).trim()}:${cleanProjectId}`;
+  if (inFlightPromotions.has(lockKey)) {
+    return {
+      ok: false,
+      status: 429,
+      project: null,
+      checklist: sourceChecklist,
+      preview: null,
+      summary: null,
+      isDuplicateSubmission: true,
+      error:
+        'Promotion of this checklist to the selected project is already in progress.',
+    };
+  }
+
+  inFlightPromotions.set(lockKey, Date.now());
+
+  try {
+    if (onProgress) {
+      onProgress('Preparing destination project and mapping checklist items...');
+    }
+
+    let targetProject =
+      targetProjectOrId &&
+      typeof targetProjectOrId === 'object' &&
+      (Array.isArray(targetProjectOrId.testSuites) ||
+        (targetProjectOrId.testPlan &&
+          Array.isArray(targetProjectOrId.testPlan.phases)))
+        ? normalizeProject(targetProjectOrId) || targetProjectOrId
+        : null;
+
+    // Fetch latest destination project state when online or if full suites/phases aren't loaded
+    if (!isClientOffline()) {
+      const fetchedRes = await fetchProjectById(cleanProjectId, {
+        currentUserId: userId,
+      });
+      if (fetchedRes.ok && fetchedRes.project) {
+        targetProject = fetchedRes.project;
+      } else if (!targetProject) {
+        return {
+          ok: false,
+          status: fetchedRes.status || 404,
+          project: null,
+          checklist: sourceChecklist,
+          preview: null,
+          summary: null,
+          error:
+            fetchedRes.error ||
+            'Destination project could not be loaded from the server.',
+        };
+      }
+    } else if (!targetProject && userId) {
+      const cachedProjects = await getCachedProjectsForUser(userId);
+      const foundCached = cachedProjects.find(
+        (p) => p && String(p.id) === cleanProjectId
+      );
+      if (foundCached) {
+        targetProject = normalizeProject(foundCached) || foundCached;
+      }
+    }
+
+    if (!targetProject || !targetProject.id) {
+      return {
+        ok: false,
+        status: 404,
+        project: null,
+        checklist: sourceChecklist,
+        preview: null,
+        summary: null,
+        error: 'Destination project not found.',
+      };
+    }
+
+    // 3. Build deterministic promotion preview and verify idempotency
+    const preview = buildChecklistPromotionPreview(
+      sourceChecklist,
+      targetProject
+    );
+
+    if (!preview.valid) {
+      return {
+        ok: false,
+        status: 400,
+        project: targetProject,
+        checklist: sourceChecklist,
+        preview,
+        summary: null,
+        error: preview.error || 'Checklist promotion validation failed.',
+      };
+    }
+
+    if (preview.alreadyFullyPromoted) {
+      return {
+        ok: false,
+        status: 409,
+        project: targetProject,
+        checklist: sourceChecklist,
+        preview,
+        summary: preview.stats,
+        isDuplicatePromotion: true,
+        alreadyPromoted: true,
+        error: `Checklist "${sourceChecklist.title}" has already been promoted to "${targetProject.name}". All ${preview.totalChecklistItems} checklist item(s) already exist in the project.`,
+      };
+    }
+
+    if (onProgress) {
+      onProgress(
+        `Promoting ${preview.stats.createdCaseCount} test case(s) across ${preview.stats.totalSuiteCount} suite(s) to "${targetProject.name}"...`
+      );
+    }
+
+    // 4. Persist updated project data via ProjectContext wrapper or projectService
+    if (typeof options.updateProjectDataFn === 'function') {
+      const ctxResult = await options.updateProjectDataFn(
+        cleanProjectId,
+        preview.patchData,
+        {
+          expectedUpdatedAt:
+            targetProject._serverUpdatedAt || targetProject.updatedAt,
+        }
+      );
+
+      if (!ctxResult || !ctxResult.ok) {
+        return {
+          ok: false,
+          status: (ctxResult && ctxResult.status) || 500,
+          project: (ctxResult && ctxResult.project) || targetProject,
+          checklist: sourceChecklist,
+          preview,
+          summary: null,
+          error:
+            (ctxResult && ctxResult.error) ||
+            'Failed to save promoted checklist entities to the project.',
+        };
+      }
+
+      return {
+        ok: true,
+        status: ctxResult.status || 200,
+        project: ctxResult.project,
+        checklist: sourceChecklist,
+        preview,
+        summary: preview.stats,
+        queuedOffline: Boolean(ctxResult.queuedOffline),
+        error: null,
+      };
+    }
+
+    // Direct service call (supports both online backend persistence and offline queueing)
+    if (isClientOffline()) {
+      const optimisticProject = normalizeProject({
+        ...targetProject,
+        ...preview.patchData,
+        updatedAt: new Date().toISOString(),
+        _pendingSync: true,
+        _syncStatus: 'pending',
+      });
+
+      if (userId) {
+        await queueProjectMutation({
+          userId,
+          projectId: cleanProjectId,
+          action: 'UPDATE_PROJECT_DATA',
+          endpoint: `/api/projects/${encodeURIComponent(cleanProjectId)}/data`,
+          method: 'PATCH',
+          payload: preview.patchData,
+          expectedUpdatedAt:
+            targetProject._serverUpdatedAt || targetProject.updatedAt || null,
+        });
+        await cacheProjectOffline(userId, optimisticProject);
+      }
+
+      return {
+        ok: true,
+        status: 202,
+        project: optimisticProject,
+        checklist: sourceChecklist,
+        preview,
+        summary: preview.stats,
+        queuedOffline: true,
+        error: null,
+      };
+    }
+
+    const updateRes = await updateProjectData(
+      cleanProjectId,
+      preview.patchData,
+      {
+        currentUserId: userId,
+        expectedUpdatedAt:
+          targetProject._serverUpdatedAt || targetProject.updatedAt || undefined,
+      }
+    );
+
+    if (!updateRes.ok) {
+      // If network failed mid-request, queue offline if userId is available
+      if (
+        (updateRes.status === 0 || updateRes.code === 'NETWORK_ERROR') &&
+        userId
+      ) {
+        const optimisticProject = normalizeProject({
+          ...targetProject,
+          ...preview.patchData,
+          updatedAt: new Date().toISOString(),
+          _pendingSync: true,
+          _syncStatus: 'pending',
+        });
+
+        await queueProjectMutation({
+          userId,
+          projectId: cleanProjectId,
+          action: 'UPDATE_PROJECT_DATA',
+          endpoint: `/api/projects/${encodeURIComponent(cleanProjectId)}/data`,
+          method: 'PATCH',
+          payload: preview.patchData,
+          expectedUpdatedAt:
+            targetProject._serverUpdatedAt || targetProject.updatedAt || null,
+        });
+        await cacheProjectOffline(userId, optimisticProject);
+
+        return {
+          ok: true,
+          status: 202,
+          project: optimisticProject,
+          checklist: sourceChecklist,
+          preview,
+          summary: preview.stats,
+          queuedOffline: true,
+          error: null,
+        };
+      }
+
+      return {
+        ok: false,
+        status: updateRes.status || 500,
+        project: targetProject,
+        checklist: sourceChecklist,
+        preview,
+        summary: null,
+        error:
+          updateRes.error ||
+          'Failed to promote checklist to the destination project.',
+      };
+    }
+
+    if (userId && updateRes.project) {
+      await cacheProjectOffline(userId, updateRes.project);
+    }
+
+    return {
+      ok: true,
+      status: updateRes.status || 200,
+      project: updateRes.project,
+      checklist: sourceChecklist,
+      preview,
+      summary: preview.stats,
+      queuedOffline: false,
+      error: null,
+    };
+  } finally {
+    inFlightPromotions.delete(lockKey);
+  }
+}
+
 export const checklistService = {
   CHECKLISTS_ENDPOINT,
   OFFLINE_CHECKLISTS_CACHE_PREFIX,
@@ -3008,6 +4272,10 @@ export const checklistService = {
   deleteChecklistItem,
   markAllChecklistItems,
   computeChecklistsSummaryMetrics,
+  mapChecklistPriorityToCasePriority,
+  mapChecklistCategoryToSuiteCategory,
+  buildChecklistPromotionPreview,
+  promoteChecklistToProject,
 };
 
 export default checklistService;
