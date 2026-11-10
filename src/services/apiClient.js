@@ -93,11 +93,97 @@ export class ApiClientError extends Error {
 }
 
 /**
+ * Tracks environment-configured origins that were rejected by the target backend
+ * with HTTP 403 ("Forbidden: Cross-origin request rejected.") so subsequent requests
+ * automatically use the validated backend origin instead of a stale env value.
+ */
+const rejectedConfiguredOrigins = new Set();
+
+/**
+ * Resets the rejected configured origins cache (used in deterministic tests).
+ */
+export function resetRejectedOriginsCache() {
+  rejectedConfiguredOrigins.clear();
+}
+
+/**
+ * Strips optional surrounding single or double quotes and trims whitespace.
+ *
+ * @param {string | undefined | null} rawValue
+ * @returns {string}
+ */
+function stripQuotesAndTrim(rawValue) {
+  if (typeof rawValue !== 'string') {
+    return '';
+  }
+  const trimmed = rawValue.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
+/**
+ * Returns true if the hostname is a localhost, Android emulator loopback, or
+ * RFC 1918 private LAN address used only for local development.
+ *
+ * @param {string} hostname
+ * @returns {boolean}
+ */
+export function isLocalOrPrivateHostname(hostname) {
+  if (typeof hostname !== 'string' || !hostname) {
+    return false;
+  }
+  const lower = hostname.toLowerCase();
+  if (
+    lower === 'localhost' ||
+    lower === '127.0.0.1' ||
+    lower === '10.0.2.2' ||
+    lower === '10.0.3.2' ||
+    lower === '::1' ||
+    lower === '[::1]' ||
+    lower.endsWith('.local')
+  ) {
+    return true;
+  }
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(lower)) {
+    return true;
+  }
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(lower)) {
+    return true;
+  }
+  const match172 = lower.match(/^172\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/);
+  if (match172) {
+    const secondOctet = Number(match172[1]);
+    if (secondOctet >= 16 && secondOctet <= 31) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Determines whether the runtime is a standard web browser DOM where `Cookie`
  * and `Origin` request headers are managed directly by the browser engine.
+ * Explicitly returns `false` in React Native (`navigator.product === 'ReactNative'`)
+ * even if a third-party library or debugger polyfills `window` or `document`.
  */
 export function isBrowserDomEnvironment() {
-  return typeof window !== 'undefined' && typeof document !== 'undefined';
+  if (
+    typeof navigator !== 'undefined' &&
+    navigator &&
+    navigator.product === 'ReactNative'
+  ) {
+    return false;
+  }
+  return (
+    typeof window !== 'undefined' &&
+    typeof document !== 'undefined' &&
+    typeof document.createElement === 'function'
+  );
 }
 
 /**
@@ -114,25 +200,23 @@ export function isProductionEnvironment() {
 }
 
 /**
- * Normalizes a base URL string by trimming whitespace and stripping trailing slashes.
+ * Normalizes a base URL string by trimming whitespace, stripping surrounding
+ * quotes, and stripping trailing slashes.
  *
  * @param {string | undefined | null} rawUrl
  * @returns {string}
  */
 export function normalizeBaseUrl(rawUrl) {
-  if (typeof rawUrl !== 'string') {
+  const cleaned = stripQuotesAndTrim(rawUrl);
+  if (!cleaned) {
     return '';
   }
-  const trimmed = rawUrl.trim();
-  if (!trimmed) {
-    return '';
-  }
-  return trimmed.replace(/\/+$/, '');
+  return cleaned.replace(/\/+$/, '');
 }
 
 /**
  * Resolves the configured backend API base URL from Expo environment variables
- * or an explicit override. Does not hardcode any production URL.
+ * or an explicit override.
  *
  * Reads `process.env.EXPO_PUBLIC_API_BASE_URL` (primary) and
  * `process.env.EXPO_PUBLIC_API_URL` (fallback).
@@ -141,7 +225,7 @@ export function normalizeBaseUrl(rawUrl) {
  * @returns {string}
  */
 export function getApiBaseUrl(overrideBaseUrl) {
-  if (typeof overrideBaseUrl === 'string' && overrideBaseUrl.trim() !== '') {
+  if (typeof overrideBaseUrl === 'string' && stripQuotesAndTrim(overrideBaseUrl) !== '') {
     return normalizeBaseUrl(overrideBaseUrl);
   }
 
@@ -158,44 +242,113 @@ export function getApiBaseUrl(overrideBaseUrl) {
  * Resolves the trusted Origin header expected by the Qavora Web backend's
  * `isOriginTrusted(origin)` check.
  *
- * Reads `process.env.EXPO_PUBLIC_TRUSTED_ORIGIN` or `process.env.EXPO_PUBLIC_APP_ORIGIN`
- * if explicitly provided; otherwise derives the origin (`protocol//host`) from the
- * configured backend base URL.
+ * Resolution & consistency rules:
+ * 1. If `explicitTrustedOrigin` is passed directly, validate and return its `origin`.
+ * 2. Parse the effective `baseUrl` (`overrideBaseUrl` or `EXPO_PUBLIC_API_BASE_URL`).
+ * 3. If `overrideBaseUrl` was explicitly supplied and its origin differs from the
+ *    default environment `EXPO_PUBLIC_API_BASE_URL` origin, prefer `overrideBaseUrl`'s
+ *    origin so custom client/request `baseUrl` overrides are not broken by global env vars.
+ * 4. If `EXPO_PUBLIC_TRUSTED_ORIGIN` (or `EXPO_PUBLIC_APP_ORIGIN`) is set in `process.env`:
+ *    - Ignore it if it was already rejected by the backend with HTTP 403 (`rejectedConfiguredOrigins`).
+ *    - Ignore it if the target `baseUrl` is a remote HTTPS server (`https:`) while the
+ *      configured origin is a stale local development origin (`http:` or `localhost` /
+ *      `10.0.2.2` / `192.168.x.x`), preventing local dev leftovers from causing 403 on
+ *      the deployed production backend.
+ * 5. Otherwise derive and return `parsedBaseUrl.origin`.
  *
  * @param {string} [overrideBaseUrl]
+ * @param {string} [explicitTrustedOrigin]
  * @returns {string}
  */
-export function getTrustedOrigin(overrideBaseUrl) {
-  const configuredOrigin =
-    (typeof process !== 'undefined' &&
-      process.env &&
-      (process.env.EXPO_PUBLIC_TRUSTED_ORIGIN || process.env.EXPO_PUBLIC_APP_ORIGIN)) ||
-    '';
-
-  if (configuredOrigin && configuredOrigin.trim()) {
+export function getTrustedOrigin(overrideBaseUrl, explicitTrustedOrigin) {
+  const cleanedExplicit = stripQuotesAndTrim(explicitTrustedOrigin);
+  if (cleanedExplicit) {
     try {
-      const parsed = new URL(configuredOrigin.trim());
-      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-        return parsed.origin;
+      const parsedExplicit = new URL(cleanedExplicit);
+      if (parsedExplicit.protocol === 'http:' || parsedExplicit.protocol === 'https:') {
+        return parsedExplicit.origin;
       }
     } catch {
-      // Fall through to baseUrl origin
+      // Fall through
     }
   }
 
   const baseUrl = getApiBaseUrl(overrideBaseUrl);
-  if (!baseUrl) {
-    return '';
+  let baseUrlParsed = null;
+  if (baseUrl) {
+    try {
+      const parsed = new URL(baseUrl);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        baseUrlParsed = parsed;
+      }
+    } catch {
+      baseUrlParsed = null;
+    }
   }
 
-  try {
-    const parsed = new URL(baseUrl);
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-      return parsed.origin;
+  // Check if overrideBaseUrl explicitly targets a different host than the env baseUrl
+  const envBaseUrl = getApiBaseUrl();
+  let isCustomBaseUrlOverride = false;
+  if (
+    overrideBaseUrl &&
+    baseUrlParsed &&
+    envBaseUrl &&
+    normalizeBaseUrl(overrideBaseUrl) !== envBaseUrl
+  ) {
+    try {
+      const envParsed = new URL(envBaseUrl);
+      if (envParsed.origin !== baseUrlParsed.origin) {
+        isCustomBaseUrlOverride = true;
+      }
+    } catch {
+      isCustomBaseUrlOverride = true;
     }
-  } catch {
-    // Ignore invalid URL
   }
+
+  if (!isCustomBaseUrlOverride) {
+    const rawConfiguredOrigin =
+      (typeof process !== 'undefined' &&
+        process.env &&
+        (process.env.EXPO_PUBLIC_TRUSTED_ORIGIN || process.env.EXPO_PUBLIC_APP_ORIGIN)) ||
+      '';
+    const configuredOrigin = stripQuotesAndTrim(rawConfiguredOrigin);
+
+    if (configuredOrigin) {
+      try {
+        const parsedConfigured = new URL(configuredOrigin);
+        if (
+          parsedConfigured.protocol === 'http:' ||
+          parsedConfigured.protocol === 'https:'
+        ) {
+          const candidateOrigin = parsedConfigured.origin;
+
+          // Skip if this configured origin was already rejected with HTTP 403 by the backend
+          if (!rejectedConfiguredOrigins.has(candidateOrigin)) {
+            const isRemoteHttpsBackend =
+              Boolean(baseUrlParsed) &&
+              baseUrlParsed.protocol === 'https:' &&
+              !isLocalOrPrivateHostname(baseUrlParsed.hostname);
+
+            const isStaleLocalOriginForRemoteHttps =
+              isRemoteHttpsBackend &&
+              (parsedConfigured.protocol !== 'https:' ||
+                isLocalOrPrivateHostname(parsedConfigured.hostname));
+
+            if (!isStaleLocalOriginForRemoteHttps) {
+              return candidateOrigin;
+            }
+          }
+        }
+      } catch {
+        // Fall through to baseUrl origin
+      }
+    }
+  }
+
+  if (baseUrlParsed) {
+    return baseUrlParsed.origin;
+  }
+
   return '';
 }
 
@@ -503,6 +656,12 @@ export function createApiClient(clientConfig = {}) {
       }
     }
 
+    const callerProvidedOrigin = Boolean(
+      (options.headers && (options.headers.Origin || options.headers.origin)) ||
+        options.omitOrigin
+    );
+    let usedAutoOrigin = false;
+
     // Attach persistent Cookie and trusted Origin headers in React Native / non-DOM runtimes
     if (!isBrowserDomEnvironment()) {
       const cookieHeaderValue = getCookieHeader(url);
@@ -510,10 +669,14 @@ export function createApiClient(clientConfig = {}) {
         headers.Cookie = cookieHeaderValue;
       }
 
-      if (isStateChanging && !headers.Origin && !headers.origin) {
-        const trustedOrigin = getTrustedOrigin(effectiveBaseUrl);
+      if (isStateChanging && !callerProvidedOrigin && !headers.Origin && !headers.origin) {
+        const trustedOrigin = getTrustedOrigin(
+          effectiveBaseUrl,
+          options.trustedOrigin ?? clientConfig.trustedOrigin
+        );
         if (trustedOrigin) {
           headers.Origin = trustedOrigin;
+          usedAutoOrigin = true;
         }
       }
     }
@@ -630,6 +793,36 @@ export function createApiClient(clientConfig = {}) {
       const errorCode =
         (data && typeof data === 'object' && (data.code || data.errorCode)) ||
         `HTTP_${response.status}`;
+
+      // Automatic single retry if a state-changing request used a stale env-configured
+      // EXPO_PUBLIC_TRUSTED_ORIGIN that differs from the target backend's own origin
+      // and was rejected with HTTP 403 ("Cross-origin request rejected" / "Origin header required")
+      if (
+        response.status === 403 &&
+        isStateChanging &&
+        usedAutoOrigin &&
+        !callerProvidedOrigin &&
+        !options._originRetried &&
+        (errorMessage.toLowerCase().includes('cross-origin request rejected') ||
+          errorMessage.toLowerCase().includes('origin header required'))
+      ) {
+        try {
+          const targetBackendOrigin = new URL(url).origin;
+          const sentOrigin = headers.Origin || headers.origin || '';
+          if (targetBackendOrigin && targetBackendOrigin !== sentOrigin) {
+            if (sentOrigin) {
+              rejectedConfiguredOrigins.add(sentOrigin);
+            }
+            return await request(method, path, {
+              ...options,
+              trustedOrigin: targetBackendOrigin,
+              _originRetried: true,
+            });
+          }
+        } catch {
+          // Fall through to standard error handling
+        }
+      }
 
       // Automatic single retry if a mutation failed due to missing/stale CSRF cookie while authenticated
       if (
