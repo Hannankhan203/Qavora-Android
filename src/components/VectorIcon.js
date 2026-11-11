@@ -9,12 +9,45 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 
+export const SUPPORTED_VECTOR_ICON_NAMES = [
+  'plus',
+  'close',
+  'x',
+  'check',
+  'check-circle',
+  'chevron-right',
+  'chevron-left',
+  'chevron-down',
+  'folder',
+  'edit',
+  'trash',
+  'refresh',
+  'search',
+  'switch',
+  'layers',
+  'info',
+  'alert',
+  'alert-triangle',
+  'share',
+  'calendar',
+  'globe',
+  'tag',
+  'flag',
+  'file-text',
+  'clipboard',
+  'list',
+];
+
 export default function VectorIcon({
   name = 'folder',
   size = 18,
   color = '#6366f1',
   style,
 }) {
+  const normalizedName =
+    typeof name === 'string' && name.trim()
+      ? name.trim().toLowerCase()
+      : 'folder';
   const stroke = Math.max(1.6, Math.round(size * 0.11 * 10) / 10);
   const boxStyle = [
     styles.container,
@@ -22,7 +55,7 @@ export default function VectorIcon({
     style,
   ];
 
-  switch (name) {
+  switch (normalizedName) {
     case 'plus': {
       const barLen = size * 0.68;
       return (
@@ -49,7 +82,8 @@ export default function VectorIcon({
       );
     }
 
-    case 'close': {
+    case 'close':
+    case 'x': {
       const barLen = size * 0.68;
       return (
         <View style={boxStyle}>
@@ -92,6 +126,38 @@ export default function VectorIcon({
               transform: [{ rotate: '-45deg' }, { translateY: -size * 0.06 }],
             }}
           />
+        </View>
+      );
+    }
+
+    case 'check-circle': {
+      const ring = size * 0.78;
+      const w = size * 0.38;
+      const h = size * 0.22;
+      return (
+        <View style={boxStyle}>
+          <View
+            style={{
+              width: ring,
+              height: ring,
+              borderRadius: ring / 2,
+              borderWidth: stroke,
+              borderColor: color,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <View
+              style={{
+                width: w,
+                height: h,
+                borderLeftWidth: stroke,
+                borderBottomWidth: stroke,
+                borderColor: color,
+                transform: [{ rotate: '-45deg' }, { translateY: -size * 0.03 }],
+              }}
+            />
+          </View>
         </View>
       );
     }
@@ -503,6 +569,139 @@ export default function VectorIcon({
       );
     }
 
+    case 'alert-triangle': {
+      const baseW = size * 0.78;
+      const sideLen = size * 0.78;
+      return (
+        <View style={boxStyle}>
+          {/* Top apex cap */}
+          <View
+            style={{
+              position: 'absolute',
+              top: size * 0.12,
+              width: stroke * 1.15,
+              height: stroke * 1.15,
+              borderRadius: stroke,
+              backgroundColor: color,
+            }}
+          />
+          {/* Left diagonal edge */}
+          <View
+            style={{
+              position: 'absolute',
+              width: stroke,
+              height: sideLen,
+              backgroundColor: color,
+              borderRadius: stroke,
+              transform: [
+                { translateX: -size * 0.19 },
+                { translateY: 0 },
+                { rotate: '28.5deg' },
+              ],
+            }}
+          />
+          {/* Right diagonal edge */}
+          <View
+            style={{
+              position: 'absolute',
+              width: stroke,
+              height: sideLen,
+              backgroundColor: color,
+              borderRadius: stroke,
+              transform: [
+                { translateX: size * 0.19 },
+                { translateY: 0 },
+                { rotate: '-28.5deg' },
+              ],
+            }}
+          />
+          {/* Bottom horizontal base */}
+          <View
+            style={{
+              position: 'absolute',
+              bottom: size * 0.13,
+              width: baseW,
+              height: stroke,
+              backgroundColor: color,
+              borderRadius: stroke,
+            }}
+          />
+          {/* Exclamation stem */}
+          <View
+            style={{
+              position: 'absolute',
+              top: size * 0.36,
+              width: stroke,
+              height: size * 0.23,
+              backgroundColor: color,
+              borderRadius: stroke,
+            }}
+          />
+          {/* Exclamation dot */}
+          <View
+            style={{
+              position: 'absolute',
+              bottom: size * 0.23,
+              width: stroke * 1.15,
+              height: stroke * 1.15,
+              borderRadius: stroke,
+              backgroundColor: color,
+            }}
+          />
+        </View>
+      );
+    }
+
+    case 'share': {
+      const trayW = size * 0.74;
+      const trayH = size * 0.42;
+      const shaftH = size * 0.52;
+      const arrowHead = size * 0.26;
+      return (
+        <View style={boxStyle}>
+          {/* Open-top share tray at bottom */}
+          <View
+            style={{
+              position: 'absolute',
+              bottom: size * 0.12,
+              width: trayW,
+              height: trayH,
+              borderLeftWidth: stroke,
+              borderRightWidth: stroke,
+              borderBottomWidth: stroke,
+              borderBottomLeftRadius: 3,
+              borderBottomRightRadius: 3,
+              borderColor: color,
+            }}
+          />
+          {/* Upward arrow shaft */}
+          <View
+            style={{
+              position: 'absolute',
+              top: size * 0.14,
+              width: stroke,
+              height: shaftH,
+              backgroundColor: color,
+              borderRadius: stroke,
+            }}
+          />
+          {/* Upward arrow head */}
+          <View
+            style={{
+              position: 'absolute',
+              top: size * 0.15,
+              width: arrowHead,
+              height: arrowHead,
+              borderTopWidth: stroke,
+              borderLeftWidth: stroke,
+              borderColor: color,
+              transform: [{ rotate: '45deg' }],
+            }}
+          />
+        </View>
+      );
+    }
+
     case 'calendar': {
       const w = size * 0.76;
       const h = size * 0.68;
@@ -594,6 +793,41 @@ export default function VectorIcon({
               }}
             />
           </View>
+        </View>
+      );
+    }
+
+    case 'flag': {
+      const poleH = size * 0.76;
+      const flagW = size * 0.52;
+      const flagH = size * 0.4;
+      return (
+        <View style={boxStyle}>
+          <View
+            style={{
+              position: 'absolute',
+              left: size * 0.2,
+              top: size * 0.12,
+              width: stroke,
+              height: poleH,
+              backgroundColor: color,
+              borderRadius: stroke,
+            }}
+          />
+          <View
+            style={{
+              position: 'absolute',
+              left: size * 0.2 + stroke * 0.5,
+              top: size * 0.14,
+              width: flagW,
+              height: flagH,
+              borderWidth: stroke,
+              borderLeftWidth: 0,
+              borderTopRightRadius: 2,
+              borderBottomRightRadius: 2,
+              borderColor: color,
+            }}
+          />
         </View>
       );
     }
