@@ -93,7 +93,7 @@ export default function DashboardScreen() {
       ? { bg: colors.warningSoft, fg: colors.warning }
       : metrics.healthTone === 'danger'
       ? { bg: colors.dangerSoft, fg: colors.danger }
-      : { bg: colors.surfaceHighlight, fg: colors.textSecondary };
+      : { bg: colors.surfaceMuted, fg: colors.textSecondary };
 
   const defectStatusCounts = metrics.defectStatusBreakdown || {
     Open: 0,
@@ -715,7 +715,7 @@ export default function DashboardScreen() {
                   <View
                     style={[
                       styles.stackedBar,
-                      { backgroundColor: colors.surfaceHighlight },
+                      { backgroundColor: colors.surfaceMuted },
                     ]}
                   >
                     {passFlex > 0 && (
@@ -1160,7 +1160,7 @@ export default function DashboardScreen() {
                       <View
                         style={[
                           styles.miniProgressTrack,
-                          { backgroundColor: colors.surfaceHighlight },
+                          { backgroundColor: colors.surfaceMuted },
                         ]}
                       >
                         <View
