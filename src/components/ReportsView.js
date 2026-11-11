@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -8,6 +8,7 @@ import {
   Modal,
   ScrollView,
   ActivityIndicator,
+  Keyboard,
 } from 'react-native';
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useProjects } from '../context/ProjectContext';
@@ -56,6 +57,7 @@ export default function ReportsView() {
   const [previewPayload, setPreviewPayload] = useState(null);
 
   const isRefreshingAny = isRefreshingProject || isSyncingProjectData;
+  const customEndDateRef = useRef(null);
 
   const activeFilters = useMemo(
     () => ({
@@ -123,6 +125,7 @@ export default function ReportsView() {
       showToast('End date must use YYYY-MM-DD format', 'danger');
       return;
     }
+    Keyboard.dismiss();
     setAppliedCustomStart(customStartInput.trim());
     setAppliedCustomEnd(customEndInput.trim());
     showToast('Applied custom date range filter', 'info');
@@ -455,6 +458,9 @@ export default function ReportsView() {
                     accessibilityLabel="Custom report start date YYYY-MM-DD"
                     keyboardType="numbers-and-punctuation"
                     autoCapitalize="none"
+                    returnKeyType="next"
+                    blurOnSubmit={false}
+                    onSubmitEditing={() => customEndDateRef.current?.focus()}
                     style={[
                       styles.customDateInput,
                       {
@@ -476,6 +482,7 @@ export default function ReportsView() {
                     END (YYYY-MM-DD)
                   </Text>
                   <TextInput
+                    ref={customEndDateRef}
                     value={customEndInput}
                     onChangeText={setCustomEndInput}
                     placeholder="2026-12-31"
@@ -483,6 +490,8 @@ export default function ReportsView() {
                     accessibilityLabel="Custom report end date YYYY-MM-DD"
                     keyboardType="numbers-and-punctuation"
                     autoCapitalize="none"
+                    returnKeyType="done"
+                    onSubmitEditing={handleApplyCustomDates}
                     style={[
                       styles.customDateInput,
                       {

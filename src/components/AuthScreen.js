@@ -22,6 +22,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Keyboard,
+  BackHandler,
   Platform,
   ActivityIndicator,
 } from 'react-native';
@@ -78,6 +79,7 @@ export default function AuthScreen() {
   // Keyboard tracking state for narrow Android screens
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const isKeyboardOpenRef = useRef(false);
 
   // Refs for scroll management and Next/Done input focus chaining
   const scrollViewRef = useRef(null);
@@ -134,6 +136,7 @@ export default function AuthScreen() {
           typeof event.endCoordinates.height === 'number' &&
           event.endCoordinates.height) ||
         280;
+      isKeyboardOpenRef.current = true;
       setIsKeyboardVisible(true);
       setKeyboardHeight(height);
       if (focusedFieldRef.current) {
@@ -142,13 +145,28 @@ export default function AuthScreen() {
     });
 
     const hideSub = Keyboard.addListener(hideEvent, () => {
+      isKeyboardOpenRef.current = false;
       setIsKeyboardVisible(false);
       setKeyboardHeight(0);
+    });
+
+    const backSub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (
+        isKeyboardOpenRef.current ||
+        (typeof Keyboard.isVisible === 'function' && Keyboard.isVisible())
+      ) {
+        Keyboard.dismiss();
+        isKeyboardOpenRef.current = false;
+        setIsKeyboardVisible(false);
+        return true;
+      }
+      return false;
     });
 
     return () => {
       showSub.remove();
       hideSub.remove();
+      backSub.remove();
     };
   }, [scrollToField]);
 

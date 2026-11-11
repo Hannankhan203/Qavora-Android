@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -7,6 +7,7 @@ import {
   Pressable,
   ScrollView,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
 } from 'react-native';
 import { useTheme, monoFontFamily } from '../theme/theme';
@@ -50,6 +51,26 @@ export default function ProfileSettingsScreen() {
   const [verifyingSession, setVerifyingSession] = useState(false);
   const [profileFeedback, setProfileFeedback] = useState(null);
 
+  const scrollViewRef = useRef(null);
+  const settingsCardYRef = useRef(260);
+  const testerNameInputRef = useRef(null);
+  const roleInputRef = useRef(null);
+  const projectNameInputRef = useRef(null);
+  const targetVersionInputRef = useRef(null);
+  const defaultBuildInputRef = useRef(null);
+  const defaultDeviceInputRef = useRef(null);
+
+  const scrollToSettingsOffset = useCallback((relativeY = 0) => {
+    setTimeout(() => {
+      if (scrollViewRef.current) {
+        scrollViewRef.current.scrollTo({
+          y: Math.max(0, settingsCardYRef.current + relativeY - 24),
+          animated: true,
+        });
+      }
+    }, 80);
+  }, []);
+
   useEffect(() => {
     setTesterName(profile.testerName || '');
     setRole(profile.role || '');
@@ -73,6 +94,7 @@ export default function ProfileSettingsScreen() {
 
   const handleSaveSettings = async () => {
     if (isSavingProfile) return;
+    Keyboard.dismiss();
     setProfileFeedback(null);
 
     const res = await updateProfile({
@@ -140,9 +162,11 @@ export default function ProfileSettingsScreen() {
   return (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 76 : 16}
     >
       <ScrollView
+        ref={scrollViewRef}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
@@ -462,6 +486,12 @@ export default function ProfileSettingsScreen() {
 
         {/* 3. Application & QA Workspace Defaults */}
         <View
+          onLayout={(e) => {
+            const y = e?.nativeEvent?.layout?.y;
+            if (typeof y === 'number') {
+              settingsCardYRef.current = y;
+            }
+          }}
           style={[
             styles.card,
             { backgroundColor: colors.surface, borderColor: colors.border },
@@ -490,12 +520,17 @@ export default function ProfileSettingsScreen() {
                 QA Tester Name
               </Text>
               <TextInput
+                ref={testerNameInputRef}
                 value={testerName}
                 onChangeText={setTesterName}
+                onFocus={() => scrollToSettingsOffset(20)}
                 placeholder="QA Engineer"
                 placeholderTextColor={colors.textMuted}
                 accessibilityLabel="QA Tester Name"
                 autoCapitalize="words"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => roleInputRef.current?.focus()}
                 style={[
                   styles.input,
                   {
@@ -514,12 +549,17 @@ export default function ProfileSettingsScreen() {
                 QA Role / Title
               </Text>
               <TextInput
+                ref={roleInputRef}
                 value={role}
                 onChangeText={setRole}
+                onFocus={() => scrollToSettingsOffset(20)}
                 placeholder="Lead QA Analyst"
                 placeholderTextColor={colors.textMuted}
                 accessibilityLabel="QA Role or Title"
                 autoCapitalize="words"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => projectNameInputRef.current?.focus()}
                 style={[
                   styles.input,
                   {
@@ -538,17 +578,22 @@ export default function ProfileSettingsScreen() {
               : 'Default Project Name'}
           </Text>
           <TextInput
+            ref={projectNameInputRef}
             value={projectName}
             onChangeText={(val) => {
               setProjectName(val);
               if (profileFeedback) setProfileFeedback(null);
             }}
+            onFocus={() => scrollToSettingsOffset(90)}
             placeholder="Enter project name"
             placeholderTextColor={colors.textMuted}
             accessibilityLabel={
               selectedProject ? 'Active Project Name' : 'Default Project Name'
             }
             maxLength={120}
+            returnKeyType="next"
+            blurOnSubmit={false}
+            onSubmitEditing={() => targetVersionInputRef.current?.focus()}
             style={[
               styles.input,
               {
@@ -567,12 +612,18 @@ export default function ProfileSettingsScreen() {
                 Target Release Version
               </Text>
               <TextInput
+                ref={targetVersionInputRef}
                 value={targetVersion}
                 onChangeText={setTargetVersion}
+                onFocus={() => scrollToSettingsOffset(160)}
                 placeholder="v1.0.0"
                 placeholderTextColor={colors.textMuted}
                 accessibilityLabel="Target Release Version"
                 autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => defaultBuildInputRef.current?.focus()}
                 style={[
                   styles.input,
                   {
@@ -592,12 +643,18 @@ export default function ProfileSettingsScreen() {
                 Default Build Number
               </Text>
               <TextInput
+                ref={defaultBuildInputRef}
                 value={defaultBuild}
                 onChangeText={setDefaultBuild}
+                onFocus={() => scrollToSettingsOffset(160)}
                 placeholder="1.0.0-build.104"
                 placeholderTextColor={colors.textMuted}
                 accessibilityLabel="Default Build Number"
                 autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => defaultDeviceInputRef.current?.focus()}
                 style={[
                   styles.input,
                   {
@@ -615,11 +672,15 @@ export default function ProfileSettingsScreen() {
             Default Test Device / Android Version
           </Text>
           <TextInput
+            ref={defaultDeviceInputRef}
             value={defaultDevice}
             onChangeText={setDefaultDevice}
+            onFocus={() => scrollToSettingsOffset(230)}
             placeholder="Android 15 · Pixel 8 (360dp)"
             placeholderTextColor={colors.textMuted}
             accessibilityLabel="Default Test Device and Android Version"
+            returnKeyType="done"
+            onSubmitEditing={handleSaveSettings}
             style={[
               styles.input,
               {

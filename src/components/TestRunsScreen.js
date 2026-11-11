@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Keyboard,
 } from 'react-native';
 import VectorIcon from './VectorIcon';
 import { useTheme, monoFontFamily } from '../theme/theme';
@@ -156,6 +157,35 @@ export default function TestRunsScreen({
 
   // Run status mutation state
   const [isTogglingRunStatus, setIsTogglingRunStatus] = useState(false);
+
+  // Refs for form keyboard UX & auto-scroll
+  const execRunnerScrollRef = useRef(null);
+  const execActualResultRef = useRef(null);
+  const execNotesRef = useRef(null);
+  const execTesterRef = useRef(null);
+  const execEnvironmentRef = useRef(null);
+
+  const runFormScrollRef = useRef(null);
+  const runNameRef = useRef(null);
+  const runEnvironmentRef = useRef(null);
+  const runDeviceRef = useRef(null);
+  const runBuildRef = useRef(null);
+  const runTesterRef = useRef(null);
+  const runNotesRef = useRef(null);
+
+  const scrollRunModalTo = useCallback((scrollRef, yOffset) => {
+    setTimeout(() => {
+      if (
+        scrollRef.current &&
+        typeof scrollRef.current.scrollTo === 'function'
+      ) {
+        scrollRef.current.scrollTo({
+          y: Math.max(0, yOffset),
+          animated: true,
+        });
+      }
+    }, 120);
+  }, []);
 
   const showFeedback = (type, message) => {
     setFeedbackBanner({ type, message });
@@ -326,6 +356,7 @@ export default function TestRunsScreen({
 
   const handleSaveExecution = async (finalStatus, andCreateDefect = false) => {
     if (!activeRun || !executingCase || isSubmittingExec) return;
+    Keyboard.dismiss();
     setIsSubmittingExec(true);
     try {
       const resolvedActual =
@@ -493,6 +524,7 @@ export default function TestRunsScreen({
       return;
     }
 
+    Keyboard.dismiss();
     setRunFormError('');
     setIsSubmittingRun(true);
     try {
@@ -1362,6 +1394,8 @@ export default function TestRunsScreen({
                     placeholder="Filter run test cases by ID, title, or notes..."
                     placeholderTextColor={theme.textMuted}
                     accessibilityLabel="Filter run test cases by ID, title, or notes"
+                    returnKeyType="search"
+                    onSubmitEditing={() => Keyboard.dismiss()}
                     value={searchQuery}
                     onChangeText={setSearchQuery}
                   />
@@ -1884,6 +1918,9 @@ export default function TestRunsScreen({
                 style={[styles.searchInput, { color: theme.text }]}
                 placeholder="Search execution history by case, run, tester, or notes..."
                 placeholderTextColor={theme.textMuted}
+                accessibilityLabel="Search execution history by case, run, tester, or notes"
+                returnKeyType="search"
+                onSubmitEditing={() => Keyboard.dismiss()}
                 value={historySearchQuery}
                 onChangeText={setHistorySearchQuery}
               />
@@ -2140,11 +2177,11 @@ export default function TestRunsScreen({
         transparent
         onRequestClose={() => setExecutingCaseId(null)}
       >
-        <View
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={[styles.modalOverlay, { backgroundColor: theme.overlay }]}
         >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          <View
             style={[
               styles.modalSheet,
               {
@@ -2197,7 +2234,10 @@ export default function TestRunsScreen({
                 </View>
 
                 <ScrollView
+                  ref={execRunnerScrollRef}
+                  style={styles.modalScrollArea}
                   showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
                   contentContainerStyle={styles.modalBody}
                 >
                   {executingCase.preconditions ? (
@@ -2402,6 +2442,7 @@ export default function TestRunsScreen({
                     ACTUAL RESULT / OBSERVED OUTCOME
                   </Text>
                   <TextInput
+                    ref={execActualResultRef}
                     style={[
                       styles.notesArea,
                       {
@@ -2412,7 +2453,9 @@ export default function TestRunsScreen({
                     ]}
                     placeholder="Record actual result observed during execution..."
                     placeholderTextColor={theme.textMuted}
+                    accessibilityLabel="Actual result or observed outcome"
                     multiline
+                    onFocus={() => scrollRunModalTo(execRunnerScrollRef, 240)}
                     value={execActualResult}
                     onChangeText={setExecActualResult}
                   />
@@ -2426,6 +2469,7 @@ export default function TestRunsScreen({
                     EXECUTION NOTES & LOGS
                   </Text>
                   <TextInput
+                    ref={execNotesRef}
                     style={[
                       styles.notesArea,
                       {
@@ -2436,7 +2480,9 @@ export default function TestRunsScreen({
                     ]}
                     placeholder="Add logcat snippets, latency metrics, or environment notes..."
                     placeholderTextColor={theme.textMuted}
+                    accessibilityLabel="Execution notes and logs"
                     multiline
+                    onFocus={() => scrollRunModalTo(execRunnerScrollRef, 340)}
                     value={execNotes}
                     onChangeText={setExecNotes}
                   />
@@ -2452,6 +2498,7 @@ export default function TestRunsScreen({
                         Tester
                       </Text>
                       <TextInput
+                        ref={execTesterRef}
                         style={[
                           styles.inputField,
                           {
@@ -2464,6 +2511,15 @@ export default function TestRunsScreen({
                         onChangeText={setExecTester}
                         placeholder="Tester name"
                         placeholderTextColor={theme.textMuted}
+                        accessibilityLabel="Execution Tester"
+                        returnKeyType="next"
+                        blurOnSubmit={false}
+                        onFocus={() =>
+                          scrollRunModalTo(execRunnerScrollRef, 440)
+                        }
+                        onSubmitEditing={() =>
+                          execEnvironmentRef.current?.focus()
+                        }
                       />
                     </View>
                     <View style={styles.execMetaInputCol}>
@@ -2476,6 +2532,7 @@ export default function TestRunsScreen({
                         Environment
                       </Text>
                       <TextInput
+                        ref={execEnvironmentRef}
                         style={[
                           styles.inputField,
                           {
@@ -2488,6 +2545,12 @@ export default function TestRunsScreen({
                         onChangeText={setExecEnvironment}
                         placeholder="Android 14 / Staging"
                         placeholderTextColor={theme.textMuted}
+                        accessibilityLabel="Execution Environment"
+                        returnKeyType="done"
+                        onFocus={() =>
+                          scrollRunModalTo(execRunnerScrollRef, 440)
+                        }
+                        onSubmitEditing={() => Keyboard.dismiss()}
                       />
                     </View>
                   </View>
@@ -2596,8 +2659,8 @@ export default function TestRunsScreen({
                 </View>
               </>
             )}
-          </KeyboardAvoidingView>
-        </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* CREATE / EDIT TEST RUN MODAL */}
@@ -2607,11 +2670,11 @@ export default function TestRunsScreen({
         transparent
         onRequestClose={() => setRunModalVisible(false)}
       >
-        <View
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={[styles.modalOverlay, { backgroundColor: theme.overlay }]}
         >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          <View
             style={[
               styles.modalSheet,
               {
@@ -2626,13 +2689,18 @@ export default function TestRunsScreen({
                 { borderBottomColor: theme.border },
               ]}
             >
-              <Text style={[styles.modalTitle, { color: theme.text }]}>
+              <Text
+                accessibilityRole="header"
+                style={[styles.modalTitle, { color: theme.text }]}
+              >
                 {editingRunId
                   ? `Edit Test Run (${editingRunId})`
                   : 'Create New Test Run'}
               </Text>
               <TouchableOpacity
                 onPress={() => setRunModalVisible(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Close test run form"
                 style={[
                   styles.closeBtn,
                   { backgroundColor: theme.surfaceMuted },
@@ -2647,7 +2715,10 @@ export default function TestRunsScreen({
             </View>
 
             <ScrollView
+              ref={runFormScrollRef}
+              style={styles.modalScrollArea}
               showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.modalBody}
             >
               {runFormError ? (
@@ -2675,6 +2746,7 @@ export default function TestRunsScreen({
                 Run Name *
               </Text>
               <TextInput
+                ref={runNameRef}
                 style={[
                   styles.inputField,
                   {
@@ -2685,6 +2757,11 @@ export default function TestRunsScreen({
                 ]}
                 placeholder="e.g., Release v2.4 Smoke Verification"
                 placeholderTextColor={theme.textMuted}
+                accessibilityLabel="Run Name, required"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onFocus={() => scrollRunModalTo(runFormScrollRef, 0)}
+                onSubmitEditing={() => runEnvironmentRef.current?.focus()}
                 value={runName}
                 onChangeText={setRunName}
               />
@@ -2875,6 +2952,7 @@ export default function TestRunsScreen({
                 Environment
               </Text>
               <TextInput
+                ref={runEnvironmentRef}
                 style={[
                   styles.inputField,
                   {
@@ -2885,6 +2963,11 @@ export default function TestRunsScreen({
                 ]}
                 placeholder="e.g., Android 14 / Staging"
                 placeholderTextColor={theme.textMuted}
+                accessibilityLabel="Run Environment"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onFocus={() => scrollRunModalTo(runFormScrollRef, 260)}
+                onSubmitEditing={() => runDeviceRef.current?.focus()}
                 value={runEnvironment}
                 onChangeText={setRunEnvironment}
               />
@@ -2895,6 +2978,7 @@ export default function TestRunsScreen({
                 Target Device & Android OS
               </Text>
               <TextInput
+                ref={runDeviceRef}
                 style={[
                   styles.inputField,
                   {
@@ -2905,6 +2989,11 @@ export default function TestRunsScreen({
                 ]}
                 placeholder="e.g., Pixel 8 Pro • Android 14"
                 placeholderTextColor={theme.textMuted}
+                accessibilityLabel="Target Device and Android OS"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onFocus={() => scrollRunModalTo(runFormScrollRef, 330)}
+                onSubmitEditing={() => runBuildRef.current?.focus()}
                 value={runDevice}
                 onChangeText={setRunDevice}
               />
@@ -2915,6 +3004,7 @@ export default function TestRunsScreen({
                 Build Version
               </Text>
               <TextInput
+                ref={runBuildRef}
                 style={[
                   styles.inputField,
                   {
@@ -2925,6 +3015,11 @@ export default function TestRunsScreen({
                 ]}
                 placeholder="e.g., 2.4.0-rc3 (Build 418)"
                 placeholderTextColor={theme.textMuted}
+                accessibilityLabel="Build Version"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onFocus={() => scrollRunModalTo(runFormScrollRef, 400)}
+                onSubmitEditing={() => runTesterRef.current?.focus()}
                 value={runBuild}
                 onChangeText={setRunBuild}
               />
@@ -2935,6 +3030,7 @@ export default function TestRunsScreen({
                 Assigned Tester
               </Text>
               <TextInput
+                ref={runTesterRef}
                 style={[
                   styles.inputField,
                   {
@@ -2945,6 +3041,11 @@ export default function TestRunsScreen({
                 ]}
                 placeholder="e.g., QA Lead"
                 placeholderTextColor={theme.textMuted}
+                accessibilityLabel="Assigned Tester"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onFocus={() => scrollRunModalTo(runFormScrollRef, 470)}
+                onSubmitEditing={() => runNotesRef.current?.focus()}
                 value={runTester}
                 onChangeText={setRunTester}
               />
@@ -2955,6 +3056,7 @@ export default function TestRunsScreen({
                 Run Notes / Cycle Scope
               </Text>
               <TextInput
+                ref={runNotesRef}
                 style={[
                   styles.notesArea,
                   {
@@ -2966,7 +3068,9 @@ export default function TestRunsScreen({
                 ]}
                 placeholder="Optional cycle notes or release criteria..."
                 placeholderTextColor={theme.textMuted}
+                accessibilityLabel="Run Notes or Cycle Scope"
                 multiline
+                onFocus={() => scrollRunModalTo(runFormScrollRef, 550)}
                 value={runNotes}
                 onChangeText={setRunNotes}
               />
@@ -3019,8 +3123,8 @@ export default function TestRunsScreen({
                 </Text>
               </TouchableOpacity>
             </View>
-          </KeyboardAvoidingView>
-        </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* DELETE TEST RUN CONFIRMATION MODAL */}
@@ -3743,6 +3847,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  modalScrollArea: {
+    flexShrink: 1,
   },
   modalBody: {
     padding: 16,

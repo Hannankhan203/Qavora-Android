@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Platform,
   ActivityIndicator,
   Linking,
+  Keyboard,
 } from 'react-native';
 import VectorIcon from './VectorIcon';
 import { useTheme, monoFontFamily } from '../theme/theme';
@@ -300,6 +301,30 @@ export default function DefectsScreen() {
   // Feedback banner
   const [feedbackBanner, setFeedbackBanner] = useState(null);
 
+  // Refs for form keyboard UX & auto-scroll
+  const defectFormScrollRef = useRef(null);
+  const defectTitleRef = useRef(null);
+  const defectDescRef = useRef(null);
+  const defectReproRef = useRef(null);
+  const defectExpectedRef = useRef(null);
+  const defectActualRef = useRef(null);
+  const defectEnvRef = useRef(null);
+  const defectUrlRef = useRef(null);
+
+  const scrollDefectModalTo = useCallback((yOffset) => {
+    setTimeout(() => {
+      if (
+        defectFormScrollRef.current &&
+        typeof defectFormScrollRef.current.scrollTo === 'function'
+      ) {
+        defectFormScrollRef.current.scrollTo({
+          y: Math.max(0, yOffset),
+          animated: true,
+        });
+      }
+    }, 120);
+  }, []);
+
   const showFeedback = (type, message) => {
     setFeedbackBanner({ type, message });
   };
@@ -506,6 +531,7 @@ export default function DefectsScreen() {
       }
     }
 
+    Keyboard.dismiss();
     setFormError('');
     setIsSubmittingDefect(true);
     try {
@@ -910,6 +936,8 @@ export default function DefectsScreen() {
               placeholder="Search ID, title, steps, case, or environment..."
               placeholderTextColor={theme.textMuted}
               accessibilityLabel="Search defects by ID, title, steps, case, or environment"
+              returnKeyType="search"
+              onSubmitEditing={() => Keyboard.dismiss()}
               value={searchQuery}
               onChangeText={setSearchQuery}
             />
@@ -1901,11 +1929,11 @@ export default function DefectsScreen() {
         transparent
         onRequestClose={() => setFormModalVisible(false)}
       >
-        <View
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={[styles.modalOverlay, { backgroundColor: theme.overlay }]}
         >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          <View
             style={[
               styles.modalSheet,
               {
@@ -1947,7 +1975,10 @@ export default function DefectsScreen() {
             </View>
 
             <ScrollView
+              ref={defectFormScrollRef}
+              style={styles.modalScrollArea}
               showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.modalBody}
             >
               {formError ? (
@@ -1975,6 +2006,7 @@ export default function DefectsScreen() {
                 Defect Title *
               </Text>
               <TextInput
+                ref={defectTitleRef}
                 style={[
                   styles.inputField,
                   {
@@ -1986,6 +2018,10 @@ export default function DefectsScreen() {
                 placeholder="e.g., Crash when rotating camera during QR scan"
                 placeholderTextColor={theme.textMuted}
                 accessibilityLabel="Defect Title, required"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onFocus={() => scrollDefectModalTo(0)}
+                onSubmitEditing={() => defectDescRef.current?.focus()}
                 value={title}
                 onChangeText={setTitle}
               />
@@ -2265,6 +2301,7 @@ export default function DefectsScreen() {
                 Summary / Description
               </Text>
               <TextInput
+                ref={defectDescRef}
                 style={[
                   styles.textArea,
                   {
@@ -2277,6 +2314,7 @@ export default function DefectsScreen() {
                 placeholderTextColor={theme.textMuted}
                 accessibilityLabel="Summary or Description"
                 multiline
+                onFocus={() => scrollDefectModalTo(340)}
                 value={description}
                 onChangeText={setDescription}
               />
@@ -2287,6 +2325,7 @@ export default function DefectsScreen() {
                 Steps to Reproduce *
               </Text>
               <TextInput
+                ref={defectReproRef}
                 style={[
                   styles.textArea,
                   {
@@ -2299,6 +2338,7 @@ export default function DefectsScreen() {
                 placeholderTextColor={theme.textMuted}
                 accessibilityLabel="Steps to Reproduce, required"
                 multiline
+                onFocus={() => scrollDefectModalTo(440)}
                 value={reproSteps}
                 onChangeText={setReproSteps}
               />
@@ -2309,6 +2349,7 @@ export default function DefectsScreen() {
                 Expected Result
               </Text>
               <TextInput
+                ref={defectExpectedRef}
                 style={[
                   styles.textArea,
                   {
@@ -2321,6 +2362,7 @@ export default function DefectsScreen() {
                 placeholderTextColor={theme.textMuted}
                 accessibilityLabel="Expected Result"
                 multiline
+                onFocus={() => scrollDefectModalTo(540)}
                 value={expectedResult}
                 onChangeText={setExpectedResult}
               />
@@ -2331,6 +2373,7 @@ export default function DefectsScreen() {
                 Actual Result / Crash Log *
               </Text>
               <TextInput
+                ref={defectActualRef}
                 style={[
                   styles.textArea,
                   {
@@ -2343,6 +2386,7 @@ export default function DefectsScreen() {
                 placeholderTextColor={theme.textMuted}
                 accessibilityLabel="Actual Result or Crash Log, required"
                 multiline
+                onFocus={() => scrollDefectModalTo(640)}
                 value={actualResult}
                 onChangeText={setActualResult}
               />
@@ -2353,6 +2397,7 @@ export default function DefectsScreen() {
                 Device & Build Environment
               </Text>
               <TextInput
+                ref={defectEnvRef}
                 style={[
                   styles.inputField,
                   {
@@ -2362,6 +2407,10 @@ export default function DefectsScreen() {
                   },
                 ]}
                 accessibilityLabel="Device and Build Environment"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onFocus={() => scrollDefectModalTo(740)}
+                onSubmitEditing={() => defectUrlRef.current?.focus()}
                 value={environment}
                 onChangeText={setEnvironment}
               />
@@ -2372,6 +2421,7 @@ export default function DefectsScreen() {
                 External Issue URL (Optional)
               </Text>
               <TextInput
+                ref={defectUrlRef}
                 style={[
                   styles.inputField,
                   {
@@ -2386,6 +2436,9 @@ export default function DefectsScreen() {
                 keyboardType="url"
                 autoCapitalize="none"
                 autoCorrect={false}
+                returnKeyType="done"
+                onFocus={() => scrollDefectModalTo(810)}
+                onSubmitEditing={handleSaveDefect}
                 value={externalUrl}
                 onChangeText={setExternalUrl}
               />
@@ -2440,8 +2493,8 @@ export default function DefectsScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
-          </KeyboardAvoidingView>
-        </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* DELETE DEFECT CONFIRMATION MODAL */}
@@ -2948,6 +3001,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  modalScrollArea: {
+    flexShrink: 1,
   },
   modalBody: {
     padding: 16,

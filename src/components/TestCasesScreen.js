@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useCallback } from 'react';
 import {
   StyleSheet,
   Text,
@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Keyboard,
 } from 'react-native';
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -161,6 +162,38 @@ export default function TestCasesScreen({
   const [isSubmittingPhase, setIsSubmittingPhase] = useState(false);
   const [deletingPhase, setDeletingPhase] = useState(null);
   const [isDeletingPhase, setIsDeletingPhase] = useState(false);
+
+  // Refs for form keyboard UX & auto-scroll
+  const caseFormScrollRef = useRef(null);
+  const caseTitleRef = useRef(null);
+  const caseTagsRef = useRef(null);
+  const caseDescRef = useRef(null);
+  const casePreconditionsRef = useRef(null);
+  const caseExpectedResultRef = useRef(null);
+
+  const suiteFormScrollRef = useRef(null);
+  const suiteNameRef = useRef(null);
+  const suiteTagsRef = useRef(null);
+  const suiteDescRef = useRef(null);
+
+  const planFormScrollRef = useRef(null);
+
+  const phaseNameRef = useRef(null);
+  const phaseDescRef = useRef(null);
+
+  const scrollModalTo = useCallback((scrollRef, yOffset) => {
+    setTimeout(() => {
+      if (
+        scrollRef.current &&
+        typeof scrollRef.current.scrollTo === 'function'
+      ) {
+        scrollRef.current.scrollTo({
+          y: Math.max(0, yOffset),
+          animated: true,
+        });
+      }
+    }, 120);
+  }, []);
 
   const selectedTestCase = useMemo(
     () =>
@@ -375,6 +408,7 @@ export default function TestCasesScreen({
       .map((t) => t.trim())
       .filter(Boolean);
 
+    Keyboard.dismiss();
     caseSubmitLockRef.current = true;
     setIsSubmittingCase(true);
     setCaseFormError(null);
@@ -498,6 +532,7 @@ export default function TestCasesScreen({
       .map((t) => t.trim())
       .filter(Boolean);
 
+    Keyboard.dismiss();
     suiteSubmitLockRef.current = true;
     setIsSubmittingSuite(true);
     setSuiteFormError(null);
@@ -613,6 +648,7 @@ export default function TestCasesScreen({
       return;
     }
 
+    Keyboard.dismiss();
     planSubmitLockRef.current = true;
     setIsSubmittingPlan(true);
     setPlanFormError(null);
@@ -654,6 +690,7 @@ export default function TestCasesScreen({
       setPhaseFormError('Phase name is required.');
       return;
     }
+    Keyboard.dismiss();
     setIsSubmittingPhase(true);
     setPhaseFormError(null);
     try {
@@ -919,6 +956,8 @@ export default function TestCasesScreen({
                   placeholder="Search ID, title, suite, tag..."
                   placeholderTextColor={colors.textMuted}
                   accessibilityLabel="Search test cases by ID, title, suite, or tag"
+                  returnKeyType="search"
+                  onSubmitEditing={() => Keyboard.dismiss()}
                   style={[styles.searchInput, { color: colors.text }]}
                 />
                 {searchQuery.length > 0 && (
@@ -2709,7 +2748,7 @@ export default function TestCasesScreen({
         onRequestClose={() => !isSubmittingCase && setIsFormModalOpen(false)}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.modalOverlay}
         >
           <View
@@ -2754,8 +2793,10 @@ export default function TestCasesScreen({
             </View>
 
             <ScrollView
+              ref={caseFormScrollRef}
               style={styles.modalBody}
               contentContainerStyle={styles.modalBodyContent}
+              keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
               {caseFormError && (
@@ -2778,11 +2819,16 @@ export default function TestCasesScreen({
                 Test Case Title *
               </Text>
               <TextInput
+                ref={caseTitleRef}
                 value={formTitle}
                 onChangeText={setFormTitle}
                 placeholder="e.g., Verify biometric login fallback to PIN"
                 placeholderTextColor={colors.textMuted}
                 accessibilityLabel="Test Case Title, required"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onFocus={() => scrollModalTo(caseFormScrollRef, 0)}
+                onSubmitEditing={() => caseTagsRef.current?.focus()}
                 style={[
                   styles.textInput,
                   {
@@ -2909,10 +2955,16 @@ export default function TestCasesScreen({
                 Tags (comma-separated)
               </Text>
               <TextInput
+                ref={caseTagsRef}
                 value={formTags}
                 onChangeText={setFormTags}
                 placeholder="e.g., auth, smoke, release-gate"
                 placeholderTextColor={colors.textMuted}
+                accessibilityLabel="Test Case Tags, comma-separated"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onFocus={() => scrollModalTo(caseFormScrollRef, 220)}
+                onSubmitEditing={() => caseDescRef.current?.focus()}
                 style={[
                   styles.textInput,
                   {
@@ -2927,11 +2979,14 @@ export default function TestCasesScreen({
                 Description / Objective
               </Text>
               <TextInput
+                ref={caseDescRef}
                 value={formDescription}
                 onChangeText={setFormDescription}
                 placeholder="Brief summary of what this test validates..."
                 placeholderTextColor={colors.textMuted}
+                accessibilityLabel="Test Case Description or Objective"
                 multiline
+                onFocus={() => scrollModalTo(caseFormScrollRef, 300)}
                 style={[
                   styles.textArea,
                   {
@@ -2946,10 +3001,14 @@ export default function TestCasesScreen({
                 Preconditions
               </Text>
               <TextInput
+                ref={casePreconditionsRef}
                 value={formPreconditions}
                 onChangeText={setFormPreconditions}
                 placeholder="Required user state, test data, or configuration..."
                 placeholderTextColor={colors.textMuted}
+                accessibilityLabel="Test Case Preconditions"
+                returnKeyType="next"
+                onFocus={() => scrollModalTo(caseFormScrollRef, 390)}
                 style={[
                   styles.textInput,
                   {
@@ -3012,6 +3071,11 @@ export default function TestCasesScreen({
                     }
                     placeholder="Action: What the tester does..."
                     placeholderTextColor={colors.textMuted}
+                    accessibilityLabel={`Step ${index + 1} Action`}
+                    returnKeyType="next"
+                    onFocus={() =>
+                      scrollModalTo(caseFormScrollRef, 460 + index * 170)
+                    }
                     style={[
                       styles.textInput,
                       {
@@ -3029,6 +3093,11 @@ export default function TestCasesScreen({
                     }
                     placeholder="Test Data (optional): e.g. user@qavora.io"
                     placeholderTextColor={colors.textMuted}
+                    accessibilityLabel={`Step ${index + 1} Test Data`}
+                    returnKeyType="next"
+                    onFocus={() =>
+                      scrollModalTo(caseFormScrollRef, 500 + index * 170)
+                    }
                     style={[
                       styles.textInput,
                       {
@@ -3046,6 +3115,17 @@ export default function TestCasesScreen({
                     }
                     placeholder="Expected step result..."
                     placeholderTextColor={colors.textMuted}
+                    accessibilityLabel={`Step ${index + 1} Expected Result`}
+                    returnKeyType="next"
+                    blurOnSubmit={false}
+                    onFocus={() =>
+                      scrollModalTo(caseFormScrollRef, 540 + index * 170)
+                    }
+                    onSubmitEditing={() => {
+                      if (index === formSteps.length - 1) {
+                        caseExpectedResultRef.current?.focus();
+                      }
+                    }}
                     style={[
                       styles.textInput,
                       {
@@ -3062,11 +3142,19 @@ export default function TestCasesScreen({
                 Overall Expected Result
               </Text>
               <TextInput
+                ref={caseExpectedResultRef}
                 value={formExpectedResult}
                 onChangeText={setFormExpectedResult}
                 placeholder="Final outcome when all steps succeed..."
                 placeholderTextColor={colors.textMuted}
+                accessibilityLabel="Overall Expected Result"
                 multiline
+                onFocus={() =>
+                  scrollModalTo(
+                    caseFormScrollRef,
+                    560 + formSteps.length * 170
+                  )
+                }
                 style={[
                   styles.textArea,
                   {
@@ -3343,7 +3431,7 @@ export default function TestCasesScreen({
         onRequestClose={() => !isSubmittingSuite && setIsSuiteModalOpen(false)}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.centeredModalOverlay}
         >
           <View
@@ -3356,129 +3444,74 @@ export default function TestCasesScreen({
             ]}
           >
             <Text
+              accessibilityRole="header"
               style={[styles.smallModalTitle, { color: colors.text }]}
             >
               {editingSuite ? 'Edit Test Suite' : 'Create Test Suite'}
             </Text>
 
-            {suiteFormError && (
-              <View
+            <ScrollView
+              ref={suiteFormScrollRef}
+              style={{ flexShrink: 1 }}
+              contentContainerStyle={{ gap: 10 }}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              {suiteFormError && (
+                <View
+                  style={[
+                    styles.formAlertBox,
+                    {
+                      backgroundColor: colors.dangerSoft,
+                      borderColor: colors.danger,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.formAlertText, { color: colors.danger }]}>
+                    {suiteFormError}
+                  </Text>
+                </View>
+              )}
+
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+                Suite Name *
+              </Text>
+              <TextInput
+                ref={suiteNameRef}
+                value={suiteNameInput}
+                onChangeText={setSuiteNameInput}
+                placeholder="e.g., Payment & Checkout Flows"
+                placeholderTextColor={colors.textMuted}
+                accessibilityLabel="Suite Name, required"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onFocus={() => scrollModalTo(suiteFormScrollRef, 0)}
+                onSubmitEditing={() => suiteTagsRef.current?.focus()}
                 style={[
-                  styles.formAlertBox,
+                  styles.textInput,
                   {
-                    backgroundColor: colors.dangerSoft,
-                    borderColor: colors.danger,
+                    backgroundColor: colors.surfaceMuted,
+                    color: colors.text,
+                    borderColor: colors.border,
                   },
                 ]}
+              />
+
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+                Category
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.optionChipsRow}
               >
-                <Text style={[styles.formAlertText, { color: colors.danger }]}>
-                  {suiteFormError}
-                </Text>
-              </View>
-            )}
-
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
-              Suite Name *
-            </Text>
-            <TextInput
-              value={suiteNameInput}
-              onChangeText={setSuiteNameInput}
-              placeholder="e.g., Payment & Checkout Flows"
-              placeholderTextColor={colors.textMuted}
-              style={[
-                styles.textInput,
-                {
-                  backgroundColor: colors.surfaceMuted,
-                  color: colors.text,
-                  borderColor: colors.border,
-                },
-              ]}
-            />
-
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
-              Category
-            </Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.optionChipsRow}
-            >
-              {(suiteCategories || ['Functional', 'UI/UX', 'Security', 'Regression']).map(
-                (cat) => {
-                  const active = suiteCategoryInput === cat;
-                  return (
-                    <Pressable
-                      key={cat}
-                      onPress={() => setSuiteCategoryInput(cat)}
-                      style={[
-                        styles.optionChip,
-                        {
-                          backgroundColor: active
-                            ? colors.primary
-                            : colors.surfaceMuted,
-                          borderColor: active ? colors.primary : colors.border,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.optionChipText,
-                          { color: active ? '#ffffff' : colors.textSecondary },
-                        ]}
-                      >
-                        {cat}
-                      </Text>
-                    </Pressable>
-                  );
-                }
-              )}
-            </ScrollView>
-
-            {planPhases.length > 0 && (
-              <>
-                <Text
-                  style={[styles.inputLabel, { color: colors.textSecondary }]}
-                >
-                  Testing Phase
-                </Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.optionChipsRow}
-                >
-                  <Pressable
-                    onPress={() => setSuitePhaseIdInput('')}
-                    style={[
-                      styles.optionChip,
-                      {
-                        backgroundColor: !suitePhaseIdInput
-                          ? colors.primary
-                          : colors.surfaceMuted,
-                        borderColor: !suitePhaseIdInput
-                          ? colors.primary
-                          : colors.border,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.optionChipText,
-                        {
-                          color: !suitePhaseIdInput
-                            ? '#ffffff'
-                            : colors.textSecondary,
-                        },
-                      ]}
-                    >
-                      General (Unassigned)
-                    </Text>
-                  </Pressable>
-                  {planPhases.map((ph) => {
-                    const active = suitePhaseIdInput === ph.id;
+                {(suiteCategories || ['Functional', 'UI/UX', 'Security', 'Regression']).map(
+                  (cat) => {
+                    const active = suiteCategoryInput === cat;
                     return (
                       <Pressable
-                        key={ph.id}
-                        onPress={() => setSuitePhaseIdInput(ph.id)}
+                        key={cat}
+                        onPress={() => setSuiteCategoryInput(cat)}
                         style={[
                           styles.optionChip,
                           {
@@ -3495,50 +3528,131 @@ export default function TestCasesScreen({
                             { color: active ? '#ffffff' : colors.textSecondary },
                           ]}
                         >
-                          {ph.name}
+                          {cat}
                         </Text>
                       </Pressable>
                     );
-                  })}
-                </ScrollView>
-              </>
-            )}
+                  }
+                )}
+              </ScrollView>
 
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
-              Tags (comma-separated)
-            </Text>
-            <TextInput
-              value={suiteTagsInput}
-              onChangeText={setSuiteTagsInput}
-              placeholder="e.g., checkout, stripe, critical"
-              placeholderTextColor={colors.textMuted}
-              style={[
-                styles.textInput,
-                {
-                  backgroundColor: colors.surfaceMuted,
-                  color: colors.text,
-                  borderColor: colors.border,
-                },
-              ]}
-            />
+              {planPhases.length > 0 && (
+                <>
+                  <Text
+                    style={[styles.inputLabel, { color: colors.textSecondary }]}
+                  >
+                    Testing Phase
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.optionChipsRow}
+                  >
+                    <Pressable
+                      onPress={() => setSuitePhaseIdInput('')}
+                      style={[
+                        styles.optionChip,
+                        {
+                          backgroundColor: !suitePhaseIdInput
+                            ? colors.primary
+                            : colors.surfaceMuted,
+                          borderColor: !suitePhaseIdInput
+                            ? colors.primary
+                            : colors.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.optionChipText,
+                          {
+                            color: !suitePhaseIdInput
+                              ? '#ffffff'
+                              : colors.textSecondary,
+                          },
+                        ]}
+                      >
+                        General (Unassigned)
+                      </Text>
+                    </Pressable>
+                    {planPhases.map((ph) => {
+                      const active = suitePhaseIdInput === ph.id;
+                      return (
+                        <Pressable
+                          key={ph.id}
+                          onPress={() => setSuitePhaseIdInput(ph.id)}
+                          style={[
+                            styles.optionChip,
+                            {
+                              backgroundColor: active
+                                ? colors.primary
+                                : colors.surfaceMuted,
+                              borderColor: active ? colors.primary : colors.border,
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.optionChipText,
+                              { color: active ? '#ffffff' : colors.textSecondary },
+                            ]}
+                          >
+                            {ph.name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </>
+              )}
 
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
-              Description
-            </Text>
-            <TextInput
-              value={suiteDescInput}
-              onChangeText={setSuiteDescInput}
-              placeholder="Scope of this test suite..."
-              placeholderTextColor={colors.textMuted}
-              style={[
-                styles.textInput,
-                {
-                  backgroundColor: colors.surfaceMuted,
-                  color: colors.text,
-                  borderColor: colors.border,
-                },
-              ]}
-            />
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+                Tags (comma-separated)
+              </Text>
+              <TextInput
+                ref={suiteTagsRef}
+                value={suiteTagsInput}
+                onChangeText={setSuiteTagsInput}
+                placeholder="e.g., checkout, stripe, critical"
+                placeholderTextColor={colors.textMuted}
+                accessibilityLabel="Suite Tags, comma-separated"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onFocus={() => scrollModalTo(suiteFormScrollRef, 140)}
+                onSubmitEditing={() => suiteDescRef.current?.focus()}
+                style={[
+                  styles.textInput,
+                  {
+                    backgroundColor: colors.surfaceMuted,
+                    color: colors.text,
+                    borderColor: colors.border,
+                  },
+                ]}
+              />
+
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+                Description
+              </Text>
+              <TextInput
+                ref={suiteDescRef}
+                value={suiteDescInput}
+                onChangeText={setSuiteDescInput}
+                placeholder="Scope of this test suite..."
+                placeholderTextColor={colors.textMuted}
+                accessibilityLabel="Suite Description"
+                returnKeyType="done"
+                onFocus={() => scrollModalTo(suiteFormScrollRef, 220)}
+                onSubmitEditing={handleSaveSuite}
+                style={[
+                  styles.textInput,
+                  {
+                    backgroundColor: colors.surfaceMuted,
+                    color: colors.text,
+                    borderColor: colors.border,
+                  },
+                ]}
+              />
+            </ScrollView>
 
             <View style={styles.smallModalActions}>
               <Pressable
@@ -3833,7 +3947,7 @@ export default function TestCasesScreen({
         onRequestClose={() => !isSubmittingPlan && setIsPlanModalOpen(false)}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.modalOverlay}
         >
           <View
@@ -3851,11 +3965,16 @@ export default function TestCasesScreen({
                 { borderBottomColor: colors.border },
               ]}
             >
-              <Text style={[styles.modalTitle, { color: colors.text }]}>
+              <Text
+                accessibilityRole="header"
+                style={[styles.modalTitle, { color: colors.text }]}
+              >
                 Edit Project Test Plan
               </Text>
               <Pressable
                 onPress={() => !isSubmittingPlan && setIsPlanModalOpen(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Close test plan editor"
                 style={[
                   styles.closeCircle,
                   { backgroundColor: colors.surfaceMuted },
@@ -3870,8 +3989,10 @@ export default function TestCasesScreen({
             </View>
 
             <ScrollView
+              ref={planFormScrollRef}
               style={styles.modalBody}
               contentContainerStyle={styles.modalBodyContent}
+              keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
               {planFormError && (
@@ -3898,6 +4019,9 @@ export default function TestCasesScreen({
                 onChangeText={(val) => handlePlanFieldChange('name', val)}
                 placeholder="e.g., Qavora v2.4 Master Test Plan"
                 placeholderTextColor={colors.textMuted}
+                accessibilityLabel="Test Plan Name, required"
+                returnKeyType="next"
+                onFocus={() => scrollModalTo(planFormScrollRef, 0)}
                 style={[
                   styles.textInput,
                   {
@@ -3979,7 +4103,7 @@ export default function TestCasesScreen({
                   label: 'Additional Notes',
                   placeholder: 'Any supplemental test plan notes...',
                 },
-              ].map((field) => (
+              ].map((field, idx) => (
                 <View key={field.key}>
                   <Text
                     style={[styles.inputLabel, { color: colors.textSecondary }]}
@@ -3993,7 +4117,11 @@ export default function TestCasesScreen({
                     }
                     placeholder={field.placeholder}
                     placeholderTextColor={colors.textMuted}
+                    accessibilityLabel={field.label}
                     multiline
+                    onFocus={() =>
+                      scrollModalTo(planFormScrollRef, 60 + idx * 105)
+                    }
                     style={[
                       styles.textArea,
                       {
@@ -4059,7 +4187,7 @@ export default function TestCasesScreen({
         onRequestClose={() => !isSubmittingPhase && setIsPhaseModalOpen(false)}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.centeredModalOverlay}
         >
           <View
@@ -4072,6 +4200,7 @@ export default function TestCasesScreen({
             ]}
           >
             <Text
+              accessibilityRole="header"
               style={[styles.smallModalTitle, { color: colors.text }]}
             >
               {editingPhase ? 'Edit Testing Phase' : 'Add Testing Phase'}
@@ -4097,10 +4226,15 @@ export default function TestCasesScreen({
               Phase Name *
             </Text>
             <TextInput
+              ref={phaseNameRef}
               value={phaseNameInput}
               onChangeText={setPhaseNameInput}
               placeholder="e.g., Phase 1: Smoke & Sanity"
               placeholderTextColor={colors.textMuted}
+              accessibilityLabel="Phase Name, required"
+              returnKeyType="next"
+              blurOnSubmit={false}
+              onSubmitEditing={() => phaseDescRef.current?.focus()}
               style={[
                 styles.textInput,
                 {
@@ -4115,10 +4249,14 @@ export default function TestCasesScreen({
               Phase Description
             </Text>
             <TextInput
+              ref={phaseDescRef}
               value={phaseDescInput}
               onChangeText={setPhaseDescInput}
               placeholder="Goals and gate criteria for this phase..."
               placeholderTextColor={colors.textMuted}
+              accessibilityLabel="Phase Description"
+              returnKeyType="done"
+              onSubmitEditing={handleSavePhase}
               style={[
                 styles.textInput,
                 {
@@ -4891,7 +5029,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalBody: {
-    maxHeight: 500,
+    flexShrink: 1,
   },
   modalBodyContent: {
     padding: 16,
@@ -5104,6 +5242,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   smallModalCard: {
+    maxHeight: '90%',
     borderRadius: 18,
     borderWidth: 1,
     padding: 18,

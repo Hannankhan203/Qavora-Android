@@ -15,7 +15,7 @@
  * 6. Workspace Reset Danger Zone (`POST /api/data/reset`) with Backup-First safeguard
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -27,6 +27,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
 } from 'react-native';
 import { useTheme, monoFontFamily } from '../theme/theme.js';
 import { useAuth } from '../context/AuthContext.js';
@@ -129,6 +130,24 @@ export default function DataManagementSection() {
 
   // Sync busy indicator
   const [isManualSyncing, setIsManualSyncing] = useState(false);
+
+  const scrollViewRef = useRef(null);
+  const importCardYRef = useRef(0);
+  const recoveryCardYRef = useRef(0);
+
+  const scrollToDataOffset = useCallback((yOffset) => {
+    setTimeout(() => {
+      if (
+        scrollViewRef.current &&
+        typeof scrollViewRef.current.scrollTo === 'function'
+      ) {
+        scrollViewRef.current.scrollTo({
+          y: Math.max(0, yOffset),
+          animated: true,
+        });
+      }
+    }, 120);
+  }, []);
 
   const loadStorageAndSnapshots = useCallback(async () => {
     if (!activeUserId) return;
@@ -585,6 +604,7 @@ export default function DataManagementSection() {
 
   const handleCreateLocalSnapshot = async () => {
     if (!activeUserId) return;
+    Keyboard.dismiss();
     const label =
       snapshotLabelInput.trim() ||
       `Manual Snapshot (${new Date().toLocaleTimeString()})`;
@@ -743,6 +763,7 @@ export default function DataManagementSection() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 24}
     >
       <ScrollView
+        ref={scrollViewRef}
         style={styles.screenContainer}
         contentContainerStyle={styles.screenContent}
         keyboardShouldPersistTaps="handled"
@@ -1548,6 +1569,9 @@ export default function DataManagementSection() {
           accessibilityLabel="Backup JSON payload input"
           multiline
           numberOfLines={5}
+          onFocus={() =>
+            scrollToDataOffset((importCardYRef.current || 920) + 120)
+          }
           style={[
             styles.jsonTextArea,
             {
@@ -1625,6 +1649,9 @@ export default function DataManagementSection() {
       {/* 5. RECOVERY SNAPSHOTS & WORKSPACE ROLLBACK                          */}
       {/* =================================================================== */}
       <View
+        onLayout={(e) => {
+          recoveryCardYRef.current = e.nativeEvent.layout.y;
+        }}
         style={[
           styles.card,
           { backgroundColor: colors.surface, borderColor: colors.border },
@@ -1738,6 +1765,11 @@ export default function DataManagementSection() {
             placeholder="Snapshot label (e.g., Pre-Release Regression)"
             placeholderTextColor={colors.textMuted}
             accessibilityLabel="Local recovery snapshot label"
+            returnKeyType="done"
+            onFocus={() =>
+              scrollToDataOffset((recoveryCardYRef.current || 1280) + 140)
+            }
+            onSubmitEditing={handleCreateLocalSnapshot}
             style={[
               styles.snapshotInput,
               {

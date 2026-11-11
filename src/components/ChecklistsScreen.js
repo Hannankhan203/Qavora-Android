@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
 } from 'react-native';
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useAuth } from '../context/AuthContext';
@@ -214,6 +215,31 @@ export default function ChecklistsScreen({
   const loadGenerationRef = useRef(0);
   const mutationLockRef = useRef(false);
   const promoteLockRef = useRef(false);
+  const detailScrollRef = useRef(null);
+  const newItemTitleRef = useRef(null);
+  const newItemNotesRef = useRef(null);
+  const editItemTitleRef = useRef(null);
+  const editItemNotesRef = useRef(null);
+  const checklistFormScrollRef = useRef(null);
+  const formTitleRef = useRef(null);
+  const formDescRef = useRef(null);
+  const formEnvRef = useRef(null);
+  const formReleaseRef = useRef(null);
+  const formCustomItemsRef = useRef(null);
+
+  const scrollChecklistFormTo = useCallback((yOffset) => {
+    setTimeout(() => {
+      if (
+        checklistFormScrollRef.current &&
+        typeof checklistFormScrollRef.current.scrollTo === 'function'
+      ) {
+        checklistFormScrollRef.current.scrollTo({
+          y: Math.max(0, yOffset),
+          animated: true,
+        });
+      }
+    }, 120);
+  }, []);
 
   const syncChecklistsState = useCallback(
     (nextList, persistCache = false) => {
@@ -709,6 +735,7 @@ export default function ChecklistsScreen({
       return;
     }
 
+    Keyboard.dismiss();
     mutationLockRef.current = true;
     setBusyMutation(true);
     setFormError(null);
@@ -941,6 +968,7 @@ export default function ChecklistsScreen({
       return;
     }
 
+    Keyboard.dismiss();
     mutationLockRef.current = true;
     setBusyMutation(true);
 
@@ -1005,6 +1033,7 @@ export default function ChecklistsScreen({
     const cleanTitle = editItemTitle.trim();
     if (!cleanTitle) return;
 
+    Keyboard.dismiss();
     mutationLockRef.current = true;
     setBusyMutation(true);
 
@@ -1449,11 +1478,14 @@ export default function ChecklistsScreen({
     return (
       <KeyboardAvoidingView
         style={[styles.container, { backgroundColor: colors.background }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 76 : 16}
       >
         <ScrollView
+          ref={detailScrollRef}
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
         >
           {/* Back Bar & Detail Actions */}
           <View
@@ -1857,10 +1889,23 @@ export default function ChecklistsScreen({
             </Text>
             <View style={styles.addItemRow}>
               <TextInput
+                ref={newItemTitleRef}
                 value={newItemTitle}
                 onChangeText={setNewItemTitle}
                 placeholder="Enter verification step or QA check..."
                 placeholderTextColor={colors.textMuted}
+                accessibilityLabel="New verification step title"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onFocus={() => {
+                  setTimeout(() => {
+                    detailScrollRef.current?.scrollTo({
+                      y: 260,
+                      animated: true,
+                    });
+                  }, 120);
+                }}
+                onSubmitEditing={() => newItemNotesRef.current?.focus()}
                 style={[
                   styles.addItemInput,
                   {
@@ -1929,10 +1974,22 @@ export default function ChecklistsScreen({
               </View>
 
               <TextInput
+                ref={newItemNotesRef}
                 value={newItemNotes}
                 onChangeText={setNewItemNotes}
                 placeholder="Optional verification note / expected outcome..."
                 placeholderTextColor={colors.textMuted}
+                accessibilityLabel="Optional verification note or expected outcome"
+                returnKeyType="done"
+                onFocus={() => {
+                  setTimeout(() => {
+                    detailScrollRef.current?.scrollTo({
+                      y: 320,
+                      animated: true,
+                    });
+                  }, 120);
+                }}
+                onSubmitEditing={handleAddNewItem}
                 style={[
                   styles.itemNotesInput,
                   {
@@ -2201,8 +2258,9 @@ export default function ChecklistsScreen({
           animationType="fade"
           onRequestClose={() => setEditingItem(null)}
         >
-          <View
+          <KeyboardAvoidingView
             accessibilityViewIsModal={true}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
           >
             <View
@@ -2217,89 +2275,105 @@ export default function ChecklistsScreen({
               >
                 Edit Verification Step
               </Text>
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                Step Title *
-              </Text>
-              <TextInput
-                value={editItemTitle}
-                onChangeText={setEditItemTitle}
-                accessibilityLabel="Step Title, required"
-                style={[
-                  styles.input,
-                  {
-                    backgroundColor: colors.background,
-                    borderColor: colors.border,
-                    color: colors.text,
-                  },
-                ]}
-              />
-
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                Priority
-              </Text>
-              <View
-                accessibilityRole="radiogroup"
-                style={[styles.priorityPillsRow, { marginBottom: 12 }]}
+              <ScrollView
+                style={styles.modalScrollArea}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
               >
-                {CHECKLIST_PRIORITIES.map((prio) => {
-                  const active = editItemPriority === prio;
-                  return (
-                    <Pressable
-                      key={prio}
-                      onPress={() => setEditItemPriority(prio)}
-                      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                      accessibilityRole="radio"
-                      accessibilityState={{ selected: active, checked: active }}
-                      accessibilityLabel={`Step priority: ${prio}`}
-                      style={[
-                        styles.miniPill,
-                        {
-                          backgroundColor: active
-                            ? colors.primary
-                            : colors.background,
-                          borderColor: active ? colors.primary : colors.border,
-                        },
-                      ]}
-                    >
-                      <Text
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                  Step Title *
+                </Text>
+                <TextInput
+                  ref={editItemTitleRef}
+                  value={editItemTitle}
+                  onChangeText={setEditItemTitle}
+                  accessibilityLabel="Step Title, required"
+                  returnKeyType="next"
+                  blurOnSubmit={false}
+                  onSubmitEditing={() => editItemNotesRef.current?.focus()}
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: colors.background,
+                      borderColor: colors.border,
+                      color: colors.text,
+                    },
+                  ]}
+                />
+
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                  Priority
+                </Text>
+                <View
+                  accessibilityRole="radiogroup"
+                  style={[styles.priorityPillsRow, { marginBottom: 12 }]}
+                >
+                  {CHECKLIST_PRIORITIES.map((prio) => {
+                    const active = editItemPriority === prio;
+                    return (
+                      <Pressable
+                        key={prio}
+                        onPress={() => setEditItemPriority(prio)}
+                        hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: active, checked: active }}
+                        accessibilityLabel={`Step priority: ${prio}`}
                         style={[
-                          styles.miniPillText,
+                          styles.miniPill,
                           {
-                            color: active
-                              ? colors.textOnPrimary
-                              : colors.textSecondary,
+                            backgroundColor: active
+                              ? colors.primary
+                              : colors.background,
+                            borderColor: active ? colors.primary : colors.border,
                           },
                         ]}
                       >
-                        {prio}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+                        <Text
+                          style={[
+                            styles.miniPillText,
+                            {
+                              color: active
+                                ? colors.textOnPrimary
+                                : colors.textSecondary,
+                            },
+                          ]}
+                        >
+                          {prio}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
 
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                Notes / Expected Outcome
-              </Text>
-              <TextInput
-                value={editItemNotes}
-                onChangeText={setEditItemNotes}
-                multiline
-                accessibilityLabel="Notes or Expected Outcome"
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                  Notes / Expected Outcome
+                </Text>
+                <TextInput
+                  ref={editItemNotesRef}
+                  value={editItemNotes}
+                  onChangeText={setEditItemNotes}
+                  multiline
+                  accessibilityLabel="Notes or Expected Outcome"
+                  style={[
+                    styles.input,
+                    {
+                      minHeight: 68,
+                      backgroundColor: colors.background,
+                      borderColor: colors.border,
+                      color: colors.text,
+                      textAlignVertical: 'top',
+                      paddingTop: 10,
+                    },
+                  ]}
+                />
+              </ScrollView>
+
+              <View
                 style={[
-                  styles.input,
-                  {
-                    minHeight: 68,
-                    backgroundColor: colors.background,
-                    borderColor: colors.border,
-                    color: colors.text,
-                    textAlignVertical: 'top',
-                    paddingTop: 10,
-                  },
+                  styles.modalActionsRow,
+                  { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
                 ]}
-              />
-
-              <View style={styles.modalActionsRow}>
+              >
                 <Pressable
                   onPress={() => setEditingItem(null)}
                   accessibilityRole="button"
@@ -2343,7 +2417,7 @@ export default function ChecklistsScreen({
                 </Pressable>
               </View>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
 
         {/* Shared Create/Edit & Delete Modals */}
@@ -2365,23 +2439,32 @@ export default function ChecklistsScreen({
           animationType="fade"
           onRequestClose={() => setFormModalVisible(false)}
         >
-          <View style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}>
+          <KeyboardAvoidingView
+            accessibilityViewIsModal={true}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+          >
             <View
               style={[
                 styles.modalCard,
                 { backgroundColor: colors.surface, borderColor: colors.border },
               ]}
             >
+              <Text
+                accessibilityRole="header"
+                style={[styles.modalTitle, { color: colors.text }]}
+              >
+                {formMode === 'create'
+                  ? 'Create QA Checklist'
+                  : 'Edit QA Checklist'}
+              </Text>
+
               <ScrollView
+                ref={checklistFormScrollRef}
+                style={styles.modalScrollArea}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
               >
-                <Text style={[styles.modalTitle, { color: colors.text }]}>
-                  {formMode === 'create'
-                    ? 'Create QA Checklist'
-                    : 'Edit QA Checklist'}
-                </Text>
-
                 {formError ? (
                   <View
                     style={[
@@ -2481,10 +2564,16 @@ export default function ChecklistsScreen({
                   Checklist Title *
                 </Text>
                 <TextInput
+                  ref={formTitleRef}
                   value={formTitle}
                   onChangeText={setFormTitle}
                   placeholder="e.g., Android v2.4 Release Readiness Checklist"
                   placeholderTextColor={colors.textMuted}
+                  accessibilityLabel="Checklist Title, required"
+                  returnKeyType="next"
+                  blurOnSubmit={false}
+                  onFocus={() => scrollChecklistFormTo(0)}
+                  onSubmitEditing={() => formDescRef.current?.focus()}
                   style={[
                     styles.input,
                     {
@@ -2499,11 +2588,14 @@ export default function ChecklistsScreen({
                   Description
                 </Text>
                 <TextInput
+                  ref={formDescRef}
                   value={formDescription}
                   onChangeText={setFormDescription}
                   placeholder="Describe the verification scope and sign-off criteria..."
                   placeholderTextColor={colors.textMuted}
+                  accessibilityLabel="Checklist Description"
                   multiline
+                  onFocus={() => scrollChecklistFormTo(80)}
                   style={[
                     styles.input,
                     {
@@ -2676,10 +2768,16 @@ export default function ChecklistsScreen({
                       Environment
                     </Text>
                     <TextInput
+                      ref={formEnvRef}
                       value={formEnvironment}
                       onChangeText={setFormEnvironment}
                       placeholder="Staging"
                       placeholderTextColor={colors.textMuted}
+                      accessibilityLabel="Checklist Environment"
+                      returnKeyType="next"
+                      blurOnSubmit={false}
+                      onFocus={() => scrollChecklistFormTo(260)}
+                      onSubmitEditing={() => formReleaseRef.current?.focus()}
                       style={[
                         styles.input,
                         {
@@ -2698,10 +2796,22 @@ export default function ChecklistsScreen({
                       Target Release
                     </Text>
                     <TextInput
+                      ref={formReleaseRef}
                       value={formTargetRelease}
                       onChangeText={setFormTargetRelease}
                       placeholder="v1.0.0"
                       placeholderTextColor={colors.textMuted}
+                      accessibilityLabel="Checklist Target Release"
+                      returnKeyType={formMode === 'create' ? 'next' : 'done'}
+                      blurOnSubmit={formMode !== 'create'}
+                      onFocus={() => scrollChecklistFormTo(260)}
+                      onSubmitEditing={() => {
+                        if (formMode === 'create') {
+                          formCustomItemsRef.current?.focus();
+                        } else {
+                          handleSaveChecklistForm();
+                        }
+                      }}
                       style={[
                         styles.input,
                         {
@@ -2723,13 +2833,16 @@ export default function ChecklistsScreen({
                       Initial Checklist Items (One per line, optional)
                     </Text>
                     <TextInput
+                      ref={formCustomItemsRef}
                       value={formCustomItemsText}
                       onChangeText={setFormCustomItemsText}
                       placeholder={
                         'Verify login session cookie persistence\nValidate CSRF header on mutations\nConfirm dark mode contrast'
                       }
                       placeholderTextColor={colors.textMuted}
+                      accessibilityLabel="Initial Checklist Items, one per line"
                       multiline
+                      onFocus={() => scrollChecklistFormTo(360)}
                       style={[
                         styles.input,
                         {
@@ -2744,52 +2857,63 @@ export default function ChecklistsScreen({
                     />
                   </>
                 ) : null}
-
-                <View style={styles.modalActionsRow}>
-                  <Pressable
-                    onPress={() => setFormModalVisible(false)}
-                    disabled={busyMutation}
-                    style={[
-                      styles.modalCancelBtn,
-                      {
-                        backgroundColor: colors.background,
-                        borderColor: colors.borderStrong,
-                      },
-                    ]}
-                  >
-                    <Text style={[styles.modalCancelText, { color: colors.text }]}>
-                      Cancel
-                    </Text>
-                  </Pressable>
-
-                  <Pressable
-                    onPress={handleSaveChecklistForm}
-                    disabled={busyMutation}
-                    style={[
-                      styles.modalConfirmBtn,
-                      {
-                        backgroundColor: colors.primary,
-                        opacity: busyMutation ? 0.6 : 1,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.modalConfirmText,
-                        { color: colors.textOnPrimary },
-                      ]}
-                    >
-                      {busyMutation
-                        ? 'Saving...'
-                        : formMode === 'create'
-                        ? 'Create Checklist'
-                        : 'Save Changes'}
-                    </Text>
-                  </Pressable>
-                </View>
               </ScrollView>
+
+              <View
+                style={[
+                  styles.modalActionsRow,
+                  { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
+                ]}
+              >
+                <Pressable
+                  onPress={() => setFormModalVisible(false)}
+                  disabled={busyMutation}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel checklist form"
+                  style={[
+                    styles.modalCancelBtn,
+                    {
+                      backgroundColor: colors.background,
+                      borderColor: colors.borderStrong,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.modalCancelText, { color: colors.text }]}>
+                    Cancel
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={handleSaveChecklistForm}
+                  disabled={busyMutation}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    formMode === 'create' ? 'Create Checklist' : 'Save Changes'
+                  }
+                  style={[
+                    styles.modalConfirmBtn,
+                    {
+                      backgroundColor: colors.primary,
+                      opacity: busyMutation ? 0.6 : 1,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.modalConfirmText,
+                      { color: colors.textOnPrimary },
+                    ]}
+                  >
+                    {busyMutation
+                      ? 'Saving...'
+                      : formMode === 'create'
+                      ? 'Create Checklist'
+                      : 'Save Changes'}
+                  </Text>
+                </Pressable>
+              </View>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
 
         {/* Destructive Delete Checklist Confirmation Modal */}
@@ -4260,6 +4384,8 @@ export default function ChecklistsScreen({
               placeholder="Search checklists by title, category, project, or step..."
               placeholderTextColor={colors.textMuted}
               accessibilityLabel="Search checklists by title, category, project, or step"
+              returnKeyType="search"
+              onSubmitEditing={() => Keyboard.dismiss()}
               style={[styles.searchInput, { color: colors.text }]}
             />
             {searchQuery ? (
@@ -5292,6 +5418,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     padding: 18,
+  },
+  modalScrollArea: {
+    flexShrink: 1,
   },
   modalTitle: {
     fontSize: 18,

@@ -9,6 +9,8 @@ import {
   Animated,
   useWindowDimensions,
   BackHandler,
+  Keyboard,
+  Platform,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -153,8 +155,30 @@ function QavoraQAShell() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isDrawerRendered, setIsDrawerRendered] = useState(false);
   const drawerAnim = useRef(new Animated.Value(0)).current;
+  const isKeyboardOpenRef = useRef(false);
+
+  useEffect(() => {
+    const showEvent =
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent =
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, () => {
+      isKeyboardOpenRef.current = true;
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      isKeyboardOpenRef.current = false;
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const openDrawer = useCallback(() => {
+    Keyboard.dismiss();
+    isKeyboardOpenRef.current = false;
     setIsDrawerRendered(true);
     setIsDrawerOpen(true);
     Animated.timing(drawerAnim, {
@@ -271,6 +295,16 @@ function QavoraQAShell() {
 
   // Consistent Android Hardware Back Navigation Flow across all top-level and nested destinations
   const handleNavigateBack = useCallback(() => {
+    // 00. Active Software Keyboard -> dismiss keyboard first without navigating away
+    if (
+      isKeyboardOpenRef.current ||
+      (typeof Keyboard.isVisible === 'function' && Keyboard.isVisible())
+    ) {
+      Keyboard.dismiss();
+      isKeyboardOpenRef.current = false;
+      return true;
+    }
+
     // 0. Open Global Navigation Drawer -> close drawer first
     if (isDrawerOpen) {
       closeDrawer();
@@ -602,6 +636,8 @@ function QavoraQAShell() {
 
   const handleSelectDrawerDestination = useCallback(
     (item) => {
+      Keyboard.dismiss();
+      isKeyboardOpenRef.current = false;
       if (item && typeof item.onSelect === 'function') {
         item.onSelect();
       }

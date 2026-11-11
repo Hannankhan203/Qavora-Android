@@ -12,7 +12,7 @@
  * - Loading and success/error feedback
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -22,6 +22,7 @@ import {
   ScrollView,
   Modal,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   ActivityIndicator,
 } from 'react-native';
@@ -67,6 +68,25 @@ export default function ProjectFormModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const submittingLockRef = useRef(false);
+  const scrollViewRef = useRef(null);
+  const nameInputRef = useRef(null);
+  const typeInputRef = useRef(null);
+  const versionInputRef = useRef(null);
+  const environmentInputRef = useRef(null);
+  const baseUrlInputRef = useRef(null);
+  const descriptionInputRef = useRef(null);
+  const tagsInputRef = useRef(null);
+
+  const scrollToOffset = useCallback((targetY) => {
+    setTimeout(() => {
+      if (scrollViewRef.current) {
+        scrollViewRef.current.scrollTo({
+          y: Math.max(0, targetY),
+          animated: true,
+        });
+      }
+    }, 80);
+  }, []);
 
   useEffect(() => {
     if (!visible) {
@@ -109,6 +129,7 @@ export default function ProjectFormModal({
 
   const handleClose = () => {
     if (busy) return;
+    Keyboard.dismiss();
     setLocalError(null);
     clearProjectError();
     if (typeof onClose === 'function') {
@@ -141,6 +162,7 @@ export default function ProjectFormModal({
       return;
     }
 
+    Keyboard.dismiss();
     setLocalError(null);
     clearProjectError();
 
@@ -223,7 +245,8 @@ export default function ProjectFormModal({
     >
       <KeyboardAvoidingView
         style={[styles.overlay, { backgroundColor: colors.overlay }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 16}
       >
         <View
           style={[
@@ -284,9 +307,11 @@ export default function ProjectFormModal({
           </View>
 
           <ScrollView
+            ref={scrollViewRef}
             style={styles.formScroll}
             contentContainerStyle={styles.formContent}
             keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={true}
           >
             {/* Error & Conflict Feedback */}
             {localError ? (
@@ -336,15 +361,20 @@ export default function ProjectFormModal({
               Project Name <Text style={{ color: colors.danger }}>*</Text>
             </Text>
             <TextInput
+              ref={nameInputRef}
               value={name}
               onChangeText={(val) => {
                 setName(val);
                 if (localError) setLocalError(null);
               }}
+              onFocus={() => scrollToOffset(0)}
               editable={!busy}
               placeholder="e.g. Qavora Android Checkout Regression"
               placeholderTextColor={colors.textMuted}
               accessibilityLabel="Project Name, required"
+              returnKeyType="next"
+              blurOnSubmit={false}
+              onSubmitEditing={() => typeInputRef.current?.focus()}
               style={[
                 styles.input,
                 {
@@ -439,12 +469,17 @@ export default function ProjectFormModal({
               })}
             </View>
             <TextInput
+              ref={typeInputRef}
               value={type}
               onChangeText={setType}
+              onFocus={() => scrollToOffset(130)}
               editable={!busy}
               placeholder="Custom project type (e.g. Mobile Application)"
               placeholderTextColor={colors.textMuted}
               accessibilityLabel="Custom Application Type"
+              returnKeyType="next"
+              blurOnSubmit={false}
+              onSubmitEditing={() => versionInputRef.current?.focus()}
               style={[
                 styles.input,
                 {
@@ -462,13 +497,19 @@ export default function ProjectFormModal({
                   Target Version
                 </Text>
                 <TextInput
+                  ref={versionInputRef}
                   value={version}
                   onChangeText={setVersion}
+                  onFocus={() => scrollToOffset(210)}
                   editable={!busy}
                   placeholder="v1.0.0"
                   placeholderTextColor={colors.textMuted}
                   accessibilityLabel="Target Version"
                   autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="next"
+                  blurOnSubmit={false}
+                  onSubmitEditing={() => environmentInputRef.current?.focus()}
                   style={[
                     styles.input,
                     {
@@ -486,12 +527,17 @@ export default function ProjectFormModal({
                   Environment
                 </Text>
                 <TextInput
+                  ref={environmentInputRef}
                   value={environment}
                   onChangeText={setEnvironment}
+                  onFocus={() => scrollToOffset(210)}
                   editable={!busy}
                   placeholder="Staging / Production"
                   placeholderTextColor={colors.textMuted}
                   accessibilityLabel="Environment"
+                  returnKeyType="next"
+                  blurOnSubmit={false}
+                  onSubmitEditing={() => baseUrlInputRef.current?.focus()}
                   style={[
                     styles.input,
                     {
@@ -509,11 +555,17 @@ export default function ProjectFormModal({
               Target Base URL (Optional)
             </Text>
             <TextInput
+              ref={baseUrlInputRef}
               value={baseUrl}
               onChangeText={setBaseUrl}
+              onFocus={() => scrollToOffset(290)}
               editable={!busy}
               autoCapitalize="none"
+              autoCorrect={false}
               keyboardType="url"
+              returnKeyType="next"
+              blurOnSubmit={false}
+              onSubmitEditing={() => descriptionInputRef.current?.focus()}
               placeholder="https://staging.example.com"
               placeholderTextColor={colors.textMuted}
               accessibilityLabel="Target Base URL"
@@ -533,8 +585,10 @@ export default function ProjectFormModal({
               Project Description
             </Text>
             <TextInput
+              ref={descriptionInputRef}
               value={description}
               onChangeText={setDescription}
+              onFocus={() => scrollToOffset(360)}
               editable={!busy}
               multiline
               numberOfLines={3}
@@ -556,10 +610,15 @@ export default function ProjectFormModal({
               Tags (comma-separated)
             </Text>
             <TextInput
+              ref={tagsInputRef}
               value={tagsInput}
               onChangeText={setTagsInput}
+              onFocus={() => scrollToOffset(450)}
               editable={!busy}
               autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="done"
+              onSubmitEditing={handleSubmit}
               placeholder="android, regression, checkout"
               placeholderTextColor={colors.textMuted}
               accessibilityLabel="Project Tags comma-separated"
@@ -697,11 +756,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   formScroll: {
-    maxHeight: 500,
+    flexShrink: 1,
   },
   formContent: {
     padding: 16,
-    paddingBottom: 24,
+    paddingBottom: 28,
   },
   errorBanner: {
     borderWidth: 1,

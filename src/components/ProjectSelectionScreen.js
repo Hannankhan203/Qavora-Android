@@ -21,6 +21,7 @@ import {
   ScrollView,
   RefreshControl,
   ActivityIndicator,
+  Keyboard,
 } from 'react-native';
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useAuth } from '../context/AuthContext';
@@ -504,6 +505,8 @@ export default function ProjectSelectionScreen({
                 placeholder="Search projects by name, version, environment, or tag..."
                 placeholderTextColor={colors.textMuted}
                 accessibilityLabel="Search projects by name, version, environment, or tag"
+                returnKeyType="search"
+                onSubmitEditing={() => Keyboard.dismiss()}
                 style={[styles.searchInput, { color: colors.text }]}
               />
               {searchQuery ? (
