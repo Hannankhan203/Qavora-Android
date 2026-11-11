@@ -34,7 +34,12 @@ function formatShortTimestamp(value) {
   return raw;
 }
 
-export default function TestRunsScreen() {
+export default function TestRunsScreen({
+  viewMode: controlledViewMode,
+  onChangeViewMode,
+  executingCaseId: controlledExecutingCaseId,
+  onChangeExecutingCaseId,
+}) {
   const { colors: theme } = useTheme();
   const {
     activeProject: currentProject,
@@ -49,6 +54,10 @@ export default function TestRunsScreen() {
     setSelectedDefectId,
     setActiveTab,
     openProjectSelection,
+    testRunsViewMode: contextViewMode,
+    setTestRunsViewMode: setContextViewMode,
+    executingTestCaseId: contextExecutingCaseId,
+    setExecutingTestCaseId: setContextExecutingCaseId,
     recordTestExecution,
     createTestRun,
     updateTestRun,
@@ -63,8 +72,27 @@ export default function TestRunsScreen() {
     reloadProjectDataFromBackend: reloadCurrentProject,
   } = useWorkspace();
 
-  // Top-level mode: 'runs' | 'history'
-  const [activeViewMode, setActiveViewMode] = useState('runs');
+  // Top-level mode: 'runs' | 'history' (Synchronized with centralized navigation state)
+  const [localViewMode, setLocalViewMode] = useState(
+    controlledViewMode || contextViewMode || 'runs'
+  );
+  const activeViewMode =
+    controlledViewMode !== undefined
+      ? controlledViewMode
+      : contextViewMode !== undefined
+      ? contextViewMode
+      : localViewMode;
+
+  const setActiveViewMode = (nextMode) => {
+    const cleanMode = nextMode === 'history' ? 'history' : 'runs';
+    setLocalViewMode(cleanMode);
+    if (typeof onChangeViewMode === 'function') {
+      onChangeViewMode(cleanMode);
+    }
+    if (typeof setContextViewMode === 'function') {
+      setContextViewMode(cleanMode);
+    }
+  };
 
   // Filters for active run cases
   const [resultFilter, setResultFilter] = useState('All');
@@ -77,8 +105,28 @@ export default function TestRunsScreen() {
   // Feedback banner
   const [feedbackBanner, setFeedbackBanner] = useState(null);
 
-  // Step-by-step Execution Runner modal state
-  const [executingCaseId, setExecutingCaseId] = useState(null);
+  // Step-by-step Execution Runner modal state (Synchronized with centralized navigation state)
+  const [localExecutingCaseId, setLocalExecutingCaseId] = useState(
+    controlledExecutingCaseId !== undefined
+      ? controlledExecutingCaseId
+      : contextExecutingCaseId || null
+  );
+  const executingCaseId =
+    controlledExecutingCaseId !== undefined
+      ? controlledExecutingCaseId
+      : contextExecutingCaseId !== undefined
+      ? contextExecutingCaseId
+      : localExecutingCaseId;
+
+  const setExecutingCaseId = (nextCaseId) => {
+    setLocalExecutingCaseId(nextCaseId);
+    if (typeof onChangeExecutingCaseId === 'function') {
+      onChangeExecutingCaseId(nextCaseId);
+    }
+    if (typeof setContextExecutingCaseId === 'function') {
+      setContextExecutingCaseId(nextCaseId);
+    }
+  };
   const [execNotes, setExecNotes] = useState('');
   const [execActualResult, setExecActualResult] = useState('');
   const [execTester, setExecTester] = useState('');

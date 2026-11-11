@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -18,7 +18,10 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
 import DataManagementSection from './DataManagementSection';
 
-export default function ProfileSettingsScreen() {
+export default function ProfileSettingsScreen({
+  activeSection: controlledSection,
+  onChangeSection,
+}) {
   const { colors, themePreference, setThemePreference } = useTheme();
   const {
     user,
@@ -36,6 +39,8 @@ export default function ProfileSettingsScreen() {
     defects,
     metrics,
     lastPersistedAt,
+    profileSubView: contextProfileSubView,
+    setProfileSubView: setContextProfileSubView,
     openProjectSelection,
     openProjectDetails,
     openReportsView,
@@ -49,6 +54,35 @@ export default function ProfileSettingsScreen() {
     isClearingWorkspaceData,
     showToast,
   } = useWorkspace();
+
+  const scrollViewRef = useRef(null);
+  const sectionOffsetsRef = useRef({ data: 0, settings: 0 });
+  const resolvedSection =
+    controlledSection !== undefined
+      ? controlledSection
+      : contextProfileSubView || 'all';
+
+  useEffect(() => {
+    if (!scrollViewRef.current) return undefined;
+    const timer = setTimeout(() => {
+      if (!scrollViewRef.current) return;
+      if (resolvedSection === 'data' && sectionOffsetsRef.current.data > 0) {
+        scrollViewRef.current.scrollTo({
+          y: Math.max(0, sectionOffsetsRef.current.data - 8),
+          animated: true,
+        });
+      } else if (
+        resolvedSection === 'settings' &&
+        sectionOffsetsRef.current.settings > 0
+      ) {
+        scrollViewRef.current.scrollTo({
+          y: 0,
+          animated: true,
+        });
+      }
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [resolvedSection]);
 
   const [testerName, setTesterName] = useState(profile.testerName || '');
   const [role, setRole] = useState(profile.role || '');
@@ -209,6 +243,7 @@ export default function ProfileSettingsScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView
+        ref={scrollViewRef}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
@@ -440,10 +475,19 @@ export default function ProfileSettingsScreen() {
         </View>
 
         {/* Phase 2F: Data Management, Backup, Restore & Offline Synchronization */}
-        <DataManagementSection />
+        <View
+          onLayout={(e) => {
+            sectionOffsetsRef.current.data = e.nativeEvent.layout.y;
+          }}
+        >
+          <DataManagementSection />
+        </View>
 
         {/* Adaptive Theme Toggle */}
         <View
+          onLayout={(e) => {
+            sectionOffsetsRef.current.settings = e.nativeEvent.layout.y;
+          }}
           style={[
             styles.card,
             { backgroundColor: colors.surface, borderColor: colors.border },

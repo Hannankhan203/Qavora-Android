@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo, useCallback } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import {
   StyleSheet,
@@ -12,7 +12,11 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme, monoFontFamily } from './src/theme/theme';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { ProjectProvider, useProjects } from './src/context/ProjectContext';
-import { WorkspaceProvider, useWorkspace } from './src/context/WorkspaceContext';
+import {
+  WorkspaceProvider,
+  useWorkspace,
+  NAVIGATION_DESTINATIONS,
+} from './src/context/WorkspaceContext';
 import AuthScreen from './src/components/AuthScreen';
 import ProjectSelectionScreen from './src/components/ProjectSelectionScreen';
 import ProjectDetailsScreen from './src/components/ProjectDetailsScreen';
@@ -24,6 +28,8 @@ import DefectsScreen from './src/components/DefectsScreen';
 import ProfileSettingsScreen from './src/components/ProfileSettingsScreen';
 import VectorIcon from './src/components/VectorIcon';
 import { startConnectivityMonitoring } from './src/services/offlineSyncService';
+
+export { NAVIGATION_DESTINATIONS };
 
 const BOTTOM_TABS = [
   { id: 'dashboard', label: 'Dashboard' },
@@ -41,6 +47,23 @@ const SCREEN_TITLES = {
   profile: 'Profile & Settings',
 };
 
+const DESTINATION_LABELS = {
+  [NAVIGATION_DESTINATIONS.CREATE_CHECKLIST]: 'Create QA Checklist',
+  [NAVIGATION_DESTINATIONS.MY_CHECKLISTS]: 'My QA Checklist',
+  [NAVIGATION_DESTINATIONS.QA_TEST_RUNNER]: 'QA Test Runner',
+  [NAVIGATION_DESTINATIONS.DASHBOARD]: 'QA Overview',
+  [NAVIGATION_DESTINATIONS.MY_PROJECTS]: 'My Projects',
+  [NAVIGATION_DESTINATIONS.PROJECT_DETAILS]: 'Project Details',
+  [NAVIGATION_DESTINATIONS.TEST_PLANS]: 'Test Plans',
+  [NAVIGATION_DESTINATIONS.TEST_CASES]: 'Test Cases',
+  [NAVIGATION_DESTINATIONS.TEST_SUITES]: 'Test Suites',
+  [NAVIGATION_DESTINATIONS.TEST_EXECUTION]: 'Test Execution',
+  [NAVIGATION_DESTINATIONS.DEFECTS]: 'Defects',
+  [NAVIGATION_DESTINATIONS.REPORTS]: 'Reports & Analytics',
+  [NAVIGATION_DESTINATIONS.DATA_MANAGEMENT]: 'Data Management',
+  [NAVIGATION_DESTINATIONS.SETTINGS]: 'Profile & Settings',
+};
+
 function QavoraQAShell() {
   const { colors, isDark, toggleTheme } = useTheme();
   const { selectedProject, syncStatus, isOffline } = useProjects();
@@ -51,11 +74,37 @@ function QavoraQAShell() {
     setDashboardSubTab,
     projectViewMode,
     setProjectViewMode,
+    testCasesSubTab,
+    setTestCasesSubTab,
+    testRunsViewMode,
+    setTestRunsViewMode,
+    executingTestCaseId,
+    setExecutingTestCaseId,
+    activeChecklistId,
+    setActiveChecklistId,
+    checklistCreateModalOpen,
+    setChecklistCreateModalOpen,
+    checklistCreateTemplateId,
+    setChecklistCreateTemplateId,
+    profileSubView,
+    setProfileSubView,
     openChecklistsView,
+    openCreateChecklistView,
+    openChecklistRunnerView,
     openDataManagementView,
+    openSettingsView,
+    openReportsView,
+    openTestPlansView,
+    openTestCasesView,
+    openTestSuitesView,
+    openTestExecutionView,
+    openDefectsView,
+    navigateToDestination,
     metrics,
     selectedTestCaseId,
     setSelectedTestCaseId,
+    selectedTestRunId,
+    setSelectedTestRunId,
     selectedDefectId,
     setSelectedDefectId,
     toast,
@@ -83,86 +132,249 @@ function QavoraQAShell() {
       activeTab === 'dashboard' &&
       dashboardSubTab === 'checklists');
 
-  // Android Hardware Back Navigation Handler
-  useEffect(() => {
-    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (effectiveViewMode === 'checklists') {
-        if (selectedProject) {
-          setProjectViewMode('workspace');
-          setDashboardSubTab('overview');
-        } else {
-          setProjectViewMode('selection');
-          setDashboardSubTab('overview');
-        }
-        return true;
+  // Centralized derivation of the active canonical destination across all 11 destinations
+  const activeDestination = useMemo(() => {
+    if (isChecklistsActive) {
+      if (checklistCreateModalOpen) {
+        return NAVIGATION_DESTINATIONS.CREATE_CHECKLIST;
       }
-      if (effectiveViewMode === 'details' && selectedProject) {
-        setProjectViewMode('workspace');
-        return true;
+      if (activeChecklistId) {
+        return NAVIGATION_DESTINATIONS.QA_TEST_RUNNER;
       }
-      if (effectiveViewMode === 'selection' && selectedProject) {
-        setProjectViewMode('workspace');
-        return true;
+      return NAVIGATION_DESTINATIONS.MY_CHECKLISTS;
+    }
+
+    if (effectiveViewMode === 'selection') {
+      return NAVIGATION_DESTINATIONS.MY_PROJECTS;
+    }
+
+    if (effectiveViewMode === 'details') {
+      return NAVIGATION_DESTINATIONS.PROJECT_DETAILS;
+    }
+
+    if (activeTab === 'dashboard') {
+      if (dashboardSubTab === 'reports') {
+        return NAVIGATION_DESTINATIONS.REPORTS;
       }
-      if (selectedTestCaseId) {
-        setSelectedTestCaseId(null);
-        return true;
+      return NAVIGATION_DESTINATIONS.DASHBOARD;
+    }
+
+    if (activeTab === 'testcases') {
+      if (testCasesSubTab === 'plan') {
+        return NAVIGATION_DESTINATIONS.TEST_PLANS;
       }
-      if (selectedDefectId) {
-        setSelectedDefectId(null);
-        return true;
+      if (testCasesSubTab === 'suites') {
+        return NAVIGATION_DESTINATIONS.TEST_SUITES;
       }
-      if (!selectedProject && effectiveViewMode === 'workspace') {
-        setProjectViewMode('selection');
-        return true;
+      return NAVIGATION_DESTINATIONS.TEST_CASES;
+    }
+
+    if (activeTab === 'testruns') {
+      return NAVIGATION_DESTINATIONS.TEST_EXECUTION;
+    }
+
+    if (activeTab === 'defects') {
+      return NAVIGATION_DESTINATIONS.DEFECTS;
+    }
+
+    if (activeTab === 'profile') {
+      if (profileSubView === 'data') {
+        return NAVIGATION_DESTINATIONS.DATA_MANAGEMENT;
       }
-      if (
-        activeTab === 'dashboard' &&
-        (dashboardSubTab === 'reports' || dashboardSubTab === 'checklists')
-      ) {
-        setDashboardSubTab('overview');
-        return true;
-      }
-      if (activeTab !== 'dashboard') {
-        if (selectedProject) {
-          setActiveTab('dashboard');
-        } else {
-          setProjectViewMode('selection');
-        }
-        return true;
-      }
-      return false;
-    });
-    return () => subscription.remove();
+      return NAVIGATION_DESTINATIONS.SETTINGS;
+    }
+
+    return NAVIGATION_DESTINATIONS.DASHBOARD;
   }, [
+    isChecklistsActive,
+    checklistCreateModalOpen,
+    activeChecklistId,
+    effectiveViewMode,
+    activeTab,
+    dashboardSubTab,
+    testCasesSubTab,
+    profileSubView,
+  ]);
+
+  // Consistent Android Hardware Back Navigation Flow across all top-level and nested destinations
+  const handleNavigateBack = useCallback(() => {
+    // 1. Nested Create Checklist Modal inside Checklists -> return to My QA Checklist / Runner
+    if (isChecklistsActive && checklistCreateModalOpen) {
+      setChecklistCreateModalOpen(false);
+      return true;
+    }
+
+    // 2. Nested QA Test Runner (activeChecklistId) -> return to My QA Checklist library
+    if (isChecklistsActive && activeChecklistId) {
+      setActiveChecklistId(null);
+      return true;
+    }
+
+    // 3. Top-level Checklists view -> return to Workspace Overview (if project selected) or My Projects
+    if (effectiveViewMode === 'checklists') {
+      if (selectedProject) {
+        setProjectViewMode('workspace');
+        setDashboardSubTab('overview');
+      } else {
+        setProjectViewMode('selection');
+        setDashboardSubTab('overview');
+      }
+      return true;
+    }
+
+    // 4. Project Details view -> return to Workspace (if project selected) or My Projects
+    if (effectiveViewMode === 'details') {
+      if (selectedProject) {
+        setProjectViewMode('workspace');
+      } else {
+        setProjectViewMode('selection');
+      }
+      return true;
+    }
+
+    // 5. My Projects selection view (when a project is already active) -> return to Workspace
+    if (effectiveViewMode === 'selection' && selectedProject) {
+      setProjectViewMode('workspace');
+      return true;
+    }
+
+    // 6. Step-by-Step Test Execution Runner Modal inside Test Runs -> close modal back to Test Runs
+    if (
+      effectiveViewMode === 'workspace' &&
+      activeTab === 'testruns' &&
+      executingTestCaseId
+    ) {
+      setExecutingTestCaseId(null);
+      return true;
+    }
+
+    // 7. Open Test Case Detail Modal -> close modal
+    if (selectedTestCaseId) {
+      setSelectedTestCaseId(null);
+      return true;
+    }
+
+    // 8. Open Defect Detail Modal -> close modal
+    if (selectedDefectId) {
+      setSelectedDefectId(null);
+      return true;
+    }
+
+    // 9. Workspace view without a selected project (e.g. Profile/Data Management) -> return to My Projects
+    if (!selectedProject && effectiveViewMode === 'workspace') {
+      setProfileSubView('all');
+      setProjectViewMode('selection');
+      return true;
+    }
+
+    // 10. Nested Dashboard sub-tabs (Reports or embedded Checklists) -> return to QA Dashboard Overview
+    if (
+      activeTab === 'dashboard' &&
+      (dashboardSubTab === 'reports' || dashboardSubTab === 'checklists')
+    ) {
+      setDashboardSubTab('overview');
+      return true;
+    }
+
+    // 11. Nested Test Cases sub-tabs (Test Plans or Test Suites) -> return to Test Cases list
+    if (
+      activeTab === 'testcases' &&
+      (testCasesSubTab === 'plan' || testCasesSubTab === 'suites')
+    ) {
+      setTestCasesSubTab('cases');
+      return true;
+    }
+
+    // 12. Nested Test Execution History view -> return to Test Runs view
+    if (activeTab === 'testruns' && testRunsViewMode === 'history') {
+      setTestRunsViewMode('runs');
+      return true;
+    }
+
+    // 13. Non-Dashboard primary workspace tabs -> return to Dashboard (or My Projects if no project)
+    if (activeTab !== 'dashboard') {
+      setProfileSubView('all');
+      if (selectedProject) {
+        setActiveTab('dashboard');
+      } else {
+        setProjectViewMode('selection');
+      }
+      return true;
+    }
+
+    return false;
+  }, [
+    isChecklistsActive,
+    checklistCreateModalOpen,
+    activeChecklistId,
     effectiveViewMode,
     selectedProject,
     activeTab,
-    dashboardSubTab,
+    executingTestCaseId,
     selectedTestCaseId,
     selectedDefectId,
+    dashboardSubTab,
+    testCasesSubTab,
+    testRunsViewMode,
+    setChecklistCreateModalOpen,
+    setActiveChecklistId,
     setProjectViewMode,
-    setActiveTab,
     setDashboardSubTab,
+    setExecutingTestCaseId,
     setSelectedTestCaseId,
     setSelectedDefectId,
+    setProfileSubView,
+    setTestCasesSubTab,
+    setTestRunsViewMode,
+    setActiveTab,
   ]);
+
+  // Android Hardware Back Navigation Handler
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener(
+      'hardwareBackPress',
+      handleNavigateBack
+    );
+    return () => subscription.remove();
+  }, [handleNavigateBack]);
 
   const headerSubtitle = !selectedProject
     ? isChecklistsActive
-      ? 'Account-Wide QA Checklists'
+      ? activeDestination === NAVIGATION_DESTINATIONS.CREATE_CHECKLIST
+        ? 'Account-Wide · Create QA Checklist'
+        : activeDestination === NAVIGATION_DESTINATIONS.QA_TEST_RUNNER
+        ? 'Account-Wide · QA Test Runner'
+        : 'Account-Wide QA Checklists'
       : effectiveViewMode === 'workspace' && activeTab === 'profile'
-      ? 'Account Settings & Data Management'
+      ? profileSubView === 'data'
+        ? 'Account · Data Management'
+        : 'Account Settings & Data Management'
       : 'Select or Create a Project'
     : effectiveViewMode === 'selection'
     ? `Switching Project · Active: ${selectedProject.name}`
     : effectiveViewMode === 'details'
     ? `${selectedProject.name} · Project Details`
     : isChecklistsActive
-    ? `${selectedProject.name} · QA Checklists`
+    ? activeDestination === NAVIGATION_DESTINATIONS.CREATE_CHECKLIST
+      ? `${selectedProject.name} · Create QA Checklist`
+      : activeDestination === NAVIGATION_DESTINATIONS.QA_TEST_RUNNER
+      ? `${selectedProject.name} · QA Test Runner`
+      : `${selectedProject.name} · QA Checklists`
     : activeTab === 'dashboard' && dashboardSubTab === 'reports'
     ? `${selectedProject.name} · Reports & Analytics`
-    : `${selectedProject.name} · ${SCREEN_TITLES[activeTab] || 'QA Manager'}`;
+    : activeTab === 'testcases' && testCasesSubTab === 'plan'
+    ? `${selectedProject.name} · Test Plans`
+    : activeTab === 'testcases' && testCasesSubTab === 'suites'
+    ? `${selectedProject.name} · Test Suites`
+    : activeTab === 'testruns' && testRunsViewMode === 'history'
+    ? `${selectedProject.name} · Execution History`
+    : activeTab === 'profile' && profileSubView === 'data'
+    ? `${selectedProject.name} · Data Management`
+    : `${selectedProject.name} · ${
+         DESTINATION_LABELS[activeDestination] ||
+        SCREEN_TITLES[activeTab] ||
+        'QA Manager'
+      }`;
 
   return (
     <SafeAreaView
@@ -219,7 +431,10 @@ function QavoraQAShell() {
             <Pressable
               onPress={() => {
                 if (isChecklistsActive) {
-                  if (selectedProject) {
+                  if (activeChecklistId || checklistCreateModalOpen) {
+                    setChecklistCreateModalOpen(false);
+                    setActiveChecklistId(null);
+                  } else if (selectedProject) {
                     setProjectViewMode('workspace');
                     setDashboardSubTab('overview');
                   } else {
@@ -227,7 +442,7 @@ function QavoraQAShell() {
                     setDashboardSubTab('overview');
                   }
                 } else {
-                  openChecklistsView();
+                  openChecklistsView({ keepRunner: true });
                 }
               }}
               style={[
@@ -442,7 +657,15 @@ function QavoraQAShell() {
             activeTab === 'dashboard' &&
             dashboardSubTab === 'checklists') ? (
           <ChecklistsScreen
+            activeChecklistId={activeChecklistId}
+            onChangeActiveChecklistId={setActiveChecklistId}
+            createModalOpen={checklistCreateModalOpen}
+            onChangeCreateModalOpen={setChecklistCreateModalOpen}
+            initialTemplateId={checklistCreateTemplateId}
+            onResetTemplateId={() => setChecklistCreateTemplateId('none')}
             onBackToOverview={() => {
+              setChecklistCreateModalOpen(false);
+              setActiveChecklistId(null);
               if (selectedProject) {
                 setProjectViewMode('workspace');
                 setDashboardSubTab('overview');
@@ -456,7 +679,9 @@ function QavoraQAShell() {
           <>
             {activeTab === 'dashboard' &&
               (selectedProject ? (
-                <DashboardScreen />
+                <DashboardScreen
+                  onNavigateToDestination={navigateToDestination}
+                />
               ) : (
                 <ProjectSelectionScreen
                   onOpenWorkspace={() => setProjectViewMode('workspace')}
@@ -465,7 +690,10 @@ function QavoraQAShell() {
               ))}
             {activeTab === 'testcases' &&
               (selectedProject ? (
-                <TestCasesScreen />
+                <TestCasesScreen
+                  subTab={testCasesSubTab}
+                  onChangeSubTab={setTestCasesSubTab}
+                />
               ) : (
                 <ProjectSelectionScreen
                   onOpenWorkspace={() => setProjectViewMode('workspace')}
@@ -474,7 +702,12 @@ function QavoraQAShell() {
               ))}
             {activeTab === 'testruns' &&
               (selectedProject ? (
-                <TestRunsScreen />
+                <TestRunsScreen
+                  viewMode={testRunsViewMode}
+                  onChangeViewMode={setTestRunsViewMode}
+                  executingCaseId={executingTestCaseId}
+                  onChangeExecutingCaseId={setExecutingTestCaseId}
+                />
               ) : (
                 <ProjectSelectionScreen
                   onOpenWorkspace={() => setProjectViewMode('workspace')}
@@ -490,7 +723,12 @@ function QavoraQAShell() {
                   onOpenProjectDetails={() => setProjectViewMode('details')}
                 />
               ))}
-            {activeTab === 'profile' && <ProfileSettingsScreen />}
+            {activeTab === 'profile' && (
+              <ProfileSettingsScreen
+                activeSection={profileSubView}
+                onChangeSection={setProfileSubView}
+              />
+            )}
           </>
         )}
       </View>
@@ -519,7 +757,7 @@ function QavoraQAShell() {
                 key={tab.id}
                 onPress={() => {
                   if (tab.id === 'profile') {
-                    openDataManagementView();
+                    openSettingsView();
                     return;
                   }
                   if (!selectedProject) {
@@ -536,6 +774,10 @@ function QavoraQAShell() {
                   setActiveTab(tab.id);
                   if (tab.id === 'dashboard') {
                     setDashboardSubTab('overview');
+                  } else if (tab.id === 'testcases') {
+                    setTestCasesSubTab('cases');
+                  } else if (tab.id === 'testruns') {
+                    setTestRunsViewMode('runs');
                   }
                 }}
                 style={styles.bottomTabBtn}

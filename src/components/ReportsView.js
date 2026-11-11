@@ -31,6 +31,7 @@ export default function ReportsView() {
     reloadProjectDataFromBackend,
     isSyncingProjectData,
     setActiveTab,
+    openTestSuitesView,
     setSelectedTestCaseId,
     setSelectedTestRunId,
     setSelectedDefectId,
@@ -199,7 +200,7 @@ export default function ReportsView() {
     if (tone === 'danger') {
       return { bg: colors.dangerSoft, fg: colors.danger };
     }
-    return { bg: colors.surfaceHighlight, fg: colors.textSecondary };
+    return { bg: colors.surfaceMuted, fg: colors.textSecondary };
   };
 
   const getVerdictBadgeStyle = (verdict) => {
@@ -218,7 +219,7 @@ export default function ReportsView() {
     ) {
       return { bg: colors.warningSoft, fg: colors.warning };
     }
-    return { bg: colors.surfaceHighlight, fg: colors.textSecondary };
+    return { bg: colors.surfaceMuted, fg: colors.textSecondary };
   };
 
   const healthStyle = getHealthBadgeStyle(report.healthTone);
@@ -1010,7 +1011,7 @@ export default function ReportsView() {
                   <View
                     style={[
                       styles.progressTrackSmall,
-                      { backgroundColor: colors.surfaceHighlight },
+                      { backgroundColor: colors.surfaceMuted },
                     ]}
                   >
                     <View
@@ -1249,7 +1250,7 @@ export default function ReportsView() {
                   <View
                     style={[
                       styles.progressTrackSmall,
-                      { backgroundColor: colors.surfaceHighlight },
+                      { backgroundColor: colors.surfaceMuted },
                     ]}
                   >
                     <View
@@ -1323,7 +1324,15 @@ export default function ReportsView() {
               <Text style={[styles.subSectionTitle, { color: colors.text }]}>
                 Suites Quality & Pass Rate
               </Text>
-              <Pressable onPress={() => setActiveTab('testcases')}>
+              <Pressable
+                onPress={() => {
+                  if (typeof openTestSuitesView === 'function') {
+                    openTestSuitesView();
+                  } else {
+                    setActiveTab('testcases');
+                  }
+                }}
+              >
                 <Text style={[styles.linkText, { color: colors.primary }]}>
                   Manage Suites →
                 </Text>
@@ -1383,7 +1392,7 @@ export default function ReportsView() {
                     <View
                       style={[
                         styles.progressTrackSmall,
-                        { backgroundColor: colors.surfaceHighlight },
+                        { backgroundColor: colors.surfaceMuted },
                       ]}
                     >
                       <View
@@ -1588,7 +1597,7 @@ export default function ReportsView() {
                     <View
                       style={[
                         styles.progressTrackSmall,
-                        { backgroundColor: colors.surfaceHighlight },
+                        { backgroundColor: colors.surfaceMuted },
                       ]}
                     >
                       <View

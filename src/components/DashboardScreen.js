@@ -15,7 +15,7 @@ import VectorIcon from './VectorIcon';
 import ReportsView from './ReportsView';
 import ChecklistsScreen from './ChecklistsScreen';
 
-export default function DashboardScreen() {
+export default function DashboardScreen({ onNavigateToDestination }) {
   const { colors } = useTheme();
   const {
     selectedProject,
@@ -33,11 +33,19 @@ export default function DashboardScreen() {
     activityLog,
     dashboardSubTab,
     setDashboardSubTab,
+    activeChecklistId,
+    setActiveChecklistId,
+    checklistCreateModalOpen,
+    setChecklistCreateModalOpen,
+    checklistCreateTemplateId,
+    setChecklistCreateTemplateId,
     reloadProjectDataFromBackend,
     isSyncingProjectData,
     setActiveTab,
     openProjectSelection,
     openProjectDetails,
+    openTestSuitesView,
+    openTestPlansView,
     setSelectedTestCaseId,
     setSelectedTestRunId,
     setSelectedDefectId,
@@ -256,7 +264,17 @@ export default function DashboardScreen() {
           <ReportsView />
         ) : dashboardSubTab === 'checklists' ? (
           <ChecklistsScreen
-            onBackToOverview={() => setDashboardSubTab('overview')}
+            activeChecklistId={activeChecklistId}
+            onChangeActiveChecklistId={setActiveChecklistId}
+            createModalOpen={checklistCreateModalOpen}
+            onChangeCreateModalOpen={setChecklistCreateModalOpen}
+            initialTemplateId={checklistCreateTemplateId}
+            onResetTemplateId={() => setChecklistCreateTemplateId('none')}
+            onBackToOverview={() => {
+              setChecklistCreateModalOpen(false);
+              setActiveChecklistId(null);
+              setDashboardSubTab('overview');
+            }}
           />
         ) : (
           <>
@@ -1093,7 +1111,15 @@ export default function DashboardScreen() {
                     </Text>
                   ) : null}
                 </View>
-                <Pressable onPress={() => setActiveTab('testcases')}>
+                <Pressable
+                  onPress={() => {
+                    if (typeof openTestSuitesView === 'function') {
+                      openTestSuitesView();
+                    } else {
+                      setActiveTab('testcases');
+                    }
+                  }}
+                >
                   <Text style={[styles.linkText, { color: colors.primary }]}>
                     View Suites →
                   </Text>

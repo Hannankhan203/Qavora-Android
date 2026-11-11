@@ -15,7 +15,10 @@ import { useTheme, monoFontFamily } from '../theme/theme';
 import { useWorkspace } from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
 
-export default function TestCasesScreen() {
+export default function TestCasesScreen({
+  subTab: controlledSubTab,
+  onChangeSubTab,
+}) {
   const { colors } = useTheme();
   const {
     activeProject,
@@ -28,6 +31,8 @@ export default function TestCasesScreen() {
     executionStatuses,
     selectedTestCaseId,
     setSelectedTestCaseId,
+    testCasesSubTab: contextSubTab,
+    setTestCasesSubTab: setContextSubTab,
     isSyncingProjectData,
     projectDataError,
     projectDataConflict,
@@ -47,8 +52,28 @@ export default function TestCasesScreen() {
     showToast,
   } = useWorkspace();
 
-  // Top-level Phase 2C sub-navigation: 'cases' | 'suites' | 'plan'
-  const [subTab, setSubTab] = useState('cases');
+  // Top-level Phase 2C sub-navigation: 'cases' | 'suites' | 'plan' (Synchronized with centralized navigation state)
+  const [localSubTab, setLocalSubTab] = useState(
+    controlledSubTab || contextSubTab || 'cases'
+  );
+  const subTab =
+    controlledSubTab !== undefined
+      ? controlledSubTab
+      : contextSubTab !== undefined
+      ? contextSubTab
+      : localSubTab;
+
+  const setSubTab = (nextTab) => {
+    const cleanTab =
+      nextTab === 'suites' || nextTab === 'plan' ? nextTab : 'cases';
+    setLocalSubTab(cleanTab);
+    if (typeof onChangeSubTab === 'function') {
+      onChangeSubTab(cleanTab);
+    }
+    if (typeof setContextSubTab === 'function') {
+      setContextSubTab(cleanTab);
+    }
+  };
 
   // --- Filter & Search State (Test Cases) ---
   const [searchQuery, setSearchQuery] = useState('');

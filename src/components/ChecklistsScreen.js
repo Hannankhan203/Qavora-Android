@@ -45,7 +45,15 @@ import {
   retryProjectOperation,
 } from '../services/offlineSyncService';
 
-export default function ChecklistsScreen({ onBackToOverview }) {
+export default function ChecklistsScreen({
+  onBackToOverview,
+  activeChecklistId: controlledActiveChecklistId,
+  onChangeActiveChecklistId,
+  createModalOpen: controlledCreateModalOpen,
+  onChangeCreateModalOpen,
+  initialTemplateId,
+  onResetTemplateId,
+}) {
   const { colors } = useTheme();
   const { user } = useAuth();
   const {
@@ -68,6 +76,12 @@ export default function ChecklistsScreen({ onBackToOverview }) {
     reloadProjectDataFromBackend,
     checklists: workspaceChecklists,
     setChecklists: setWorkspaceChecklists,
+    activeChecklistId: contextActiveChecklistId,
+    setActiveChecklistId: setContextActiveChecklistId,
+    checklistCreateModalOpen: contextCreateModalOpen,
+    setChecklistCreateModalOpen: setContextCreateModalOpen,
+    checklistCreateTemplateId: contextCreateTemplateId,
+    setChecklistCreateTemplateId: setContextCreateTemplateId,
   } = useWorkspace();
 
   const currentUserId = useMemo(
@@ -103,8 +117,38 @@ export default function ChecklistsScreen({ onBackToOverview }) {
   const [statusFilter, setStatusFilter] = useState('All');
   const [categoryFilter, setCategoryFilter] = useState('All');
 
-  // Active checklist detail & item filters
-  const [activeChecklistId, setActiveChecklistId] = useState(null);
+  // Active checklist detail & item filters (Synchronized with centralized navigation state)
+  const [localActiveChecklistId, setLocalActiveChecklistId] = useState(
+    controlledActiveChecklistId !== undefined
+      ? controlledActiveChecklistId
+      : contextActiveChecklistId || null
+  );
+  const activeChecklistId =
+    controlledActiveChecklistId !== undefined
+      ? controlledActiveChecklistId
+      : contextActiveChecklistId !== undefined
+      ? contextActiveChecklistId
+      : localActiveChecklistId;
+
+  const setActiveChecklistId = useCallback(
+    (nextId) => {
+      const resolvedId =
+        typeof nextId === 'function' ? nextId(activeChecklistId) : nextId;
+      setLocalActiveChecklistId(resolvedId);
+      if (typeof onChangeActiveChecklistId === 'function') {
+        onChangeActiveChecklistId(resolvedId);
+      }
+      if (typeof setContextActiveChecklistId === 'function') {
+        setContextActiveChecklistId(resolvedId);
+      }
+    },
+    [
+      activeChecklistId,
+      onChangeActiveChecklistId,
+      setContextActiveChecklistId,
+    ]
+  );
+
   const [itemFilterMode, setItemFilterMode] = useState('all'); // 'all' | 'pending' | 'completed'
   const [busyMutation, setBusyMutation] = useState(false);
   const [busyItemId, setBusyItemId] = useState(null);
@@ -121,9 +165,25 @@ export default function ChecklistsScreen({ onBackToOverview }) {
   const [editItemCategory, setEditItemCategory] = useState('General QA');
   const [editItemNotes, setEditItemNotes] = useState('');
 
-  // Create / Edit Checklist Modal state
-  const [formModalVisible, setFormModalVisible] = useState(false);
+  // Create / Edit Checklist Modal state (Synchronized with centralized create_checklist destination)
+  const [formModalVisible, setFormModalVisibleState] = useState(false);
   const [formMode, setFormMode] = useState('create'); // 'create' | 'edit'
+
+  const setFormModalVisible = useCallback(
+    (nextVisible) => {
+      const resolved = Boolean(nextVisible);
+      setFormModalVisibleState(resolved);
+      if (!resolved) {
+        if (typeof onChangeCreateModalOpen === 'function') {
+          onChangeCreateModalOpen(false);
+        }
+        if (typeof setContextCreateModalOpen === 'function') {
+          setContextCreateModalOpen(false);
+        }
+      }
+    },
+    [onChangeCreateModalOpen, setContextCreateModalOpen]
+  );
   const [editingChecklistId, setEditingChecklistId] = useState(null);
   const [formTitle, setFormTitle] = useState('');
   const [formDescription, setFormDescription] = useState('');
@@ -570,8 +630,41 @@ export default function ChecklistsScreen({ onBackToOverview }) {
     setFormTemplateId(preset ? preset.id : 'none');
     setFormCustomItemsText('');
     setFormError(null);
-    setFormModalVisible(true);
+    setFormModalVisibleState(true);
+    if (typeof onChangeCreateModalOpen === 'function') {
+      onChangeCreateModalOpen(true);
+    }
+    if (typeof setContextCreateModalOpen === 'function') {
+      setContextCreateModalOpen(true);
+    }
   };
+
+  const resolvedCreateModalRequest =
+    controlledCreateModalOpen !== undefined
+      ? controlledCreateModalOpen
+      : Boolean(contextCreateModalOpen);
+  const resolvedTemplateRequest =
+    initialTemplateId !== undefined
+      ? initialTemplateId
+      : contextCreateTemplateId || 'none';
+
+  useEffect(() => {
+    if (resolvedCreateModalRequest && !formModalVisible) {
+      openCreateModal(resolvedTemplateRequest);
+      if (typeof onResetTemplateId === 'function') {
+        onResetTemplateId();
+      }
+      if (typeof setContextCreateTemplateId === 'function') {
+        setContextCreateTemplateId('none');
+      }
+    } else if (
+      !resolvedCreateModalRequest &&
+      formModalVisible &&
+      formMode === 'create'
+    ) {
+      setFormModalVisibleState(false);
+    }
+  }, [resolvedCreateModalRequest, resolvedTemplateRequest]);
 
   // Open Edit Checklist modal
   const openEditModal = (checklist) => {
