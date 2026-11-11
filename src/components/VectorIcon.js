@@ -36,6 +36,7 @@ export const SUPPORTED_VECTOR_ICON_NAMES = [
   'file-text',
   'clipboard',
   'list',
+  'menu',
 ];
 
 export default function VectorIcon({
@@ -931,6 +932,41 @@ export default function VectorIcon({
               }}
             />
           </View>
+        </View>
+      );
+    }
+
+    case 'menu': {
+      const barW = size * 0.72;
+      const gap = size * 0.16;
+      return (
+        <View style={boxStyle}>
+          <View
+            style={{
+              width: barW,
+              height: stroke,
+              backgroundColor: color,
+              borderRadius: stroke,
+              marginBottom: gap,
+            }}
+          />
+          <View
+            style={{
+              width: barW,
+              height: stroke,
+              backgroundColor: color,
+              borderRadius: stroke,
+              marginBottom: gap,
+            }}
+          />
+          <View
+            style={{
+              width: barW,
+              height: stroke,
+              backgroundColor: color,
+              borderRadius: stroke,
+            }}
+          />
         </View>
       );
     }

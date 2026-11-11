@@ -1,10 +1,13 @@
-import React, { useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import {
   StyleSheet,
   View,
   Text,
   Pressable,
+  ScrollView,
+  Animated,
+  useWindowDimensions,
   BackHandler,
   ActivityIndicator,
 } from 'react-native';
@@ -88,6 +91,10 @@ function QavoraQAShell() {
     setChecklistCreateTemplateId,
     profileSubView,
     setProfileSubView,
+    checklists,
+    openDashboardOverview,
+    openProjectSelection,
+    openProjectDetails,
     openChecklistsView,
     openCreateChecklistView,
     openChecklistRunnerView,
@@ -111,6 +118,46 @@ function QavoraQAShell() {
     showToast,
     dismissToast,
   } = useWorkspace();
+
+  const { width: viewportWidth } = useWindowDimensions();
+  const drawerWidth = Math.min(
+    304,
+    Math.max(264, Math.round((viewportWidth || 360) * 0.82))
+  );
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isDrawerRendered, setIsDrawerRendered] = useState(false);
+  const drawerAnim = useRef(new Animated.Value(0)).current;
+
+  const openDrawer = useCallback(() => {
+    setIsDrawerRendered(true);
+    setIsDrawerOpen(true);
+    Animated.timing(drawerAnim, {
+      toValue: 1,
+      duration: 210,
+      useNativeDriver: true,
+    }).start();
+  }, [drawerAnim]);
+
+  const closeDrawer = useCallback(() => {
+    setIsDrawerOpen(false);
+    Animated.timing(drawerAnim, {
+      toValue: 0,
+      duration: 180,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        setIsDrawerRendered(false);
+      }
+    });
+  }, [drawerAnim]);
+
+  const toggleDrawer = useCallback(() => {
+    if (isDrawerOpen) {
+      closeDrawer();
+    } else {
+      openDrawer();
+    }
+  }, [isDrawerOpen, closeDrawer, openDrawer]);
 
   // Allow account-level Checklists and Profile/Settings/Data Management even when selectedProject is null
   const canViewWithoutProject =
@@ -198,6 +245,12 @@ function QavoraQAShell() {
 
   // Consistent Android Hardware Back Navigation Flow across all top-level and nested destinations
   const handleNavigateBack = useCallback(() => {
+    // 0. Open Global Navigation Drawer -> close drawer first
+    if (isDrawerOpen) {
+      closeDrawer();
+      return true;
+    }
+
     // 1. Nested Create Checklist Modal inside Checklists -> return to My QA Checklist / Runner
     if (isChecklistsActive && checklistCreateModalOpen) {
       setChecklistCreateModalOpen(false);
@@ -323,6 +376,8 @@ function QavoraQAShell() {
     testCasesSubTab,
     testRunsViewMode,
     profileSubView,
+    isDrawerOpen,
+    closeDrawer,
     setChecklistCreateModalOpen,
     setActiveChecklistId,
     setProjectViewMode,
@@ -335,6 +390,199 @@ function QavoraQAShell() {
     setTestRunsViewMode,
     setActiveTab,
   ]);
+
+  // Global Navigation Drawer Sections & All 11 Canonical Destinations
+  const drawerSections = useMemo(
+    () => [
+      {
+        id: 'qa_checklists',
+        title: 'QA Checklists',
+        items: [
+          {
+            id: NAVIGATION_DESTINATIONS.CREATE_CHECKLIST,
+            label: 'Create QA Checklist',
+            icon: 'plus',
+            isActive:
+              activeDestination === NAVIGATION_DESTINATIONS.CREATE_CHECKLIST,
+            nestedBadge: null,
+            onSelect: () => openCreateChecklistView('none'),
+          },
+          {
+            id: NAVIGATION_DESTINATIONS.MY_CHECKLISTS,
+            label: 'My QA Checklist',
+            icon: 'clipboard',
+            isActive:
+              activeDestination === NAVIGATION_DESTINATIONS.MY_CHECKLISTS,
+            nestedBadge:
+              Array.isArray(checklists) && checklists.length > 0
+                ? String(checklists.length)
+                : null,
+            onSelect: () => openChecklistsView({ keepRunner: false }),
+          },
+          {
+            id: NAVIGATION_DESTINATIONS.QA_TEST_RUNNER,
+            label: 'QA Test Runner',
+            icon: 'check-circle',
+            isActive:
+              activeDestination === NAVIGATION_DESTINATIONS.QA_TEST_RUNNER,
+            nestedBadge:
+              activeDestination === NAVIGATION_DESTINATIONS.QA_TEST_RUNNER
+                ? 'Active'
+                : null,
+            onSelect: () => openChecklistRunnerView(),
+          },
+        ],
+      },
+      {
+        id: 'project_workspace',
+        title: 'Project Workspace',
+        items: [
+          {
+            id: NAVIGATION_DESTINATIONS.DASHBOARD,
+            label: 'Dashboard',
+            icon: 'globe',
+            isActive: activeDestination === NAVIGATION_DESTINATIONS.DASHBOARD,
+            nestedBadge:
+              selectedProject &&
+              activeDestination === NAVIGATION_DESTINATIONS.DASHBOARD
+                ? `${metrics.passRate}%`
+                : null,
+            onSelect: () => openDashboardOverview(),
+          },
+          {
+            id: NAVIGATION_DESTINATIONS.MY_PROJECTS,
+            label: 'My Projects',
+            icon: 'folder',
+            isActive:
+              activeDestination === NAVIGATION_DESTINATIONS.MY_PROJECTS ||
+              activeDestination === NAVIGATION_DESTINATIONS.PROJECT_DETAILS,
+            nestedBadge:
+              activeDestination === NAVIGATION_DESTINATIONS.PROJECT_DETAILS
+                ? 'Details'
+                : null,
+            onSelect: () => openProjectSelection(),
+          },
+          {
+            id: NAVIGATION_DESTINATIONS.TEST_PLANS,
+            label: 'Test Plans',
+            icon: 'layers',
+            isActive:
+              activeDestination === NAVIGATION_DESTINATIONS.TEST_PLANS ||
+              activeDestination === NAVIGATION_DESTINATIONS.TEST_SUITES ||
+              activeDestination === NAVIGATION_DESTINATIONS.TEST_CASES,
+            nestedBadge:
+              activeDestination === NAVIGATION_DESTINATIONS.TEST_SUITES
+                ? 'Suites'
+                : activeDestination === NAVIGATION_DESTINATIONS.TEST_CASES
+                ? selectedTestCaseId
+                  ? 'Case Detail'
+                  : 'Cases'
+                : null,
+            onSelect: () => openTestPlansView(),
+          },
+          {
+            id: NAVIGATION_DESTINATIONS.TEST_EXECUTION,
+            label: 'Test Execution',
+            icon: 'flag',
+            isActive:
+              activeDestination === NAVIGATION_DESTINATIONS.TEST_EXECUTION,
+            nestedBadge:
+              activeDestination === NAVIGATION_DESTINATIONS.TEST_EXECUTION
+                ? executingTestCaseId
+                  ? 'Runner'
+                  : testRunsViewMode === 'history'
+                  ? 'History'
+                  : 'Runs'
+                : null,
+            onSelect: () => openTestExecutionView(),
+          },
+          {
+            id: NAVIGATION_DESTINATIONS.DEFECTS,
+            label: 'Defects',
+            icon: 'alert',
+            isActive: activeDestination === NAVIGATION_DESTINATIONS.DEFECTS,
+            nestedBadge:
+              activeDestination === NAVIGATION_DESTINATIONS.DEFECTS &&
+              selectedDefectId
+                ? 'Detail'
+                : selectedProject && metrics.openDefects > 0
+                ? String(metrics.openDefects)
+                : null,
+            onSelect: () => openDefectsView(),
+          },
+          {
+            id: NAVIGATION_DESTINATIONS.REPORTS,
+            label: 'Reports',
+            icon: 'file-text',
+            isActive: activeDestination === NAVIGATION_DESTINATIONS.REPORTS,
+            nestedBadge: null,
+            onSelect: () => openReportsView(),
+          },
+        ],
+      },
+      {
+        id: 'workspace_account_utilities',
+        title: 'Workspace & Account Utilities',
+        items: [
+          {
+            id: NAVIGATION_DESTINATIONS.DATA_MANAGEMENT,
+            label: 'Data Management',
+            icon: 'refresh',
+            isActive:
+              activeDestination === NAVIGATION_DESTINATIONS.DATA_MANAGEMENT,
+            nestedBadge:
+              syncStatus && syncStatus.conflictCount > 0
+                ? `${syncStatus.conflictCount} Conflict`
+                : syncStatus && syncStatus.pendingCount > 0
+                ? `${syncStatus.pendingCount} Queued`
+                : null,
+            onSelect: () => openDataManagementView(),
+          },
+          {
+            id: NAVIGATION_DESTINATIONS.SETTINGS,
+            label: 'Settings',
+            icon: 'tag',
+            isActive: activeDestination === NAVIGATION_DESTINATIONS.SETTINGS,
+            nestedBadge: null,
+            onSelect: () => openSettingsView(),
+          },
+        ],
+      },
+    ],
+    [
+      activeDestination,
+      checklists,
+      selectedProject,
+      metrics.passRate,
+      metrics.openDefects,
+      selectedTestCaseId,
+      executingTestCaseId,
+      testRunsViewMode,
+      selectedDefectId,
+      syncStatus,
+      openCreateChecklistView,
+      openChecklistsView,
+      openChecklistRunnerView,
+      openDashboardOverview,
+      openProjectSelection,
+      openTestPlansView,
+      openTestExecutionView,
+      openDefectsView,
+      openReportsView,
+      openDataManagementView,
+      openSettingsView,
+    ]
+  );
+
+  const handleSelectDrawerDestination = useCallback(
+    (item) => {
+      if (item && typeof item.onSelect === 'function') {
+        item.onSelect();
+      }
+      closeDrawer();
+    },
+    [closeDrawer]
+  );
 
   // Android Hardware Back Navigation Handler
   useEffect(() => {
@@ -398,6 +646,31 @@ function QavoraQAShell() {
         ]}
       >
         <View style={styles.topBarInner}>
+          <Pressable
+            onPress={toggleDrawer}
+            accessibilityRole="button"
+            accessibilityLabel={
+              isDrawerOpen
+                ? 'Close navigation drawer'
+                : 'Open navigation drawer'
+            }
+            style={[
+              styles.drawerMenuBtn,
+              {
+                backgroundColor: isDrawerOpen
+                  ? colors.primary
+                  : colors.surfaceAccent,
+                borderColor: colors.primary,
+              },
+            ]}
+          >
+            <VectorIcon
+              name={isDrawerOpen ? 'close' : 'menu'}
+              size={16}
+              color={isDrawerOpen ? colors.textOnPrimary : colors.primary}
+            />
+          </Pressable>
+
           <Pressable
             onPress={() => {
               if (selectedProject) {
@@ -818,6 +1091,318 @@ function QavoraQAShell() {
           })}
         </View>
       </View>
+
+      {/* Global Left-Side Slide-Out Navigation Drawer */}
+      {(isDrawerOpen || isDrawerRendered) && (
+        <View
+          style={styles.drawerOverlayRoot}
+          pointerEvents={isDrawerOpen ? 'auto' : 'none'}
+        >
+          <Animated.View
+            style={[
+              styles.drawerBackdrop,
+              {
+                backgroundColor: colors.overlay,
+                opacity: drawerAnim,
+              },
+            ]}
+          >
+            <Pressable
+              onPress={closeDrawer}
+              accessibilityRole="button"
+              accessibilityLabel="Close navigation drawer backdrop"
+              style={styles.drawerBackdropTouch}
+            />
+          </Animated.View>
+
+          <Animated.View
+            style={[
+              styles.drawerPanel,
+              {
+                width: drawerWidth,
+                backgroundColor: colors.surface,
+                borderRightColor: colors.border,
+                transform: [
+                  {
+                    translateX: drawerAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-drawerWidth, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            {/* Drawer Header */}
+            <View
+              style={[
+                styles.drawerHeader,
+                { borderBottomColor: colors.border },
+              ]}
+            >
+              <View style={styles.drawerBrandRow}>
+                <View
+                  style={[
+                    styles.brandBadge,
+                    { backgroundColor: colors.primary },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.brandBadgeText,
+                      { color: colors.textOnPrimary },
+                    ]}
+                  >
+                    Q
+                  </Text>
+                </View>
+                <View style={styles.drawerBrandTextWrap}>
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.drawerBrandTitle, { color: colors.text }]}
+                  >
+                    Qavora Navigation
+                  </Text>
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.drawerBrandSubtitle,
+                      { color: colors.textMuted, fontFamily: monoFontFamily },
+                    ]}
+                  >
+                    {selectedProject
+                      ? `Project: ${selectedProject.name}`
+                      : 'No Active Project Selected'}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={closeDrawer}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close navigation drawer"
+                  style={[
+                    styles.drawerCloseBtn,
+                    {
+                      backgroundColor: colors.surfaceMuted,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <VectorIcon
+                    name="close"
+                    size={15}
+                    color={colors.textSecondary}
+                  />
+                </Pressable>
+              </View>
+
+              {/* Active Context Pill */}
+              <View
+                style={[
+                  styles.drawerContextBanner,
+                  {
+                    backgroundColor: colors.surfaceAccent,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.drawerContextText,
+                    { color: colors.primary, fontFamily: monoFontFamily },
+                  ]}
+                >
+                  Active:{' '}
+                  {DESTINATION_LABELS[activeDestination] || 'QA Overview'}
+                </Text>
+                {selectedProject ? (
+                  <Pressable
+                    onPress={() => {
+                      openProjectDetails();
+                      closeDrawer();
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.drawerContextLink,
+                        { color: colors.primary },
+                      ]}
+                    >
+                      Project Info →
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            </View>
+
+            {/* Drawer Sections & 11 Canonical Destinations */}
+            <ScrollView
+              style={styles.drawerScroll}
+              contentContainerStyle={styles.drawerScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {drawerSections.map((section, sectionIdx) => (
+                <View
+                  key={section.id}
+                  style={[
+                    styles.drawerSection,
+                    sectionIdx > 0 && {
+                      borderTopWidth: 1,
+                      borderTopColor: colors.border,
+                      paddingTop: 10,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.drawerSectionTitle,
+                      { color: colors.textMuted, fontFamily: monoFontFamily },
+                    ]}
+                  >
+                    {section.title.toUpperCase()}
+                  </Text>
+
+                  <View style={styles.drawerSectionItems}>
+                    {section.items.map((item) => {
+                      const active = Boolean(item.isActive);
+                      return (
+                        <Pressable
+                          key={item.id}
+                          onPress={() => handleSelectDrawerDestination(item)}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: active }}
+                          accessibilityLabel={item.label}
+                          style={[
+                            styles.drawerItemBtn,
+                            {
+                              backgroundColor: active
+                                ? colors.surfaceAccent
+                                : 'transparent',
+                              borderColor: active
+                                ? colors.primary
+                                : 'transparent',
+                            },
+                          ]}
+                        >
+                          {active && (
+                            <View
+                              style={[
+                                styles.drawerActivePillBar,
+                                { backgroundColor: colors.primary },
+                              ]}
+                            />
+                          )}
+                          <View
+                            style={[
+                              styles.drawerItemIconBox,
+                              {
+                                backgroundColor: active
+                                  ? colors.primary
+                                  : colors.surfaceMuted,
+                              },
+                            ]}
+                          >
+                            <VectorIcon
+                              name={item.icon}
+                              size={14}
+                              color={
+                                active
+                                  ? colors.textOnPrimary
+                                  : colors.textSecondary
+                              }
+                            />
+                          </View>
+
+                          <Text
+                            numberOfLines={1}
+                            style={[
+                              styles.drawerItemLabel,
+                              {
+                                color: active ? colors.primary : colors.text,
+                                fontWeight: active ? '700' : '500',
+                              },
+                            ]}
+                          >
+                            {item.label}
+                          </Text>
+
+                          {item.nestedBadge ? (
+                            <View
+                              style={[
+                                styles.drawerNestedBadge,
+                                {
+                                  backgroundColor: active
+                                    ? colors.primary
+                                    : colors.surfaceMuted,
+                                },
+                              ]}
+                            >
+                              <Text
+                                numberOfLines={1}
+                                style={[
+                                  styles.drawerNestedBadgeText,
+                                  {
+                                    color: active
+                                      ? colors.textOnPrimary
+                                      : colors.textSecondary,
+                                    fontFamily: monoFontFamily,
+                                  },
+                                ]}
+                              >
+                                {item.nestedBadge}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+
+            {/* Drawer Footer */}
+            <View
+              style={[
+                styles.drawerFooter,
+                {
+                  borderTopColor: colors.border,
+                  backgroundColor: colors.surfaceElevated,
+                },
+              ]}
+            >
+              <Text
+                numberOfLines={1}
+                style={[
+                  styles.drawerFooterMeta,
+                  { color: colors.textMuted, fontFamily: monoFontFamily },
+                ]}
+              >
+                {isOffline ? 'Offline Queue Active' : 'Online · Synced'}
+              </Text>
+              <Pressable
+                onPress={toggleTheme}
+                style={[
+                  styles.drawerFooterThemeBtn,
+                  {
+                    backgroundColor: colors.surfaceAccent,
+                    borderColor: colors.primary,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.drawerFooterThemeText,
+                    { color: colors.primary },
+                  ]}
+                >
+                  {isDark ? 'Switch to Light' : 'Switch to Dark'}
+                </Text>
+              </Pressable>
+            </View>
+          </Animated.View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -1072,5 +1657,173 @@ const styles = StyleSheet.create({
     width: 22,
     height: 3,
     borderRadius: 2,
+  },
+  drawerMenuBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  drawerOverlayRoot: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1000,
+    elevation: 24,
+    flexDirection: 'row',
+  },
+  drawerBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  drawerBackdropTouch: {
+    flex: 1,
+  },
+  drawerPanel: {
+    height: '100%',
+    borderRightWidth: 1,
+    justifyContent: 'space-between',
+    shadowColor: '#000',
+    shadowOffset: { width: 4, height: 0 },
+    shadowOpacity: 0.22,
+    shadowRadius: 12,
+    elevation: 24,
+  },
+  drawerHeader: {
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    gap: 8,
+  },
+  drawerBrandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  drawerBrandTextWrap: {
+    flex: 1,
+    flexShrink: 1,
+  },
+  drawerBrandTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+  },
+  drawerBrandSubtitle: {
+    fontSize: 11,
+    marginTop: 1,
+  },
+  drawerCloseBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  drawerContextBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 8,
+  },
+  drawerContextText: {
+    fontSize: 11,
+    fontWeight: '700',
+    flex: 1,
+  },
+  drawerContextLink: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  drawerScroll: {
+    flex: 1,
+  },
+  drawerScrollContent: {
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    gap: 10,
+  },
+  drawerSection: {
+    gap: 4,
+  },
+  drawerSectionTitle: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    paddingHorizontal: 6,
+    marginBottom: 2,
+  },
+  drawerSectionItems: {
+    gap: 3,
+  },
+  drawerItemBtn: {
+    minHeight: 40,
+    borderRadius: 9,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    position: 'relative',
+  },
+  drawerActivePillBar: {
+    position: 'absolute',
+    left: 0,
+    top: 8,
+    bottom: 8,
+    width: 3,
+    borderRadius: 2,
+  },
+  drawerItemIconBox: {
+    width: 26,
+    height: 26,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  drawerItemLabel: {
+    fontSize: 13,
+    flex: 1,
+    flexShrink: 1,
+  },
+  drawerNestedBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  drawerNestedBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  drawerFooter: {
+    borderTopWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  drawerFooterMeta: {
+    fontSize: 10.5,
+    flex: 1,
+  },
+  drawerFooterThemeBtn: {
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 7,
+    borderWidth: 1,
+  },
+  drawerFooterThemeText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
 });
