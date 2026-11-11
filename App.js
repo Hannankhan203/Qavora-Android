@@ -35,11 +35,36 @@ import { startConnectivityMonitoring } from './src/services/offlineSyncService';
 export { NAVIGATION_DESTINATIONS };
 
 const BOTTOM_TABS = [
-  { id: 'dashboard', label: 'Dashboard' },
-  { id: 'testcases', label: 'Test Cases' },
-  { id: 'testruns', label: 'Test Runs' },
-  { id: 'defects', label: 'Defects' },
-  { id: 'profile', label: 'Profile' },
+  {
+    id: 'dashboard',
+    label: 'Dashboard',
+    icon: 'dashboard',
+    accessibilityLabel: 'Dashboard tab',
+  },
+  {
+    id: 'checklists',
+    label: 'Checklists',
+    icon: 'clipboard',
+    accessibilityLabel: 'QA Checklists tab',
+  },
+  {
+    id: 'testcases',
+    label: 'Test Cases',
+    icon: 'layers',
+    accessibilityLabel: 'Test Cases, Plans, and Suites tab',
+  },
+  {
+    id: 'testruns',
+    label: 'Test Execution',
+    icon: 'play-circle',
+    accessibilityLabel: 'Test Execution and Test Runs tab',
+  },
+  {
+    id: 'profile',
+    label: 'Profile',
+    icon: 'user',
+    accessibilityLabel: 'Profile and Settings tab',
+  },
 ];
 
 const SCREEN_TITLES = {
@@ -440,7 +465,7 @@ function QavoraQAShell() {
           {
             id: NAVIGATION_DESTINATIONS.DASHBOARD,
             label: 'Dashboard',
-            icon: 'globe',
+            icon: 'dashboard',
             isActive: activeDestination === NAVIGATION_DESTINATIONS.DASHBOARD,
             nestedBadge:
               selectedProject &&
@@ -483,7 +508,7 @@ function QavoraQAShell() {
           {
             id: NAVIGATION_DESTINATIONS.TEST_EXECUTION,
             label: 'Test Execution',
-            icon: 'flag',
+            icon: 'play-circle',
             isActive:
               activeDestination === NAVIGATION_DESTINATIONS.TEST_EXECUTION,
             nestedBadge:
@@ -541,7 +566,7 @@ function QavoraQAShell() {
           {
             id: NAVIGATION_DESTINATIONS.SETTINGS,
             label: 'Settings',
-            icon: 'tag',
+            icon: 'user',
             isActive: activeDestination === NAVIGATION_DESTINATIONS.SETTINGS,
             nestedBadge: null,
             onSelect: () => openSettingsView(),
@@ -638,7 +663,7 @@ function QavoraQAShell() {
     >
       <StatusBar style={colors.statusBar} />
 
-      {/* Contextual Mobile Top Bar */}
+      {/* Compact 56dp Mobile Top Bar (Single-Row, 360dp Safe) */}
       <View
         style={[
           styles.topBar,
@@ -648,6 +673,7 @@ function QavoraQAShell() {
         <View style={styles.topBarInner}>
           <Pressable
             onPress={toggleDrawer}
+            hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
             accessibilityRole="button"
             accessibilityLabel={
               isDrawerOpen
@@ -681,22 +707,35 @@ function QavoraQAShell() {
                 setProjectViewMode('selection');
               }
             }}
+            hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
+            accessibilityRole="button"
+            accessibilityLabel={
+              selectedProject
+                ? `${selectedProject.name}, ${headerSubtitle}. Tap to toggle project details`
+                : 'Qavora, Select or create a project'
+            }
             style={styles.brandLockup}
           >
-            <View style={[styles.brandBadge, { backgroundColor: colors.primary }]}>
-              <Text style={[styles.brandBadgeText, { color: colors.textOnPrimary }]}>
+            <View
+              style={[styles.brandBadge, { backgroundColor: colors.primary }]}
+            >
+              <Text
+                style={[styles.brandBadgeText, { color: colors.textOnPrimary }]}
+              >
                 Q
               </Text>
             </View>
             <View style={styles.brandTextWrap}>
               <Text
                 numberOfLines={1}
+                ellipsizeMode="tail"
                 style={[styles.brandTitle, { color: colors.text }]}
               >
                 {selectedProject ? selectedProject.name : 'Qavora'}
               </Text>
               <Text
                 numberOfLines={1}
+                ellipsizeMode="tail"
                 style={[
                   styles.screenSubtitle,
                   { color: colors.textMuted, fontFamily: monoFontFamily },
@@ -708,108 +747,6 @@ function QavoraQAShell() {
           </Pressable>
 
           <View style={styles.topRightUtilities}>
-            <Pressable
-              onPress={() => {
-                if (isChecklistsActive) {
-                  if (activeChecklistId || checklistCreateModalOpen) {
-                    setChecklistCreateModalOpen(false);
-                    setActiveChecklistId(null);
-                  } else if (selectedProject) {
-                    setProjectViewMode('workspace');
-                    setDashboardSubTab('overview');
-                  } else {
-                    setProjectViewMode('selection');
-                    setDashboardSubTab('overview');
-                  }
-                } else {
-                  openChecklistsView({ keepRunner: true });
-                }
-              }}
-              style={[
-                styles.projectSwitchBtn,
-                {
-                  backgroundColor: isChecklistsActive
-                    ? colors.primary
-                    : colors.surfaceAccent,
-                  borderColor: colors.primary,
-                },
-              ]}
-            >
-              <VectorIcon
-                name="clipboard"
-                size={14}
-                color={
-                  isChecklistsActive ? colors.textOnPrimary : colors.primary
-                }
-              />
-              <Text
-                style={[
-                  styles.projectSwitchBtnText,
-                  {
-                    color: isChecklistsActive
-                      ? colors.textOnPrimary
-                      : colors.primary,
-                  },
-                ]}
-              >
-                Checklists
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={() => {
-                if (effectiveViewMode === 'selection' && selectedProject) {
-                  setProjectViewMode('workspace');
-                } else {
-                  setProjectViewMode('selection');
-                }
-              }}
-              style={[
-                styles.projectSwitchBtn,
-                {
-                  backgroundColor:
-                    effectiveViewMode === 'selection'
-                      ? colors.primary
-                      : colors.surfaceAccent,
-                  borderColor: colors.primary,
-                },
-              ]}
-            >
-              <VectorIcon
-                name="folder"
-                size={14}
-                color={
-                  effectiveViewMode === 'selection'
-                    ? colors.textOnPrimary
-                    : colors.primary
-                }
-              />
-              <Text
-                style={[
-                  styles.projectSwitchBtnText,
-                  {
-                    color:
-                      effectiveViewMode === 'selection'
-                        ? colors.textOnPrimary
-                        : colors.primary,
-                  },
-                ]}
-              >
-                Projects
-              </Text>
-            </Pressable>
-
-            {selectedProject && effectiveViewMode === 'workspace' ? (
-              <Text
-                style={[
-                  styles.passRatePill,
-                  { color: colors.success, fontFamily: monoFontFamily },
-                ]}
-              >
-                {metrics.passRate}% Pass
-              </Text>
-            ) : null}
-
             {(isOffline ||
               (syncStatus &&
                 (syncStatus.totalQueued > 0 ||
@@ -817,14 +754,25 @@ function QavoraQAShell() {
                   syncStatus.isSyncing))) ? (
               <Pressable
                 onPress={openDataManagementView}
+                hitSlop={{ top: 6, bottom: 6, left: 3, right: 3 }}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  syncStatus && syncStatus.conflictCount > 0
+                    ? `Sync conflicts: ${syncStatus.conflictCount}. Open Data Management`
+                    : isOffline
+                    ? `Offline mode${
+                        syncStatus && syncStatus.pendingCount > 0
+                          ? `, ${syncStatus.pendingCount} queued`
+                          : ''
+                      }. Open Data Management`
+                    : 'Synchronizing offline queue. Open Data Management'
+                }
                 style={[
                   styles.syncPillBtn,
                   {
                     backgroundColor:
                       syncStatus && syncStatus.conflictCount > 0
                         ? colors.dangerSoft
-                        : isOffline
-                        ? colors.surfaceAccent
                         : colors.surfaceAccent,
                     borderColor:
                       syncStatus && syncStatus.conflictCount > 0
@@ -835,7 +783,23 @@ function QavoraQAShell() {
                   },
                 ]}
               >
+                <VectorIcon
+                  name={
+                    syncStatus && syncStatus.conflictCount > 0
+                      ? 'alert-triangle'
+                      : 'refresh'
+                  }
+                  size={13}
+                  color={
+                    syncStatus && syncStatus.conflictCount > 0
+                      ? colors.danger
+                      : isOffline
+                      ? colors.warning
+                      : colors.primary
+                  }
+                />
                 <Text
+                  numberOfLines={1}
                   style={[
                     styles.syncPillText,
                     {
@@ -850,33 +814,191 @@ function QavoraQAShell() {
                   ]}
                 >
                   {syncStatus && syncStatus.conflictCount > 0
-                    ? `Conflict (${syncStatus.conflictCount})`
+                    ? String(syncStatus.conflictCount)
+                    : syncStatus && syncStatus.pendingCount > 0
+                    ? String(syncStatus.pendingCount)
                     : isOffline
-                    ? `Offline${
-                        syncStatus && syncStatus.pendingCount > 0
-                          ? ` (${syncStatus.pendingCount})`
-                          : ''
-                      }`
-                    : syncStatus && syncStatus.isSyncing
-                    ? 'Syncing...'
-                    : `Sync (${syncStatus.pendingCount})`}
+                    ? 'Off'
+                    : '...'}
                 </Text>
               </Pressable>
             ) : null}
 
+            {selectedProject ? (
+              <Pressable
+                onPress={() => openDefectsView()}
+                hitSlop={{ top: 6, bottom: 6, left: 3, right: 3 }}
+                accessibilityRole="button"
+                accessibilityLabel={`Defects${
+                  metrics.openDefects > 0
+                    ? `, ${metrics.openDefects} open`
+                    : ''
+                }`}
+                style={[
+                  styles.topActionIconBtn,
+                  {
+                    backgroundColor:
+                      activeDestination === NAVIGATION_DESTINATIONS.DEFECTS
+                        ? colors.primary
+                        : colors.surfaceAccent,
+                    borderColor:
+                      activeDestination === NAVIGATION_DESTINATIONS.DEFECTS
+                        ? colors.primary
+                        : metrics.openDefects > 0
+                        ? colors.danger
+                        : colors.border,
+                  },
+                ]}
+              >
+                <VectorIcon
+                  name="alert"
+                  size={15}
+                  color={
+                    activeDestination === NAVIGATION_DESTINATIONS.DEFECTS
+                      ? colors.textOnPrimary
+                      : metrics.openDefects > 0
+                      ? colors.danger
+                      : colors.textSecondary
+                  }
+                />
+                {metrics.openDefects > 0 ? (
+                  <View
+                    style={[
+                      styles.topIconCountBadge,
+                      {
+                        backgroundColor:
+                          activeDestination === NAVIGATION_DESTINATIONS.DEFECTS
+                            ? colors.surface
+                            : colors.danger,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.topIconCountBadgeText,
+                        {
+                          color:
+                            activeDestination ===
+                            NAVIGATION_DESTINATIONS.DEFECTS
+                              ? colors.primary
+                              : '#ffffff',
+                          fontFamily: monoFontFamily,
+                        },
+                      ]}
+                    >
+                      {metrics.openDefects > 99 ? '99+' : metrics.openDefects}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
+            ) : null}
+
             <Pressable
-              onPress={toggleTheme}
+              onPress={() => {
+                if (effectiveViewMode === 'selection' && selectedProject) {
+                  setProjectViewMode('workspace');
+                } else {
+                  openProjectSelection();
+                }
+              }}
+              hitSlop={{ top: 6, bottom: 6, left: 3, right: 3 }}
+              accessibilityRole="button"
+              accessibilityState={{
+                selected:
+                  effectiveViewMode === 'selection' ||
+                  effectiveViewMode === 'details',
+              }}
+              accessibilityLabel="My Projects switcher"
               style={[
-                styles.themeBtn,
+                styles.topActionIconBtn,
                 {
-                  backgroundColor: colors.surfaceAccent,
-                  borderColor: colors.primary,
+                  backgroundColor:
+                    effectiveViewMode === 'selection' ||
+                    effectiveViewMode === 'details'
+                      ? colors.primary
+                      : colors.surfaceAccent,
+                  borderColor:
+                    effectiveViewMode === 'selection' ||
+                    effectiveViewMode === 'details'
+                      ? colors.primary
+                      : colors.border,
                 },
               ]}
             >
-              <Text style={[styles.themeBtnText, { color: colors.primary }]}>
-                {isDark ? 'Light' : 'Dark'}
-              </Text>
+              <VectorIcon
+                name="folder"
+                size={15}
+                color={
+                  effectiveViewMode === 'selection' ||
+                  effectiveViewMode === 'details'
+                    ? colors.textOnPrimary
+                    : colors.primary
+                }
+              />
+            </Pressable>
+
+            <Pressable
+              onPress={toggleTheme}
+              hitSlop={{ top: 6, bottom: 6, left: 3, right: 3 }}
+              accessibilityRole="button"
+              accessibilityLabel={
+                isDark ? 'Switch to light theme' : 'Switch to dark theme'
+              }
+              style={[
+                styles.topActionIconBtn,
+                {
+                  backgroundColor: colors.surfaceAccent,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <VectorIcon
+                name={isDark ? 'sun' : 'moon'}
+                size={15}
+                color={colors.primary}
+              />
+            </Pressable>
+
+            <Pressable
+              onPress={openSettingsView}
+              hitSlop={{ top: 6, bottom: 6, left: 3, right: 3 }}
+              accessibilityRole="button"
+              accessibilityState={{
+                selected:
+                  !isChecklistsActive &&
+                  effectiveViewMode === 'workspace' &&
+                  activeTab === 'profile',
+              }}
+              accessibilityLabel="Profile and Settings"
+              style={[
+                styles.topActionIconBtn,
+                {
+                  backgroundColor:
+                    !isChecklistsActive &&
+                    effectiveViewMode === 'workspace' &&
+                    activeTab === 'profile'
+                      ? colors.primary
+                      : colors.surfaceAccent,
+                  borderColor:
+                    !isChecklistsActive &&
+                    effectiveViewMode === 'workspace' &&
+                    activeTab === 'profile'
+                      ? colors.primary
+                      : colors.border,
+                },
+              ]}
+            >
+              <VectorIcon
+                name="user"
+                size={15}
+                color={
+                  !isChecklistsActive &&
+                  effectiveViewMode === 'workspace' &&
+                  activeTab === 'profile'
+                    ? colors.textOnPrimary
+                    : colors.primary
+                }
+              />
             </Pressable>
           </View>
         </View>
@@ -1013,7 +1135,7 @@ function QavoraQAShell() {
         )}
       </View>
 
-      {/* Primary Mobile Bottom Navigation Bar */}
+      {/* Primary Mobile Bottom Navigation Bar (5 Icon-Based Destinations) */}
       <View
         style={[
           styles.bottomBar,
@@ -1023,23 +1145,68 @@ function QavoraQAShell() {
         <View style={styles.bottomBarInner}>
           {BOTTOM_TABS.map((tab) => {
             const active =
-              effectiveViewMode === 'workspace' &&
-              activeTab === tab.id &&
-              (tab.id === 'profile' || Boolean(selectedProject)) &&
-              (tab.id !== 'dashboard' || dashboardSubTab === 'overview');
-            const showOpenBugCount =
-              Boolean(selectedProject) &&
-              tab.id === 'defects' &&
-              metrics.openDefects > 0;
+              tab.id === 'checklists'
+                ? isChecklistsActive
+                : tab.id === 'profile'
+                ? !isChecklistsActive &&
+                  effectiveViewMode === 'workspace' &&
+                  activeTab === 'profile'
+                : tab.id === 'dashboard'
+                ? !isChecklistsActive &&
+                  effectiveViewMode === 'workspace' &&
+                  Boolean(selectedProject) &&
+                  activeTab === 'dashboard'
+                : !isChecklistsActive &&
+                  effectiveViewMode === 'workspace' &&
+                  Boolean(selectedProject) &&
+                  activeTab === tab.id;
+
+            const nestedIndicatorText =
+              active && tab.id === 'dashboard' && dashboardSubTab === 'reports'
+                ? 'Reports'
+                : active && tab.id === 'checklists'
+                ? checklistCreateModalOpen
+                  ? 'New'
+                  : activeChecklistId
+                  ? 'Runner'
+                  : null
+                : active && tab.id === 'testcases'
+                ? testCasesSubTab === 'plan'
+                  ? 'Plans'
+                  : testCasesSubTab === 'suites'
+                  ? 'Suites'
+                  : null
+                : active &&
+                  tab.id === 'testruns' &&
+                  (executingTestCaseId || testRunsViewMode === 'history')
+                ? executingTestCaseId
+                  ? 'Runner'
+                  : 'History'
+                : active && tab.id === 'profile' && profileSubView === 'data'
+                ? 'Data'
+                : null;
 
             return (
               <Pressable
                 key={tab.id}
                 onPress={() => {
+                  if (tab.id === 'checklists') {
+                    if (
+                      isChecklistsActive &&
+                      (activeChecklistId || checklistCreateModalOpen)
+                    ) {
+                      openChecklistsView({ keepRunner: false });
+                    } else {
+                      openChecklistsView({ keepRunner: true });
+                    }
+                    return;
+                  }
+
                   if (tab.id === 'profile') {
                     openSettingsView();
                     return;
                   }
+
                   if (!selectedProject) {
                     setProjectViewMode('selection');
                     if (showToast) {
@@ -1050,23 +1217,76 @@ function QavoraQAShell() {
                     }
                     return;
                   }
+
+                  if (tab.id === 'dashboard') {
+                    openDashboardOverview();
+                    return;
+                  }
+
+                  if (tab.id === 'testcases') {
+                    openTestCasesView('cases');
+                    setSelectedTestCaseId(null);
+                    return;
+                  }
+
+                  if (tab.id === 'testruns') {
+                    openTestExecutionView({ viewMode: 'runs' });
+                    return;
+                  }
+
                   setProjectViewMode('workspace');
                   setActiveTab(tab.id, {
                     clearSelectedCase: true,
                     clearSelectedDefect: true,
                   });
-                  if (tab.id === 'dashboard') {
-                    setDashboardSubTab('overview');
-                  } else if (tab.id === 'testcases') {
-                    setTestCasesSubTab('cases');
-                  } else if (tab.id === 'testruns') {
-                    setTestRunsViewMode('runs');
-                  }
                 }}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={
+                  nestedIndicatorText
+                    ? `${tab.accessibilityLabel || tab.label}, ${nestedIndicatorText} active`
+                    : tab.accessibilityLabel || tab.label
+                }
                 style={styles.bottomTabBtn}
               >
+                {active && (
+                  <View
+                    style={[
+                      styles.activeBarIndicator,
+                      { backgroundColor: colors.primary },
+                    ]}
+                  />
+                )}
+
+                <View
+                  style={[
+                    styles.bottomTabIconPill,
+                    {
+                      backgroundColor: active
+                        ? colors.surfaceAccent
+                        : 'transparent',
+                      borderColor: active ? colors.primary : 'transparent',
+                    },
+                  ]}
+                >
+                  <VectorIcon
+                    name={tab.icon}
+                    size={17}
+                    color={active ? colors.primary : colors.textSecondary}
+                  />
+                  {nestedIndicatorText ? (
+                    <View
+                      style={[
+                        styles.bottomTabNestedDot,
+                        { backgroundColor: colors.primary },
+                      ]}
+                    />
+                  ) : null}
+                </View>
+
                 <Text
                   numberOfLines={1}
+                  ellipsizeMode="tail"
                   style={[
                     styles.bottomTabLabel,
                     {
@@ -1076,16 +1296,7 @@ function QavoraQAShell() {
                   ]}
                 >
                   {tab.label}
-                  {showOpenBugCount ? ` (${metrics.openDefects})` : ''}
                 </Text>
-                {active && (
-                  <View
-                    style={[
-                      styles.activeBarIndicator,
-                      { backgroundColor: colors.primary },
-                    ]}
-                  />
-                )}
               </Pressable>
             );
           })}
@@ -1504,103 +1715,104 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   topBar: {
-    minHeight: 54,
+    height: 56,
+    minHeight: 56,
+    maxHeight: 56,
     borderBottomWidth: 1,
     justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 8,
   },
   topBarInner: {
     maxWidth: 920,
     width: '100%',
+    height: 56,
     alignSelf: 'center',
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     alignItems: 'center',
     justifyContent: 'space-between',
-    columnGap: 8,
-    rowGap: 6,
+    gap: 6,
   },
   brandLockup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 7,
     flex: 1,
     flexShrink: 1,
-    minWidth: 145,
+    minWidth: 0,
+    height: 44,
   },
   brandBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 9,
+    width: 28,
+    height: 28,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   brandBadgeText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
   },
   brandTextWrap: {
     flex: 1,
     flexShrink: 1,
+    minWidth: 0,
+    justifyContent: 'center',
   },
   brandTitle: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
   },
   screenSubtitle: {
-    fontSize: 11,
+    fontSize: 10,
+    marginTop: 1,
   },
   topRightUtilities: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: 6,
-    flexShrink: 1,
+    gap: 4,
+    flexShrink: 0,
   },
-  projectSwitchBtn: {
-    minHeight: 34,
-    paddingHorizontal: 9,
+  topActionIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 9,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  topIconCountBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 15,
+    height: 15,
     borderRadius: 8,
+    paddingHorizontal: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  topIconCountBadgeText: {
+    fontSize: 8.5,
+    fontWeight: '700',
+  },
+  syncPillBtn: {
+    height: 36,
+    paddingHorizontal: 7,
+    borderRadius: 9,
     borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-  },
-  projectSwitchBtnText: {
-    fontSize: 11.5,
-    fontWeight: '700',
-  },
-  passRatePill: {
-    fontSize: 11.5,
-    fontWeight: '700',
-  },
-  syncPillBtn: {
-    minHeight: 34,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    gap: 3,
   },
   syncPillText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  themeBtn: {
-    minHeight: 34,
-    minWidth: 46,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  themeBtnText: {
-    fontSize: 11.5,
+    fontSize: 10,
     fontWeight: '700',
   },
   toastBanner: {
@@ -1625,10 +1837,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   bottomBar: {
-    minHeight: 58,
+    minHeight: 60,
     borderTopWidth: 1,
     justifyContent: 'center',
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
+    paddingVertical: 2,
   },
   bottomBarInner: {
     maxWidth: 920,
@@ -1640,31 +1853,55 @@ const styles = StyleSheet.create({
   },
   bottomTabBtn: {
     flex: 1,
-    minHeight: 48,
+    minHeight: 54,
+    minWidth: 48,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 2,
+    paddingTop: 5,
+    paddingBottom: 4,
+    position: 'relative',
+    gap: 3,
+  },
+  bottomTabIconPill: {
+    width: 36,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
     position: 'relative',
   },
+  bottomTabNestedDot: {
+    position: 'absolute',
+    top: 2,
+    right: 4,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
   bottomTabLabel: {
-    fontSize: 10.5,
+    fontSize: 10,
+    lineHeight: 12,
     textAlign: 'center',
     flexShrink: 1,
   },
   activeBarIndicator: {
     position: 'absolute',
-    bottom: 4,
-    width: 22,
+    top: 0,
+    width: 24,
     height: 3,
-    borderRadius: 2,
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 2,
   },
   drawerMenuBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
+    width: 38,
+    height: 38,
+    borderRadius: 9,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   drawerOverlayRoot: {
     ...StyleSheet.absoluteFillObject,

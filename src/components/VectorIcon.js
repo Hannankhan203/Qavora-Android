@@ -37,6 +37,13 @@ export const SUPPORTED_VECTOR_ICON_NAMES = [
   'clipboard',
   'list',
   'menu',
+  'dashboard',
+  'grid',
+  'play',
+  'play-circle',
+  'user',
+  'sun',
+  'moon',
 ];
 
 export default function VectorIcon({
@@ -965,6 +972,180 @@ export default function VectorIcon({
               height: stroke,
               backgroundColor: color,
               borderRadius: stroke,
+            }}
+          />
+        </View>
+      );
+    }
+
+    case 'dashboard':
+    case 'grid': {
+      const cell = size * 0.31;
+      const gap = size * 0.1;
+      const cellRadius = Math.max(1.5, size * 0.08);
+      return (
+        <View style={boxStyle}>
+          <View style={{ gap }}>
+            <View style={{ flexDirection: 'row', gap }}>
+              <View
+                style={{
+                  width: cell,
+                  height: cell,
+                  borderRadius: cellRadius,
+                  borderWidth: stroke,
+                  borderColor: color,
+                }}
+              />
+              <View
+                style={{
+                  width: cell,
+                  height: cell,
+                  borderRadius: cellRadius,
+                  borderWidth: stroke,
+                  borderColor: color,
+                }}
+              />
+            </View>
+            <View style={{ flexDirection: 'row', gap }}>
+              <View
+                style={{
+                  width: cell,
+                  height: cell,
+                  borderRadius: cellRadius,
+                  borderWidth: stroke,
+                  borderColor: color,
+                }}
+              />
+              <View
+                style={{
+                  width: cell,
+                  height: cell,
+                  borderRadius: cellRadius,
+                  borderWidth: stroke,
+                  borderColor: color,
+                }}
+              />
+            </View>
+          </View>
+        </View>
+      );
+    }
+
+    case 'play':
+    case 'play-circle': {
+      const ring = size * 0.78;
+      const arm = size * 0.24;
+      return (
+        <View style={boxStyle}>
+          <View
+            style={{
+              width: ring,
+              height: ring,
+              borderRadius: ring / 2,
+              borderWidth: stroke,
+              borderColor: color,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <View
+              style={{
+                width: arm,
+                height: arm,
+                borderTopWidth: stroke,
+                borderRightWidth: stroke,
+                borderColor: color,
+                transform: [
+                  { translateX: -size * 0.03 },
+                  { rotate: '45deg' },
+                ],
+              }}
+            />
+          </View>
+        </View>
+      );
+    }
+
+    case 'user': {
+      const head = size * 0.34;
+      const bodyW = size * 0.66;
+      const bodyH = size * 0.28;
+      return (
+        <View style={boxStyle}>
+          <View
+            style={{
+              width: head,
+              height: head,
+              borderRadius: head / 2,
+              borderWidth: stroke,
+              borderColor: color,
+              marginBottom: size * 0.06,
+            }}
+          />
+          <View
+            style={{
+              width: bodyW,
+              height: bodyH,
+              borderTopLeftRadius: bodyW / 2,
+              borderTopRightRadius: bodyW / 2,
+              borderWidth: stroke,
+              borderBottomWidth: 0,
+              borderColor: color,
+            }}
+          />
+        </View>
+      );
+    }
+
+    case 'sun': {
+      const core = size * 0.44;
+      const ray = size * 0.76;
+      return (
+        <View style={boxStyle}>
+          <View
+            style={{
+              position: 'absolute',
+              width: ray,
+              height: stroke,
+              backgroundColor: color,
+              borderRadius: stroke,
+            }}
+          />
+          <View
+            style={{
+              position: 'absolute',
+              width: stroke,
+              height: ray,
+              backgroundColor: color,
+              borderRadius: stroke,
+            }}
+          />
+          <View
+            style={{
+              width: core,
+              height: core,
+              borderRadius: core / 2,
+              borderWidth: stroke,
+              borderColor: color,
+            }}
+          />
+        </View>
+      );
+    }
+
+    case 'moon': {
+      const outer = size * 0.68;
+      return (
+        <View style={boxStyle}>
+          <View
+            style={{
+              width: outer,
+              height: outer,
+              borderRadius: outer / 2,
+              borderWidth: stroke,
+              borderColor: color,
+              borderRightColor: 'transparent',
+              transform: [{ rotate: '-35deg' }],
             }}
           />
         </View>
