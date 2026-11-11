@@ -47,6 +47,7 @@ import {
 } from '../services/offlineSyncService';
 
 export default function ChecklistsScreen({
+  embedded = false,
   onBackToOverview,
   activeChecklistId: controlledActiveChecklistId,
   onChangeActiveChecklistId,
@@ -1483,7 +1484,10 @@ export default function ChecklistsScreen({
       >
         <ScrollView
           ref={detailScrollRef}
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[
+            styles.content,
+            embedded && styles.contentEmbedded,
+          ]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
         >
@@ -3003,43 +3007,49 @@ export default function ChecklistsScreen({
                 { backgroundColor: colors.surface, borderColor: colors.border },
               ]}
             >
+              <View style={styles.promoteModalHeaderRow}>
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={[
+                      styles.sectionKicker,
+                      { color: colors.primary, fontFamily: monoFontFamily },
+                    ]}
+                  >
+                    CHECKLIST-TO-PROJECT PROMOTION
+                  </Text>
+                  <Text
+                    accessibilityRole="header"
+                    style={[
+                      styles.modalTitle,
+                      { color: colors.text, marginBottom: 4 },
+                    ]}
+                  >
+                    Promote Checklist to Project
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={closePromoteModal}
+                  disabled={isPromoting}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close promote checklist modal"
+                  style={[
+                    styles.iconBtn,
+                    {
+                      backgroundColor: colors.background,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <VectorIcon name="close" size={16} color={colors.textSecondary} />
+                </Pressable>
+              </View>
+
               <ScrollView
+                style={styles.modalScrollArea}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
               >
-                <View style={styles.promoteModalHeaderRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={[
-                        styles.sectionKicker,
-                        { color: colors.primary, fontFamily: monoFontFamily },
-                      ]}
-                    >
-                      CHECKLIST-TO-PROJECT PROMOTION
-                    </Text>
-                    <Text
-                      style={[
-                        styles.modalTitle,
-                        { color: colors.text, marginBottom: 4 },
-                      ]}
-                    >
-                      Promote Checklist to Project
-                    </Text>
-                  </View>
-                  <Pressable
-                    onPress={closePromoteModal}
-                    disabled={isPromoting}
-                    style={[
-                      styles.iconBtn,
-                      {
-                        backgroundColor: colors.background,
-                        borderColor: colors.border,
-                      },
-                    ]}
-                  >
-                    <VectorIcon name="x" size={16} color={colors.textSecondary} />
-                  </Pressable>
-                </View>
 
                 {/* Source Checklist Summary Box */}
                 {promoteSourceChecklist ? (
@@ -3891,33 +3901,51 @@ export default function ChecklistsScreen({
                         ) : null}
                       </View>
                     ) : null}
+                  </>
+                )}
+              </ScrollView>
 
-                    {/* Modal Footer Actions */}
-                    <View style={styles.modalActionsRow}>
-                      <Pressable
-                        onPress={closePromoteModal}
-                        disabled={isPromoting}
-                        style={[
-                          styles.modalCancelBtn,
-                          {
-                            backgroundColor: colors.background,
-                            borderColor: colors.borderStrong,
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.modalCancelText,
-                            { color: colors.text },
-                          ]}
-                        >
-                          Cancel
-                        </Text>
-                      </Pressable>
+              {!promoteSuccessResult ? (
+                <View style={styles.modalActionsRow}>
+                  <Pressable
+                    onPress={closePromoteModal}
+                    disabled={isPromoting}
+                    style={[
+                      styles.modalCancelBtn,
+                      {
+                        backgroundColor: colors.background,
+                        borderColor: colors.borderStrong,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.modalCancelText,
+                        { color: colors.text },
+                      ]}
+                    >
+                      Cancel
+                    </Text>
+                  </Pressable>
 
-                      <Pressable
-                        onPress={handleConfirmPromoteChecklist}
-                        disabled={
+                  <Pressable
+                    onPress={handleConfirmPromoteChecklist}
+                    disabled={
+                      isPromoting ||
+                      availableProjects.length === 0 ||
+                      !promoteTargetProjectId ||
+                      Boolean(
+                        promotionPreview &&
+                          promotionPreview.alreadyFullyPromoted
+                      )
+                    }
+                    style={[
+                      styles.modalConfirmBtn,
+                      {
+                        backgroundColor: colors.primary,
+                        flexDirection: 'row',
+                        gap: 6,
+                        opacity:
                           isPromoting ||
                           availableProjects.length === 0 ||
                           !promoteTargetProjectId ||
@@ -3925,48 +3953,31 @@ export default function ChecklistsScreen({
                             promotionPreview &&
                               promotionPreview.alreadyFullyPromoted
                           )
-                        }
-                        style={[
-                          styles.modalConfirmBtn,
-                          {
-                            backgroundColor: colors.primary,
-                            flexDirection: 'row',
-                            gap: 6,
-                            opacity:
-                              isPromoting ||
-                              availableProjects.length === 0 ||
-                              !promoteTargetProjectId ||
-                              Boolean(
-                                promotionPreview &&
-                                  promotionPreview.alreadyFullyPromoted
-                              )
-                                ? 0.55
-                                : 1,
-                          },
-                        ]}
-                      >
-                        <VectorIcon
-                          name="layers"
-                          size={14}
-                          color={colors.textOnPrimary}
-                        />
-                        <Text
-                          style={[
-                            styles.modalConfirmText,
-                            { color: colors.textOnPrimary },
-                          ]}
-                        >
-                          {isPromoting
-                            ? 'Promoting...'
-                            : promotionPreview?.alreadyFullyPromoted
-                            ? 'Already Promoted'
-                            : 'Confirm & Promote'}
-                        </Text>
-                      </Pressable>
-                    </View>
-                  </>
-                )}
-              </ScrollView>
+                            ? 0.55
+                            : 1,
+                      },
+                    ]}
+                  >
+                    <VectorIcon
+                      name="layers"
+                      size={14}
+                      color={colors.textOnPrimary}
+                    />
+                    <Text
+                      style={[
+                        styles.modalConfirmText,
+                        { color: colors.textOnPrimary },
+                      ]}
+                    >
+                      {isPromoting
+                        ? 'Promoting...'
+                        : promotionPreview?.alreadyFullyPromoted
+                        ? 'Already Promoted'
+                        : 'Confirm & Promote'}
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : null}
             </View>
           </View>
         </Modal>
@@ -3980,7 +3991,10 @@ export default function ChecklistsScreen({
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          embedded && styles.contentEmbedded,
+        ]}
         keyboardShouldPersistTaps="handled"
       >
         {/* Top Module Header & Primary Actions */}
@@ -4875,11 +4889,16 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 14,
     paddingTop: 12,
-    paddingBottom: 96,
+    paddingBottom: 28,
     maxWidth: 960,
     width: '100%',
     alignSelf: 'center',
     gap: 12,
+  },
+  contentEmbedded: {
+    paddingHorizontal: 0,
+    paddingTop: 2,
+    paddingBottom: 8,
   },
   card: {
     borderRadius: 16,
@@ -4900,7 +4919,7 @@ const styles = StyleSheet.create({
   },
   headerTextCol: {
     flex: 1,
-    minWidth: 220,
+    minWidth: 190,
   },
   sectionKicker: {
     fontSize: 11,
@@ -5264,11 +5283,13 @@ const styles = StyleSheet.create({
   },
   addItemRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     marginTop: 6,
   },
   addItemInput: {
     flex: 1,
+    minWidth: 180,
     minHeight: 44,
     borderWidth: 1,
     borderRadius: 10,
@@ -5461,6 +5482,7 @@ const styles = StyleSheet.create({
   },
   modalActionsRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'flex-end',
     gap: 10,
     marginTop: 8,

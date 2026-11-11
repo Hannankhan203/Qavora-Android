@@ -1928,7 +1928,10 @@ export default function ReportsView() {
         animationType="slide"
         onRequestClose={() => setPreviewModalVisible(false)}
       >
-        <View style={styles.modalBackdrop} accessibilityViewIsModal={true}>
+        <View
+          style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+          accessibilityViewIsModal={true}
+        >
           <View
             style={[
               styles.modalSheet,
@@ -2448,6 +2451,7 @@ const styles = StyleSheet.create({
   timelineCounts: {
     fontSize: 11,
     flex: 1,
+    minWidth: 120,
     textAlign: 'center',
   },
   timelineRate: {
@@ -2525,7 +2529,6 @@ const styles = StyleSheet.create({
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.65)',
     justifyContent: 'center',
     padding: 16,
   },
@@ -2577,7 +2580,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   previewCodeScroll: {
-    maxHeight: 360,
+    flexShrink: 1,
+    maxHeight: 340,
     borderRadius: 10,
     borderWidth: 1,
   },

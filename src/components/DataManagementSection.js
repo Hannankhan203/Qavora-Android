@@ -2121,7 +2121,10 @@ export default function DataManagementSection() {
         animationType="fade"
         onRequestClose={() => setExportPreview(null)}
       >
-        <View style={styles.modalBackdrop} accessibilityViewIsModal={true}>
+        <View
+          style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+          accessibilityViewIsModal={true}
+        >
           <View
             style={[
               styles.modalCard,
@@ -2235,37 +2238,48 @@ export default function DataManagementSection() {
         animationType="fade"
         onRequestClose={() => setImportPreview(null)}
       >
-        <View style={styles.modalBackdrop} accessibilityViewIsModal={true}>
+        <View
+          style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+          accessibilityViewIsModal={true}
+        >
           <View
             style={[
               styles.modalCard,
               { backgroundColor: colors.surface, borderColor: colors.border },
             ]}
           >
-            <Text
-              style={[
-                styles.sectionKicker,
-                { color: colors.primary, fontFamily: monoFontFamily },
-              ]}
+            <View>
+              <Text
+                style={[
+                  styles.sectionKicker,
+                  { color: colors.primary, fontFamily: monoFontFamily },
+                ]}
+              >
+                VALIDATED IMPORT PREVIEW
+              </Text>
+              <Text
+                accessibilityRole="header"
+                style={[styles.modalTitle, { color: colors.text, flex: 0 }]}
+              >
+                Confirm Workspace Restore ({importPreview?.formatType})
+              </Text>
+              <Text
+                style={[
+                  styles.snapshotMeta,
+                  { color: colors.textMuted, fontFamily: monoFontFamily },
+                ]}
+              >
+                Source: {importPreview?.fileName || 'Qavora_Import.json'} ·{' '}
+                {importPreview?.fileSize || 0} bytes · Schema v
+                {importPreview?.schemaVersion || 1}
+              </Text>
+            </View>
+
+            <ScrollView
+              style={{ flexShrink: 1 }}
+              contentContainerStyle={{ gap: 10 }}
+              showsVerticalScrollIndicator={false}
             >
-              VALIDATED IMPORT PREVIEW
-            </Text>
-            <Text
-              accessibilityRole="header"
-              style={[styles.modalTitle, { color: colors.text }]}
-            >
-              Confirm Workspace Restore ({importPreview?.formatType})
-            </Text>
-            <Text
-              style={[
-                styles.snapshotMeta,
-                { color: colors.textMuted, fontFamily: monoFontFamily },
-              ]}
-            >
-              Source: {importPreview?.fileName || 'Qavora_Import.json'} ·{' '}
-              {importPreview?.fileSize || 0} bytes · Schema v
-              {importPreview?.schemaVersion || 1}
-            </Text>
 
             <View
               style={[
@@ -2448,6 +2462,7 @@ export default function DataManagementSection() {
                 </Text>
               </Pressable>
             </View>
+            </ScrollView>
 
             <View style={styles.actionButtonsRow}>
               <Pressable
@@ -2512,54 +2527,63 @@ export default function DataManagementSection() {
         animationType="fade"
         onRequestClose={() => setConfirmActionModal(null)}
       >
-        <View style={styles.modalBackdrop} accessibilityViewIsModal={true}>
+        <View
+          style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+          accessibilityViewIsModal={true}
+        >
           <View
             style={[
               styles.modalCard,
               { backgroundColor: colors.surface, borderColor: colors.border },
             ]}
           >
-            <Text
-              style={[
-                styles.sectionKicker,
-                { color: colors.danger, fontFamily: monoFontFamily },
-              ]}
+            <ScrollView
+              style={{ flexShrink: 1 }}
+              contentContainerStyle={{ gap: 8 }}
+              showsVerticalScrollIndicator={false}
             >
-              CONFIRM PROTECTED DATA OPERATION
-            </Text>
-            <Text
-              accessibilityRole="header"
-              style={[styles.modalTitle, { color: colors.text }]}
-            >
-              {confirmActionModal?.title}
-            </Text>
-            <Text
-              style={[styles.sectionDesc, { color: colors.textSecondary }]}
-            >
-              {confirmActionModal?.description}
-            </Text>
-
-            {confirmActionModal?.type === 'workspace_reset' ? (
-              <Pressable
-                onPress={handleExportFullBackupJSON}
-                accessibilityRole="button"
-                accessibilityLabel="Download Full Backup First"
+              <Text
                 style={[
-                  styles.secondaryBtn,
-                  {
-                    backgroundColor: colors.surfaceAccent,
-                    borderColor: colors.primary,
-                    marginBottom: 10,
-                  },
+                  styles.sectionKicker,
+                  { color: colors.danger, fontFamily: monoFontFamily },
                 ]}
               >
-                <Text
-                  style={[styles.secondaryBtnText, { color: colors.primary }]}
+                CONFIRM PROTECTED DATA OPERATION
+              </Text>
+              <Text
+                accessibilityRole="header"
+                style={[styles.modalTitle, { color: colors.text, flex: 0 }]}
+              >
+                {confirmActionModal?.title}
+              </Text>
+              <Text
+                style={[styles.sectionDesc, { color: colors.textSecondary }]}
+              >
+                {confirmActionModal?.description}
+              </Text>
+
+              {confirmActionModal?.type === 'workspace_reset' ? (
+                <Pressable
+                  onPress={handleExportFullBackupJSON}
+                  accessibilityRole="button"
+                  accessibilityLabel="Download Full Backup First"
+                  style={[
+                    styles.secondaryBtn,
+                    {
+                      backgroundColor: colors.surfaceAccent,
+                      borderColor: colors.primary,
+                      marginBottom: 4,
+                    },
+                  ]}
                 >
-                  Download Full Backup First
-                </Text>
-              </Pressable>
-            ) : null}
+                  <Text
+                    style={[styles.secondaryBtnText, { color: colors.primary }]}
+                  >
+                    Download Full Backup First
+                  </Text>
+                </Pressable>
+              ) : null}
+            </ScrollView>
 
             <View style={styles.actionButtonsRow}>
               <Pressable
@@ -2950,7 +2974,6 @@ const styles = StyleSheet.create({
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(9, 13, 22, 0.72)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 16,
@@ -2978,6 +3001,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   previewScrollBox: {
+    flexShrink: 1,
     maxHeight: 340,
     borderWidth: 1,
     borderRadius: 10,

@@ -277,6 +277,7 @@ export default function DashboardScreen({ onNavigateToDestination }) {
           <ReportsView />
         ) : dashboardSubTab === 'checklists' ? (
           <ChecklistsScreen
+            embedded={true}
             activeChecklistId={activeChecklistId}
             onChangeActiveChecklistId={setActiveChecklistId}
             createModalOpen={checklistCreateModalOpen}

@@ -1460,6 +1460,7 @@ export default function DefectsScreen() {
                 </View>
 
                 <ScrollView
+                  style={styles.modalScrollArea}
                   showsVerticalScrollIndicator={false}
                   contentContainerStyle={styles.modalBody}
                 >
@@ -2771,10 +2772,10 @@ const styles = StyleSheet.create({
   },
   kpiChip: {
     flex: 1,
-    minWidth: 58,
+    minWidth: 56,
     alignItems: 'center',
     paddingVertical: 6,
-    paddingHorizontal: 4,
+    paddingHorizontal: 3,
     borderRadius: 9,
   },
   kpiVal: {

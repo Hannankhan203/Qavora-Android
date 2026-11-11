@@ -1104,7 +1104,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 14,
     paddingTop: 14,
-    paddingBottom: 96,
+    paddingBottom: 28,
     maxWidth: 920,
     width: '100%',
     alignSelf: 'center',
@@ -1118,8 +1118,10 @@ const styles = StyleSheet.create({
   },
   heroTopRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+    gap: 8,
   },
   heroTitleCol: {
     flex: 1,
@@ -1416,6 +1418,7 @@ const styles = StyleSheet.create({
   },
   cardTopRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
@@ -1426,6 +1429,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
     flex: 1,
+    minWidth: 150,
   },
   statusBadge: {
     paddingHorizontal: 9,

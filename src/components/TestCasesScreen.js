@@ -2226,7 +2226,7 @@ export default function TestCasesScreen({
         transparent
         onRequestClose={() => setSelectedTestCaseId(null)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}>
           <View
             style={[
               styles.modalSheet,
@@ -2749,7 +2749,7 @@ export default function TestCasesScreen({
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}
+          style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}
         >
           <View
             style={[
@@ -3223,7 +3223,12 @@ export default function TestCasesScreen({
         transparent
         onRequestClose={() => !isMovingCase && setMovingCase(null)}
       >
-        <View style={styles.centeredModalOverlay}>
+        <View
+          style={[
+            styles.centeredModalOverlay,
+            { backgroundColor: colors.overlay },
+          ]}
+        >
           <View
             style={[
               styles.smallModalCard,
@@ -3253,7 +3258,11 @@ export default function TestCasesScreen({
                   destination suite below:
                 </Text>
 
-                <View style={styles.suiteSelectList}>
+                <ScrollView
+                  style={{ flexShrink: 1, maxHeight: 240 }}
+                  contentContainerStyle={styles.suiteSelectList}
+                  showsVerticalScrollIndicator={false}
+                >
                   {suites.map((s) => {
                     const active = moveTargetSuiteId === s.id;
                     return (
@@ -3290,7 +3299,7 @@ export default function TestCasesScreen({
                       </Pressable>
                     );
                   })}
-                </View>
+                </ScrollView>
 
                 <View style={styles.smallModalActions}>
                   <Pressable
@@ -3343,7 +3352,12 @@ export default function TestCasesScreen({
         transparent
         onRequestClose={() => !isDeletingCase && setDeletingCase(null)}
       >
-        <View style={styles.centeredModalOverlay}>
+        <View
+          style={[
+            styles.centeredModalOverlay,
+            { backgroundColor: colors.overlay },
+          ]}
+        >
           <View
             style={[
               styles.smallModalCard,
@@ -3432,7 +3446,10 @@ export default function TestCasesScreen({
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.centeredModalOverlay}
+          style={[
+            styles.centeredModalOverlay,
+            { backgroundColor: colors.overlay },
+          ]}
         >
           <View
             style={[
@@ -3705,7 +3722,12 @@ export default function TestCasesScreen({
         transparent
         onRequestClose={() => !isDeletingSuite && setDeletingSuite(null)}
       >
-        <View style={styles.centeredModalOverlay}>
+        <View
+          style={[
+            styles.centeredModalOverlay,
+            { backgroundColor: colors.overlay },
+          ]}
+        >
           <View
             style={[
               styles.smallModalCard,
@@ -3948,7 +3970,7 @@ export default function TestCasesScreen({
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}
+          style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}
         >
           <View
             style={[
@@ -4188,7 +4210,10 @@ export default function TestCasesScreen({
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.centeredModalOverlay}
+          style={[
+            styles.centeredModalOverlay,
+            { backgroundColor: colors.overlay },
+          ]}
         >
           <View
             style={[
@@ -4318,7 +4343,12 @@ export default function TestCasesScreen({
         transparent
         onRequestClose={() => !isDeletingPhase && setDeletingPhase(null)}
       >
-        <View style={styles.centeredModalOverlay}>
+        <View
+          style={[
+            styles.centeredModalOverlay,
+            { backgroundColor: colors.overlay },
+          ]}
+        >
           <View
             style={[
               styles.smallModalCard,
@@ -4984,7 +5014,6 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(2, 6, 23, 0.72)',
     justifyContent: 'flex-end',
   },
   modalSheet: {
@@ -5067,10 +5096,12 @@ const styles = StyleSheet.create({
   },
   metaGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
   },
   metaCell: {
     flex: 1,
+    minWidth: 86,
     borderRadius: 10,
     borderWidth: 1,
     padding: 10,
@@ -5116,6 +5147,7 @@ const styles = StyleSheet.create({
   },
   modalFooter: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     padding: 14,
     borderTopWidth: 1,
     gap: 8,
@@ -5134,6 +5166,7 @@ const styles = StyleSheet.create({
   },
   footerSecondaryBtn: {
     flex: 1,
+    minWidth: 88,
     paddingVertical: 11,
     borderRadius: 10,
     borderWidth: 1,
@@ -5146,6 +5179,7 @@ const styles = StyleSheet.create({
   },
   footerPrimaryBtn: {
     flex: 1,
+    minWidth: 88,
     paddingVertical: 11,
     borderRadius: 10,
     alignItems: 'center',
@@ -5237,7 +5271,6 @@ const styles = StyleSheet.create({
   },
   centeredModalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(2, 6, 23, 0.72)',
     justifyContent: 'center',
     padding: 20,
   },

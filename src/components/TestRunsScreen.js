@@ -2881,7 +2881,9 @@ export default function TestRunsScreen({
                 </View>
               </View>
 
-              <View
+              <ScrollView
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={true}
                 style={[
                   styles.casePickerBox,
                   {
@@ -2944,7 +2946,7 @@ export default function TestRunsScreen({
                     );
                   })
                 )}
-              </View>
+              </ScrollView>
 
               <Text
                 style={[styles.inputLabel, { color: theme.textSecondary }]}
@@ -3498,6 +3500,7 @@ const styles = StyleSheet.create({
   },
   summaryTopRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     gap: 10,
@@ -3967,9 +3970,10 @@ const styles = StyleSheet.create({
     minWidth: 130,
   },
   runnerFooter: {
-    padding: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderTopWidth: 1,
-    gap: 10,
+    gap: 8,
   },
   runnerFooterTitle: {
     fontSize: 11,
