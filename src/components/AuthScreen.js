@@ -1,11 +1,18 @@
 /**
- * Qavora Android — Authentication Screen (Phase 1B)
+ * Qavora Android — Authentication Screen (Phase 1B & MEDIUM-3 Keyboard UX + Safe Diagnostics)
  *
  * Provides Login and Registration workflows aligned with Qavora Web's
  * authentication experience (`authUI.js`) and Qavora Android's theme tokens.
+ *
+ * Keyboard & Error UX Guarantees (MEDIUM-3):
+ * - Keyboard-aware layout and automatic scroll-to-focused-input on narrow Android screens (360dp).
+ * - Full Next/Done return-key navigation across Login and Registration fields.
+ * - Inline + label-row password visibility toggles accessible while the keyboard is open.
+ * - Password-manager and autofill compatibility (`autoComplete`, `textContentType`, `importantForAutofill`).
+ * - Field-level validation feedback + sanitized user-facing error messages via `formatAuthErrorMessage`.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -14,6 +21,7 @@ import {
   Pressable,
   ScrollView,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   ActivityIndicator,
 } from 'react-native';
@@ -22,7 +30,10 @@ import { StatusBar } from 'expo-status-bar';
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useAuth } from '../context/AuthContext';
 import { checkBackendHealth, getApiBaseUrl } from '../services/apiClient';
-import { EMAIL_REGEX } from '../services/authService';
+import {
+  EMAIL_REGEX,
+  formatAuthErrorMessage,
+} from '../services/authService';
 
 const ROLE_OPTIONS = [
   'QA Tester',
@@ -56,17 +67,123 @@ export default function AuthScreen() {
   const [registerPassword, setRegisterPassword] = useState('');
   const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
+  const [showRegisterConfirmPassword, setShowRegisterConfirmPassword] =
+    useState(false);
 
-  // Local validation message
+  // Field-level & form-level validation state
   const [localError, setLocalError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [focusedField, setFocusedField] = useState(null);
+
+  // Keyboard tracking state for narrow Android screens
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // Refs for scroll management and Next/Done input focus chaining
+  const scrollViewRef = useRef(null);
+  const authCardYRef = useRef(0);
+  const formSectionYRef = useRef(0);
+  const fieldOffsetsRef = useRef({});
+  const focusedFieldRef = useRef(null);
+
+  const loginEmailInputRef = useRef(null);
+  const loginPasswordInputRef = useRef(null);
+  const registerNameInputRef = useRef(null);
+  const registerEmailInputRef = useRef(null);
+  const registerPasswordInputRef = useRef(null);
+  const registerConfirmPasswordInputRef = useRef(null);
 
   // Backend health status
   const [healthState, setHealthState] = useState({
     checking: true,
     ok: false,
     database: null,
-    message: 'Checking backend connection...',
+    message: 'Checking server connection...',
   });
+
+  /**
+   * Scrolls the ScrollView so the specified field and adjacent controls remain
+   * clearly visible above the software keyboard on narrow Android screens.
+   */
+  const scrollToField = useCallback((fieldKey, delayMs = 60) => {
+    if (!fieldKey) return;
+    setTimeout(() => {
+      if (!scrollViewRef.current) return;
+      const fieldY = fieldOffsetsRef.current[fieldKey];
+      if (typeof fieldY === 'number') {
+        const targetY = Math.max(
+          0,
+          authCardYRef.current + formSectionYRef.current + fieldY - 28
+        );
+        scrollViewRef.current.scrollTo({ y: targetY, animated: true });
+      }
+    }, delayMs);
+  }, []);
+
+  // Track Android / iOS software keyboard open & close events
+  useEffect(() => {
+    const showEvent =
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent =
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, (event) => {
+      const height =
+        (event &&
+          event.endCoordinates &&
+          typeof event.endCoordinates.height === 'number' &&
+          event.endCoordinates.height) ||
+        280;
+      setIsKeyboardVisible(true);
+      setKeyboardHeight(height);
+      if (focusedFieldRef.current) {
+        scrollToField(focusedFieldRef.current, 80);
+      }
+    });
+
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setIsKeyboardVisible(false);
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [scrollToField]);
+
+  const handleFieldFocus = useCallback(
+    (fieldKey) => {
+      focusedFieldRef.current = fieldKey;
+      setFocusedField(fieldKey);
+      scrollToField(fieldKey, 90);
+    },
+    [scrollToField]
+  );
+
+  const handleFieldBlur = useCallback((fieldKey) => {
+    if (focusedFieldRef.current === fieldKey) {
+      focusedFieldRef.current = null;
+    }
+    setFocusedField((prev) => (prev === fieldKey ? null : prev));
+  }, []);
+
+  const recordFieldLayout = useCallback((fieldKey, event) => {
+    const y = event?.nativeEvent?.layout?.y;
+    if (typeof y === 'number') {
+      fieldOffsetsRef.current[fieldKey] = y;
+    }
+  }, []);
+
+  const clearFieldError = useCallback((fieldKey) => {
+    setFieldErrors((prev) => {
+      if (!prev[fieldKey]) return prev;
+      const next = { ...prev };
+      delete next[fieldKey];
+      return next;
+    });
+    setLocalError(null);
+  }, []);
 
   const runHealthCheck = useCallback(async () => {
     const baseUrl = getApiBaseUrl();
@@ -75,7 +192,7 @@ export default function AuthScreen() {
         checking: false,
         ok: false,
         database: null,
-        message: 'EXPO_PUBLIC_API_BASE_URL is not configured.',
+        message: 'Server connection URL is not configured.',
       });
       return;
     }
@@ -83,7 +200,7 @@ export default function AuthScreen() {
     setHealthState((prev) => ({
       ...prev,
       checking: true,
-      message: 'Checking backend connection...',
+      message: 'Checking server connection...',
     }));
 
     const result = await checkBackendHealth();
@@ -101,9 +218,7 @@ export default function AuthScreen() {
         checking: false,
         ok: false,
         database: 'disconnected',
-        message:
-          (result.error && result.error.message) ||
-          'Backend server unreachable.',
+        message: formatAuthErrorMessage(result.error, 'health'),
       });
     }
   }, []);
@@ -112,65 +227,107 @@ export default function AuthScreen() {
     runHealthCheck();
   }, [runHealthCheck]);
 
-  const switchMode = (nextMode) => {
-    setMode(nextMode);
-    setLocalError(null);
-    clearAuthFeedback();
-  };
+  const switchMode = useCallback(
+    (nextMode) => {
+      Keyboard.dismiss();
+      setMode(nextMode);
+      setLocalError(null);
+      setFieldErrors({});
+      clearAuthFeedback();
+    },
+    [clearAuthFeedback]
+  );
 
   const handleLoginSubmit = async () => {
+    if (isLoading) return;
+    Keyboard.dismiss();
     setLocalError(null);
+    setFieldErrors({});
     clearAuthFeedback();
 
     const trimmedEmail = loginEmail.trim().toLowerCase();
+    const nextFieldErrors = {};
+
     if (!trimmedEmail || !EMAIL_REGEX.test(trimmedEmail)) {
-      setLocalError('Please enter a valid email address.');
-      return;
+      nextFieldErrors.email = 'Please enter a valid email address.';
     }
     if (!loginPassword) {
-      setLocalError('Please enter your password.');
+      nextFieldErrors.password = 'Please enter your password.';
+    }
+
+    if (Object.keys(nextFieldErrors).length > 0) {
+      setFieldErrors(nextFieldErrors);
+      setLocalError(nextFieldErrors.email || nextFieldErrors.password);
       return;
     }
 
-    await login({
+    const result = await login({
       email: trimmedEmail,
       password: loginPassword,
     });
+
+    if (result && !result.ok && result.field) {
+      setFieldErrors({ [result.field]: result.error });
+    }
   };
 
   const handleRegisterSubmit = async () => {
+    if (isLoading) return;
+    Keyboard.dismiss();
     setLocalError(null);
+    setFieldErrors({});
     clearAuthFeedback();
 
     const trimmedName = registerName.trim();
     const trimmedEmail = registerEmail.trim().toLowerCase();
+    const nextFieldErrors = {};
 
     if (!trimmedName) {
-      setLocalError('Full name is required.');
-      return;
+      nextFieldErrors.name = 'Full name is required.';
     }
     if (!trimmedEmail || !EMAIL_REGEX.test(trimmedEmail)) {
-      setLocalError('Please enter a valid email address.');
-      return;
+      nextFieldErrors.email = 'Please enter a valid email address.';
     }
     if (registerPassword.length < 8) {
-      setLocalError('Password must be at least 8 characters long.');
-      return;
+      nextFieldErrors.password =
+        'Password must be at least 8 characters long.';
     }
     if (registerPassword !== registerConfirmPassword) {
-      setLocalError('Passwords do not match.');
+      nextFieldErrors.confirmPassword = 'Passwords do not match.';
+    }
+
+    if (Object.keys(nextFieldErrors).length > 0) {
+      setFieldErrors(nextFieldErrors);
+      const firstError =
+        nextFieldErrors.name ||
+        nextFieldErrors.email ||
+        nextFieldErrors.password ||
+        nextFieldErrors.confirmPassword;
+      setLocalError(firstError);
       return;
     }
 
-    await register({
+    const result = await register({
       name: trimmedName,
       email: trimmedEmail,
       password: registerPassword,
       role: registerRole.trim() || 'QA Tester',
     });
+
+    if (result && !result.ok && result.field) {
+      setFieldErrors({ [result.field]: result.error });
+    }
   };
 
-  const activeError = localError || authError;
+  const activeError = localError
+    ? formatAuthErrorMessage(localError, mode)
+    : authError
+    ? formatAuthErrorMessage(authError, mode)
+    : null;
+
+  const safeNotice = authNotice
+    ? formatAuthErrorMessage({ status: 401, message: authNotice }, 'session')
+    : null;
 
   return (
     <SafeAreaView
@@ -193,11 +350,12 @@ export default function AuthScreen() {
                 Q
               </Text>
             </View>
-            <View>
+            <View style={styles.brandTextWrap}>
               <Text style={[styles.brandTitle, { color: colors.text }]}>
                 Qavora
               </Text>
               <Text
+                numberOfLines={1}
                 style={[
                   styles.brandSubtitle,
                   { color: colors.textMuted, fontFamily: monoFontFamily },
@@ -210,6 +368,7 @@ export default function AuthScreen() {
 
           <Pressable
             onPress={toggleTheme}
+            hitSlop={8}
             style={[
               styles.themeBtn,
               {
@@ -227,508 +386,935 @@ export default function AuthScreen() {
 
       <KeyboardAvoidingView
         style={styles.flexOne}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 12}
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          ref={scrollViewRef}
+          contentContainerStyle={[
+            styles.scrollContent,
+            {
+              paddingBottom: isKeyboardVisible
+                ? Math.max(keyboardHeight + 36, 180)
+                : 36,
+            },
+          ]}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="none"
+          showsVerticalScrollIndicator={true}
         >
-          {/* Main Auth Card */}
-          <View
-            style={[
-              styles.authCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
+          {/* Tap-outside area to dismiss software keyboard when tapping non-input regions */}
+          <Pressable
+            onPress={Keyboard.dismiss}
+            accessible={false}
+            style={styles.dismissTouchArea}
           >
-            <Text
-              style={[
-                styles.kicker,
-                { color: colors.primary, fontFamily: monoFontFamily },
-              ]}
-            >
-              QAVORA CLOUD WORKSPACE
-            </Text>
-            <Text style={[styles.heading, { color: colors.text }]}>
-              {mode === 'login'
-                ? 'Sign in to your QA account'
-                : 'Create your QA account'}
-            </Text>
-            <Text style={[styles.subheading, { color: colors.textSecondary }]}>
-              {mode === 'login'
-                ? 'Authenticate with your Qavora credentials to access your QA workspace.'
-                : 'Register a new tester profile on the Qavora backend.'}
-            </Text>
-
-            {/* Backend Connection Status Bar */}
+            {/* Main Auth Card */}
             <View
+              onLayout={(e) => {
+                const y = e?.nativeEvent?.layout?.y;
+                if (typeof y === 'number') {
+                  authCardYRef.current = y;
+                }
+              }}
               style={[
-                styles.healthBar,
-                {
-                  backgroundColor: colors.background,
-                  borderColor: healthState.ok
-                    ? colors.success
-                    : colors.borderStrong,
-                },
+                styles.authCard,
+                { backgroundColor: colors.surface, borderColor: colors.border },
               ]}
             >
-              <View style={styles.healthLeft}>
-                <View
-                  style={[
-                    styles.healthDot,
-                    {
-                      backgroundColor: healthState.checking
-                        ? colors.warning
-                        : healthState.ok
-                        ? colors.success
-                        : colors.danger,
-                    },
-                  ]}
-                />
-                <Text
-                  numberOfLines={2}
-                  style={[
-                    styles.healthText,
-                    { color: colors.textSecondary, fontFamily: monoFontFamily },
-                  ]}
-                >
-                  {healthState.message}
-                </Text>
-              </View>
-              <Pressable
-                onPress={runHealthCheck}
-                disabled={healthState.checking}
+              <Text
                 style={[
-                  styles.healthRetryBtn,
-                  { borderColor: colors.borderStrong },
+                  styles.kicker,
+                  { color: colors.primary, fontFamily: monoFontFamily },
                 ]}
               >
-                <Text
-                  style={[
-                    styles.healthRetryText,
-                    { color: colors.primary, fontFamily: monoFontFamily },
-                  ]}
-                >
-                  {healthState.checking ? '...' : 'Check'}
-                </Text>
-              </Pressable>
-            </View>
+                QAVORA CLOUD WORKSPACE
+              </Text>
+              <Text style={[styles.heading, { color: colors.text }]}>
+                {mode === 'login'
+                  ? 'Sign in to your QA account'
+                  : 'Create your QA account'}
+              </Text>
+              <Text style={[styles.subheading, { color: colors.textSecondary }]}>
+                {mode === 'login'
+                  ? 'Authenticate with your Qavora credentials to access your QA workspace.'
+                  : 'Register a new tester profile on the Qavora backend.'}
+              </Text>
 
-            {/* Mode Switcher Tabs */}
-            <View
-              style={[
-                styles.modeTabsRow,
-                {
-                  backgroundColor: colors.background,
-                  borderColor: colors.border,
-                },
-              ]}
-            >
-              <Pressable
-                onPress={() => switchMode('login')}
-                style={[
-                  styles.modeTabBtn,
-                  mode === 'login' && {
-                    backgroundColor: colors.primary,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.modeTabText,
-                    {
-                      color:
-                        mode === 'login'
-                          ? colors.textOnPrimary
-                          : colors.textSecondary,
-                    },
-                  ]}
-                >
-                  Sign In
-                </Text>
-              </Pressable>
-
-              <Pressable
-                onPress={() => switchMode('register')}
-                style={[
-                  styles.modeTabBtn,
-                  mode === 'register' && {
-                    backgroundColor: colors.primary,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.modeTabText,
-                    {
-                      color:
-                        mode === 'register'
-                          ? colors.textOnPrimary
-                          : colors.textSecondary,
-                    },
-                  ]}
-                >
-                  Create Account
-                </Text>
-              </Pressable>
-            </View>
-
-            {/* Notice Banner (e.g., Session Expired or Signed Out) */}
-            {authNotice && !activeError ? (
+              {/* Backend Connection Status Bar */}
               <View
                 style={[
-                  styles.alertBox,
+                  styles.healthBar,
                   {
-                    backgroundColor: colors.infoSoft,
-                    borderColor: colors.info,
+                    backgroundColor: colors.background,
+                    borderColor: healthState.ok
+                      ? colors.success
+                      : colors.borderStrong,
                   },
                 ]}
               >
-                <Text style={[styles.alertText, { color: colors.text }]}>
-                  {authNotice}
-                </Text>
-              </View>
-            ) : null}
-
-            {/* Error Banner */}
-            {activeError ? (
-              <View
-                style={[
-                  styles.alertBox,
-                  {
-                    backgroundColor: colors.dangerSoft,
-                    borderColor: colors.danger,
-                  },
-                ]}
-              >
-                <Text style={[styles.alertText, { color: colors.danger }]}>
-                  {activeError}
-                </Text>
-              </View>
-            ) : null}
-
-            {mode === 'login' ? (
-              /* LOGIN FORM */
-              <View style={styles.formSection}>
-                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                  Email Address
-                </Text>
-                <TextInput
-                  value={loginEmail}
-                  onChangeText={setLoginEmail}
-                  placeholder="tester@example.com"
-                  placeholderTextColor={colors.textMuted}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  editable={!isLoading}
-                  style={[
-                    styles.input,
-                    {
-                      backgroundColor: colors.background,
-                      borderColor: colors.border,
-                      color: colors.text,
-                    },
-                  ]}
-                />
-
-                <View style={styles.passwordHeaderRow}>
+                <View style={styles.healthLeft}>
+                  <View
+                    style={[
+                      styles.healthDot,
+                      {
+                        backgroundColor: healthState.checking
+                          ? colors.warning
+                          : healthState.ok
+                          ? colors.success
+                          : colors.danger,
+                      },
+                    ]}
+                  />
                   <Text
-                    style={[styles.fieldLabel, { color: colors.textSecondary }]}
+                    numberOfLines={2}
+                    style={[
+                      styles.healthText,
+                      { color: colors.textSecondary, fontFamily: monoFontFamily },
+                    ]}
                   >
-                    Password
+                    {healthState.message}
                   </Text>
-                  <Pressable
-                    onPress={() => setShowLoginPassword((prev) => !prev)}
-                  >
-                    <Text
-                      style={[
-                        styles.togglePassText,
-                        { color: colors.primary, fontFamily: monoFontFamily },
-                      ]}
-                    >
-                      {showLoginPassword ? 'Hide' : 'Show'}
-                    </Text>
-                  </Pressable>
                 </View>
-                <TextInput
-                  value={loginPassword}
-                  onChangeText={setLoginPassword}
-                  placeholder="Enter your password"
-                  placeholderTextColor={colors.textMuted}
-                  secureTextEntry={!showLoginPassword}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  editable={!isLoading}
-                  style={[
-                    styles.input,
-                    {
-                      backgroundColor: colors.background,
-                      borderColor: colors.border,
-                      color: colors.text,
-                    },
-                  ]}
-                />
-
                 <Pressable
-                  onPress={handleLoginSubmit}
-                  disabled={isLoading}
+                  onPress={runHealthCheck}
+                  disabled={healthState.checking}
+                  hitSlop={8}
                   style={[
-                    styles.submitBtn,
-                    {
+                    styles.healthRetryBtn,
+                    { borderColor: colors.borderStrong },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.healthRetryText,
+                      { color: colors.primary, fontFamily: monoFontFamily },
+                    ]}
+                  >
+                    {healthState.checking ? '...' : 'Check'}
+                  </Text>
+                </Pressable>
+              </View>
+
+              {/* Mode Switcher Tabs */}
+              <View
+                style={[
+                  styles.modeTabsRow,
+                  {
+                    backgroundColor: colors.background,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Pressable
+                  onPress={() => switchMode('login')}
+                  style={[
+                    styles.modeTabBtn,
+                    mode === 'login' && {
                       backgroundColor: colors.primary,
-                      opacity: isLoading ? 0.7 : 1,
                     },
                   ]}
                 >
-                  {isLoading ? (
-                    <View style={styles.loadingBtnRow}>
-                      <ActivityIndicator
-                        size="small"
-                        color={colors.textOnPrimary}
-                      />
-                      <Text
-                        style={[
-                          styles.submitBtnText,
-                          { color: colors.textOnPrimary },
-                        ]}
-                      >
-                        Signing in...
-                      </Text>
-                    </View>
-                  ) : (
-                    <Text
-                      style={[
-                        styles.submitBtnText,
-                        { color: colors.textOnPrimary },
-                      ]}
-                    >
-                      Sign In to Qavora
-                    </Text>
-                  )}
+                  <Text
+                    style={[
+                      styles.modeTabText,
+                      {
+                        color:
+                          mode === 'login'
+                            ? colors.textOnPrimary
+                            : colors.textSecondary,
+                      },
+                    ]}
+                  >
+                    Sign In
+                  </Text>
                 </Pressable>
 
                 <Pressable
                   onPress={() => switchMode('register')}
-                  style={styles.switchLinkWrap}
+                  style={[
+                    styles.modeTabBtn,
+                    mode === 'register' && {
+                      backgroundColor: colors.primary,
+                    },
+                  ]}
                 >
                   <Text
                     style={[
-                      styles.switchLinkText,
-                      { color: colors.textSecondary },
+                      styles.modeTabText,
+                      {
+                        color:
+                          mode === 'register'
+                            ? colors.textOnPrimary
+                            : colors.textSecondary,
+                      },
                     ]}
                   >
-                    Don&apos;t have an account?{' '}
-                    <Text
-                      style={{ color: colors.primary, fontWeight: '700' }}
-                    >
-                      Create Account
-                    </Text>
+                    Create Account
                   </Text>
                 </Pressable>
               </View>
-            ) : (
-              /* REGISTER FORM */
-              <View style={styles.formSection}>
-                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                  Full Name
-                </Text>
-                <TextInput
-                  value={registerName}
-                  onChangeText={setRegisterName}
-                  placeholder="Alex Rivera"
-                  placeholderTextColor={colors.textMuted}
-                  autoCapitalize="words"
-                  editable={!isLoading}
+
+              {/* Notice Banner (e.g., Session Expired or Signed Out) */}
+              {safeNotice && !activeError ? (
+                <View
                   style={[
-                    styles.input,
+                    styles.alertBox,
                     {
-                      backgroundColor: colors.background,
-                      borderColor: colors.border,
-                      color: colors.text,
+                      backgroundColor: colors.infoSoft,
+                      borderColor: colors.info,
                     },
                   ]}
-                />
+                >
+                  <Text style={[styles.alertText, { color: colors.text }]}>
+                    {safeNotice}
+                  </Text>
+                </View>
+              ) : null}
 
-                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                  Email Address
-                </Text>
-                <TextInput
-                  value={registerEmail}
-                  onChangeText={setRegisterEmail}
-                  placeholder="alex.rivera@example.com"
-                  placeholderTextColor={colors.textMuted}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  editable={!isLoading}
+              {/* Top Error Banner */}
+              {activeError ? (
+                <View
+                  accessibilityRole="alert"
                   style={[
-                    styles.input,
+                    styles.alertBox,
                     {
-                      backgroundColor: colors.background,
-                      borderColor: colors.border,
-                      color: colors.text,
+                      backgroundColor: colors.dangerSoft,
+                      borderColor: colors.danger,
                     },
                   ]}
-                />
+                >
+                  <Text style={[styles.alertText, { color: colors.danger }]}>
+                    {activeError}
+                  </Text>
+                </View>
+              ) : null}
 
-                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                  QA Role
-                </Text>
-                <View style={styles.roleChipsRow}>
-                  {ROLE_OPTIONS.map((roleOpt) => {
-                    const selected = registerRole === roleOpt;
-                    return (
-                      <Pressable
-                        key={roleOpt}
-                        onPress={() => setRegisterRole(roleOpt)}
+              {mode === 'login' ? (
+                /* LOGIN FORM */
+                <View
+                  onLayout={(e) => {
+                    const y = e?.nativeEvent?.layout?.y;
+                    if (typeof y === 'number') {
+                      formSectionYRef.current = y;
+                    }
+                  }}
+                  style={styles.formSection}
+                >
+                  {/* Login Email Field */}
+                  <View
+                    onLayout={(e) => recordFieldLayout('loginEmail', e)}
+                    style={styles.fieldGroup}
+                  >
+                    <Text
+                      style={[styles.fieldLabel, { color: colors.textSecondary }]}
+                    >
+                      Email Address
+                    </Text>
+                    <TextInput
+                      ref={loginEmailInputRef}
+                      value={loginEmail}
+                      onChangeText={(val) => {
+                        setLoginEmail(val);
+                        clearFieldError('email');
+                      }}
+                      onFocus={() => handleFieldFocus('loginEmail')}
+                      onBlur={() => handleFieldBlur('loginEmail')}
+                      placeholder="tester@example.com"
+                      placeholderTextColor={colors.textMuted}
+                      keyboardType="email-address"
+                      inputMode="email"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      autoComplete="email"
+                      textContentType="emailAddress"
+                      importantForAutofill="yes"
+                      returnKeyType="next"
+                      blurOnSubmit={false}
+                      onSubmitEditing={() => {
+                        if (loginPasswordInputRef.current) {
+                          loginPasswordInputRef.current.focus();
+                        }
+                      }}
+                      editable={!isLoading}
+                      style={[
+                        styles.input,
+                        {
+                          backgroundColor: colors.background,
+                          borderColor: fieldErrors.email
+                            ? colors.danger
+                            : focusedField === 'loginEmail'
+                            ? colors.primary
+                            : colors.border,
+                          color: colors.text,
+                        },
+                      ]}
+                    />
+                    {fieldErrors.email ? (
+                      <Text
+                        style={[styles.fieldErrorText, { color: colors.danger }]}
+                      >
+                        {fieldErrors.email}
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  {/* Login Password Field */}
+                  <View
+                    onLayout={(e) => recordFieldLayout('loginPassword', e)}
+                    style={styles.fieldGroup}
+                  >
+                    <View style={styles.passwordHeaderRow}>
+                      <Text
                         style={[
-                          styles.roleChip,
-                          {
-                            backgroundColor: selected
-                              ? colors.primary
-                              : colors.background,
-                            borderColor: selected
-                              ? colors.primary
-                              : colors.border,
-                          },
+                          styles.fieldLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Password
+                      </Text>
+                      <Pressable
+                        onPress={() => setShowLoginPassword((prev) => !prev)}
+                        hitSlop={10}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          showLoginPassword ? 'Hide password' : 'Show password'
+                        }
+                        style={styles.headerTogglePassBtn}
+                      >
+                        <Text
+                          style={[
+                            styles.togglePassText,
+                            { color: colors.primary, fontFamily: monoFontFamily },
+                          ]}
+                        >
+                          {showLoginPassword ? 'Hide' : 'Show'}
+                        </Text>
+                      </Pressable>
+                    </View>
+
+                    <View
+                      style={[
+                        styles.passwordInputContainer,
+                        {
+                          backgroundColor: colors.background,
+                          borderColor: fieldErrors.password
+                            ? colors.danger
+                            : focusedField === 'loginPassword'
+                            ? colors.primary
+                            : colors.border,
+                        },
+                      ]}
+                    >
+                      <TextInput
+                        ref={loginPasswordInputRef}
+                        value={loginPassword}
+                        onChangeText={(val) => {
+                          setLoginPassword(val);
+                          clearFieldError('password');
+                        }}
+                        onFocus={() => handleFieldFocus('loginPassword')}
+                        onBlur={() => handleFieldBlur('loginPassword')}
+                        placeholder="Enter your password"
+                        placeholderTextColor={colors.textMuted}
+                        secureTextEntry={!showLoginPassword}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        autoComplete="current-password"
+                        textContentType="password"
+                        importantForAutofill="yes"
+                        returnKeyType="done"
+                        blurOnSubmit={true}
+                        onSubmitEditing={handleLoginSubmit}
+                        editable={!isLoading}
+                        style={[styles.passwordInputField, { color: colors.text }]}
+                      />
+                      <Pressable
+                        onPress={() => setShowLoginPassword((prev) => !prev)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          showLoginPassword ? 'Hide password' : 'Show password'
+                        }
+                        style={[
+                          styles.inlinePasswordToggleBtn,
+                          { borderLeftColor: colors.border },
                         ]}
                       >
                         <Text
                           style={[
-                            styles.roleChipText,
-                            {
-                              color: selected
-                                ? colors.textOnPrimary
-                                : colors.textSecondary,
-                            },
+                            styles.inlinePasswordToggleText,
+                            { color: colors.primary, fontFamily: monoFontFamily },
                           ]}
                         >
-                          {roleOpt}
+                          {showLoginPassword ? 'Hide' : 'Show'}
                         </Text>
                       </Pressable>
-                    );
-                  })}
-                </View>
+                    </View>
 
-                <View style={styles.passwordHeaderRow}>
-                  <Text
-                    style={[styles.fieldLabel, { color: colors.textSecondary }]}
-                  >
-                    Password (minimum 8 characters)
-                  </Text>
-                  <Pressable
-                    onPress={() => setShowRegisterPassword((prev) => !prev)}
-                  >
-                    <Text
+                    {fieldErrors.password ? (
+                      <Text
+                        style={[styles.fieldErrorText, { color: colors.danger }]}
+                      >
+                        {fieldErrors.password}
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  {/* Keep validation/auth error visible near submit button when keyboard is open */}
+                  {activeError && isKeyboardVisible ? (
+                    <View
                       style={[
-                        styles.togglePassText,
-                        { color: colors.primary, fontFamily: monoFontFamily },
+                        styles.inlineSubmitErrorBox,
+                        {
+                          backgroundColor: colors.dangerSoft,
+                          borderColor: colors.danger,
+                        },
                       ]}
                     >
-                      {showRegisterPassword ? 'Hide' : 'Show'}
-                    </Text>
-                  </Pressable>
-                </View>
-                <TextInput
-                  value={registerPassword}
-                  onChangeText={setRegisterPassword}
-                  placeholder="At least 8 characters"
-                  placeholderTextColor={colors.textMuted}
-                  secureTextEntry={!showRegisterPassword}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  editable={!isLoading}
-                  style={[
-                    styles.input,
-                    {
-                      backgroundColor: colors.background,
-                      borderColor: colors.border,
-                      color: colors.text,
-                    },
-                  ]}
-                />
+                      <Text
+                        style={[
+                          styles.inlineSubmitErrorText,
+                          { color: colors.danger },
+                        ]}
+                      >
+                        {activeError}
+                      </Text>
+                    </View>
+                  ) : null}
 
-                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                  Confirm Password
-                </Text>
-                <TextInput
-                  value={registerConfirmPassword}
-                  onChangeText={setRegisterConfirmPassword}
-                  placeholder="Re-enter your password"
-                  placeholderTextColor={colors.textMuted}
-                  secureTextEntry={!showRegisterPassword}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  editable={!isLoading}
-                  style={[
-                    styles.input,
-                    {
-                      backgroundColor: colors.background,
-                      borderColor: colors.border,
-                      color: colors.text,
-                    },
-                  ]}
-                />
-
-                <Pressable
-                  onPress={handleRegisterSubmit}
-                  disabled={isLoading}
-                  style={[
-                    styles.submitBtn,
-                    {
-                      backgroundColor: colors.primary,
-                      opacity: isLoading ? 0.7 : 1,
-                    },
-                  ]}
-                >
-                  {isLoading ? (
-                    <View style={styles.loadingBtnRow}>
-                      <ActivityIndicator
-                        size="small"
-                        color={colors.textOnPrimary}
-                      />
+                  <Pressable
+                    onPress={handleLoginSubmit}
+                    disabled={isLoading}
+                    style={[
+                      styles.submitBtn,
+                      {
+                        backgroundColor: colors.primary,
+                        opacity: isLoading ? 0.7 : 1,
+                      },
+                    ]}
+                  >
+                    {isLoading ? (
+                      <View style={styles.loadingBtnRow}>
+                        <ActivityIndicator
+                          size="small"
+                          color={colors.textOnPrimary}
+                        />
+                        <Text
+                          style={[
+                            styles.submitBtnText,
+                            { color: colors.textOnPrimary },
+                          ]}
+                        >
+                          Signing in...
+                        </Text>
+                      </View>
+                    ) : (
                       <Text
                         style={[
                           styles.submitBtnText,
                           { color: colors.textOnPrimary },
                         ]}
                       >
-                        Creating account...
+                        Sign In to Qavora
                       </Text>
-                    </View>
-                  ) : (
+                    )}
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => switchMode('register')}
+                    style={styles.switchLinkWrap}
+                  >
                     <Text
                       style={[
-                        styles.submitBtnText,
-                        { color: colors.textOnPrimary },
+                        styles.switchLinkText,
+                        { color: colors.textSecondary },
                       ]}
                     >
-                      Create Qavora Account
+                      Don&apos;t have an account?{' '}
+                      <Text style={{ color: colors.primary, fontWeight: '700' }}>
+                        Create Account
+                      </Text>
                     </Text>
-                  )}
-                </Pressable>
-
-                <Pressable
-                  onPress={() => switchMode('login')}
-                  style={styles.switchLinkWrap}
+                  </Pressable>
+                </View>
+              ) : (
+                /* REGISTER FORM */
+                <View
+                  onLayout={(e) => {
+                    const y = e?.nativeEvent?.layout?.y;
+                    if (typeof y === 'number') {
+                      formSectionYRef.current = y;
+                    }
+                  }}
+                  style={styles.formSection}
                 >
+                  {/* Register Full Name Field */}
+                  <View
+                    onLayout={(e) => recordFieldLayout('registerName', e)}
+                    style={styles.fieldGroup}
+                  >
+                    <Text
+                      style={[styles.fieldLabel, { color: colors.textSecondary }]}
+                    >
+                      Full Name
+                    </Text>
+                    <TextInput
+                      ref={registerNameInputRef}
+                      value={registerName}
+                      onChangeText={(val) => {
+                        setRegisterName(val);
+                        clearFieldError('name');
+                      }}
+                      onFocus={() => handleFieldFocus('registerName')}
+                      onBlur={() => handleFieldBlur('registerName')}
+                      placeholder="Alex Rivera"
+                      placeholderTextColor={colors.textMuted}
+                      keyboardType="default"
+                      autoCapitalize="words"
+                      autoComplete="name"
+                      textContentType="name"
+                      importantForAutofill="yes"
+                      returnKeyType="next"
+                      blurOnSubmit={false}
+                      onSubmitEditing={() => {
+                        if (registerEmailInputRef.current) {
+                          registerEmailInputRef.current.focus();
+                        }
+                      }}
+                      editable={!isLoading}
+                      style={[
+                        styles.input,
+                        {
+                          backgroundColor: colors.background,
+                          borderColor: fieldErrors.name
+                            ? colors.danger
+                            : focusedField === 'registerName'
+                            ? colors.primary
+                            : colors.border,
+                          color: colors.text,
+                        },
+                      ]}
+                    />
+                    {fieldErrors.name ? (
+                      <Text
+                        style={[styles.fieldErrorText, { color: colors.danger }]}
+                      >
+                        {fieldErrors.name}
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  {/* Register Email Field */}
+                  <View
+                    onLayout={(e) => recordFieldLayout('registerEmail', e)}
+                    style={styles.fieldGroup}
+                  >
+                    <Text
+                      style={[styles.fieldLabel, { color: colors.textSecondary }]}
+                    >
+                      Email Address
+                    </Text>
+                    <TextInput
+                      ref={registerEmailInputRef}
+                      value={registerEmail}
+                      onChangeText={(val) => {
+                        setRegisterEmail(val);
+                        clearFieldError('email');
+                      }}
+                      onFocus={() => handleFieldFocus('registerEmail')}
+                      onBlur={() => handleFieldBlur('registerEmail')}
+                      placeholder="alex.rivera@example.com"
+                      placeholderTextColor={colors.textMuted}
+                      keyboardType="email-address"
+                      inputMode="email"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      autoComplete="email"
+                      textContentType="emailAddress"
+                      importantForAutofill="yes"
+                      returnKeyType="next"
+                      blurOnSubmit={false}
+                      onSubmitEditing={() => {
+                        if (registerPasswordInputRef.current) {
+                          registerPasswordInputRef.current.focus();
+                        }
+                      }}
+                      editable={!isLoading}
+                      style={[
+                        styles.input,
+                        {
+                          backgroundColor: colors.background,
+                          borderColor: fieldErrors.email
+                            ? colors.danger
+                            : focusedField === 'registerEmail'
+                            ? colors.primary
+                            : colors.border,
+                          color: colors.text,
+                        },
+                      ]}
+                    />
+                    {fieldErrors.email ? (
+                      <Text
+                        style={[styles.fieldErrorText, { color: colors.danger }]}
+                      >
+                        {fieldErrors.email}
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  {/* QA Role Selector */}
                   <Text
+                    style={[styles.fieldLabel, { color: colors.textSecondary }]}
+                  >
+                    QA Role
+                  </Text>
+                  <View style={styles.roleChipsRow}>
+                    {ROLE_OPTIONS.map((roleOpt) => {
+                      const selected = registerRole === roleOpt;
+                      return (
+                        <Pressable
+                          key={roleOpt}
+                          onPress={() => setRegisterRole(roleOpt)}
+                          style={[
+                            styles.roleChip,
+                            {
+                              backgroundColor: selected
+                                ? colors.primary
+                                : colors.background,
+                              borderColor: selected
+                                ? colors.primary
+                                : colors.border,
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.roleChipText,
+                              {
+                                color: selected
+                                  ? colors.textOnPrimary
+                                  : colors.textSecondary,
+                              },
+                            ]}
+                          >
+                            {roleOpt}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  {/* Register Password Field */}
+                  <View
+                    onLayout={(e) => recordFieldLayout('registerPassword', e)}
+                    style={styles.fieldGroup}
+                  >
+                    <View style={styles.passwordHeaderRow}>
+                      <Text
+                        style={[
+                          styles.fieldLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Password (minimum 8 characters)
+                      </Text>
+                      <Pressable
+                        onPress={() => {
+                          setShowRegisterPassword((prev) => {
+                            const next = !prev;
+                            setShowRegisterConfirmPassword(next);
+                            return next;
+                          });
+                        }}
+                        hitSlop={10}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          showRegisterPassword ? 'Hide password' : 'Show password'
+                        }
+                        style={styles.headerTogglePassBtn}
+                      >
+                        <Text
+                          style={[
+                            styles.togglePassText,
+                            { color: colors.primary, fontFamily: monoFontFamily },
+                          ]}
+                        >
+                          {showRegisterPassword ? 'Hide' : 'Show'}
+                        </Text>
+                      </Pressable>
+                    </View>
+
+                    <View
+                      style={[
+                        styles.passwordInputContainer,
+                        {
+                          backgroundColor: colors.background,
+                          borderColor: fieldErrors.password
+                            ? colors.danger
+                            : focusedField === 'registerPassword'
+                            ? colors.primary
+                            : colors.border,
+                        },
+                      ]}
+                    >
+                      <TextInput
+                        ref={registerPasswordInputRef}
+                        value={registerPassword}
+                        onChangeText={(val) => {
+                          setRegisterPassword(val);
+                          clearFieldError('password');
+                        }}
+                        onFocus={() => handleFieldFocus('registerPassword')}
+                        onBlur={() => handleFieldBlur('registerPassword')}
+                        placeholder="At least 8 characters"
+                        placeholderTextColor={colors.textMuted}
+                        secureTextEntry={!showRegisterPassword}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        autoComplete="new-password"
+                        textContentType="newPassword"
+                        importantForAutofill="yes"
+                        returnKeyType="next"
+                        blurOnSubmit={false}
+                        onSubmitEditing={() => {
+                          if (registerConfirmPasswordInputRef.current) {
+                            registerConfirmPasswordInputRef.current.focus();
+                          }
+                        }}
+                        editable={!isLoading}
+                        style={[styles.passwordInputField, { color: colors.text }]}
+                      />
+                      <Pressable
+                        onPress={() =>
+                          setShowRegisterPassword((prev) => !prev)
+                        }
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          showRegisterPassword ? 'Hide password' : 'Show password'
+                        }
+                        style={[
+                          styles.inlinePasswordToggleBtn,
+                          { borderLeftColor: colors.border },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.inlinePasswordToggleText,
+                            { color: colors.primary, fontFamily: monoFontFamily },
+                          ]}
+                        >
+                          {showRegisterPassword ? 'Hide' : 'Show'}
+                        </Text>
+                      </Pressable>
+                    </View>
+
+                    {fieldErrors.password ? (
+                      <Text
+                        style={[styles.fieldErrorText, { color: colors.danger }]}
+                      >
+                        {fieldErrors.password}
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  {/* Register Confirm Password Field */}
+                  <View
+                    onLayout={(e) =>
+                      recordFieldLayout('registerConfirmPassword', e)
+                    }
+                    style={styles.fieldGroup}
+                  >
+                    <View style={styles.passwordHeaderRow}>
+                      <Text
+                        style={[
+                          styles.fieldLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Confirm Password
+                      </Text>
+                      <Pressable
+                        onPress={() =>
+                          setShowRegisterConfirmPassword((prev) => !prev)
+                        }
+                        hitSlop={10}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          showRegisterConfirmPassword
+                            ? 'Hide confirm password'
+                            : 'Show confirm password'
+                        }
+                        style={styles.headerTogglePassBtn}
+                      >
+                        <Text
+                          style={[
+                            styles.togglePassText,
+                            { color: colors.primary, fontFamily: monoFontFamily },
+                          ]}
+                        >
+                          {showRegisterConfirmPassword ? 'Hide' : 'Show'}
+                        </Text>
+                      </Pressable>
+                    </View>
+
+                    <View
+                      style={[
+                        styles.passwordInputContainer,
+                        {
+                          backgroundColor: colors.background,
+                          borderColor: fieldErrors.confirmPassword
+                            ? colors.danger
+                            : focusedField === 'registerConfirmPassword'
+                            ? colors.primary
+                            : colors.border,
+                        },
+                      ]}
+                    >
+                      <TextInput
+                        ref={registerConfirmPasswordInputRef}
+                        value={registerConfirmPassword}
+                        onChangeText={(val) => {
+                          setRegisterConfirmPassword(val);
+                          clearFieldError('confirmPassword');
+                        }}
+                        onFocus={() =>
+                          handleFieldFocus('registerConfirmPassword')
+                        }
+                        onBlur={() =>
+                          handleFieldBlur('registerConfirmPassword')
+                        }
+                        placeholder="Re-enter your password"
+                        placeholderTextColor={colors.textMuted}
+                        secureTextEntry={!showRegisterConfirmPassword}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        autoComplete="new-password"
+                        textContentType="newPassword"
+                        importantForAutofill="yes"
+                        returnKeyType="done"
+                        blurOnSubmit={true}
+                        onSubmitEditing={handleRegisterSubmit}
+                        editable={!isLoading}
+                        style={[styles.passwordInputField, { color: colors.text }]}
+                      />
+                      <Pressable
+                        onPress={() =>
+                          setShowRegisterConfirmPassword((prev) => !prev)
+                        }
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          showRegisterConfirmPassword
+                            ? 'Hide confirm password'
+                            : 'Show confirm password'
+                        }
+                        style={[
+                          styles.inlinePasswordToggleBtn,
+                          { borderLeftColor: colors.border },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.inlinePasswordToggleText,
+                            { color: colors.primary, fontFamily: monoFontFamily },
+                          ]}
+                        >
+                          {showRegisterConfirmPassword ? 'Hide' : 'Show'}
+                        </Text>
+                      </Pressable>
+                    </View>
+
+                    {fieldErrors.confirmPassword ? (
+                      <Text
+                        style={[styles.fieldErrorText, { color: colors.danger }]}
+                      >
+                        {fieldErrors.confirmPassword}
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  {/* Keep validation/auth error visible near submit button when keyboard is open */}
+                  {activeError && isKeyboardVisible ? (
+                    <View
+                      style={[
+                        styles.inlineSubmitErrorBox,
+                        {
+                          backgroundColor: colors.dangerSoft,
+                          borderColor: colors.danger,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.inlineSubmitErrorText,
+                          { color: colors.danger },
+                        ]}
+                      >
+                        {activeError}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  <Pressable
+                    onPress={handleRegisterSubmit}
+                    disabled={isLoading}
                     style={[
-                      styles.switchLinkText,
-                      { color: colors.textSecondary },
+                      styles.submitBtn,
+                      {
+                        backgroundColor: colors.primary,
+                        opacity: isLoading ? 0.7 : 1,
+                      },
                     ]}
                   >
-                    Already have an account?{' '}
+                    {isLoading ? (
+                      <View style={styles.loadingBtnRow}>
+                        <ActivityIndicator
+                          size="small"
+                          color={colors.textOnPrimary}
+                        />
+                        <Text
+                          style={[
+                            styles.submitBtnText,
+                            { color: colors.textOnPrimary },
+                          ]}
+                        >
+                          Creating account...
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text
+                        style={[
+                          styles.submitBtnText,
+                          { color: colors.textOnPrimary },
+                        ]}
+                      >
+                        Create Qavora Account
+                      </Text>
+                    )}
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => switchMode('login')}
+                    style={styles.switchLinkWrap}
+                  >
                     <Text
-                      style={{ color: colors.primary, fontWeight: '700' }}
+                      style={[
+                        styles.switchLinkText,
+                        { color: colors.textSecondary },
+                      ]}
                     >
-                      Sign In
+                      Already have an account?{' '}
+                      <Text style={{ color: colors.primary, fontWeight: '700' }}>
+                        Sign In
+                      </Text>
                     </Text>
-                  </Text>
-                </Pressable>
-              </View>
-            )}
-          </View>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -743,10 +1329,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   topBar: {
-    height: 54,
+    minHeight: 54,
     borderBottomWidth: 1,
     justifyContent: 'center',
     paddingHorizontal: 14,
+    paddingVertical: 6,
   },
   topBarInner: {
     maxWidth: 520,
@@ -755,11 +1342,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
   },
   brandLockup: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    flex: 1,
+    minWidth: 0,
+  },
+  brandTextWrap: {
+    flex: 1,
+    minWidth: 0,
   },
   brandBadge: {
     width: 32,
@@ -794,16 +1388,20 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   scrollContent: {
-    paddingHorizontal: 14,
-    paddingVertical: 24,
+    paddingHorizontal: 12,
+    paddingTop: 18,
     maxWidth: 520,
     width: '100%',
     alignSelf: 'center',
+    flexGrow: 1,
+  },
+  dismissTouchArea: {
+    flex: 1,
   },
   authCard: {
     borderRadius: 16,
     borderWidth: 1,
-    padding: 18,
+    padding: 16,
   },
   kicker: {
     fontSize: 11,
@@ -848,10 +1446,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   healthRetryBtn: {
+    minHeight: 32,
     borderWidth: 1,
     borderRadius: 6,
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   healthRetryText: {
     fontSize: 11,
@@ -866,7 +1467,7 @@ const styles = StyleSheet.create({
   },
   modeTabBtn: {
     flex: 1,
-    minHeight: 38,
+    minHeight: 40,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
@@ -890,28 +1491,80 @@ const styles = StyleSheet.create({
   formSection: {
     marginTop: 2,
   },
+  fieldGroup: {
+    marginBottom: 12,
+  },
   fieldLabel: {
     fontSize: 13,
     fontWeight: '600',
     marginBottom: 6,
+    flexShrink: 1,
   },
   passwordHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
+  },
+  headerTogglePassBtn: {
+    paddingVertical: 2,
+    paddingHorizontal: 4,
+    marginBottom: 4,
   },
   togglePassText: {
     fontSize: 12,
     fontWeight: '700',
-    marginBottom: 6,
   },
   input: {
-    minHeight: 44,
+    minHeight: 46,
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 12,
     fontSize: 14,
-    marginBottom: 12,
+  },
+  passwordInputContainer: {
+    minHeight: 46,
+    borderWidth: 1,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  passwordInputField: {
+    flex: 1,
+    minHeight: 46,
+    paddingHorizontal: 12,
+    fontSize: 14,
+  },
+  inlinePasswordToggleBtn: {
+    minHeight: 46,
+    minWidth: 58,
+    paddingHorizontal: 12,
+    borderLeftWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inlinePasswordToggleText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  fieldErrorText: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 5,
+    lineHeight: 16,
+  },
+  inlineSubmitErrorBox: {
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 10,
+  },
+  inlineSubmitErrorText: {
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
   },
   roleChipsRow: {
     flexDirection: 'row',
@@ -920,17 +1573,20 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   roleChip: {
+    minHeight: 36,
     borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   roleChipText: {
     fontSize: 12,
     fontWeight: '600',
   },
   submitBtn: {
-    minHeight: 46,
+    minHeight: 48,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
@@ -948,7 +1604,7 @@ const styles = StyleSheet.create({
   switchLinkWrap: {
     marginTop: 14,
     alignItems: 'center',
-    paddingVertical: 6,
+    paddingVertical: 8,
   },
   switchLinkText: {
     fontSize: 13,

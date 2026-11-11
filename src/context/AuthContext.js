@@ -23,6 +23,7 @@ import {
   logoutUser,
   restoreAuthenticatedSession,
   fetchCurrentUser,
+  formatAuthErrorMessage,
 } from '../services/authService.js';
 
 const AuthContext = createContext(null);
@@ -57,8 +58,10 @@ export function AuthProvider({ children }) {
       setUser(null);
       if (result.isExpired) {
         setAuthNotice(
-          result.error ||
-            'Your session has expired or is no longer valid. Please sign in again.'
+          formatAuthErrorMessage(
+            { status: 401, error: result.error },
+            'session'
+          )
         );
       }
       return result;
@@ -87,8 +90,10 @@ export function AuthProvider({ children }) {
       setIsLoading(false);
       setIsRestoringSession(false);
       setAuthNotice(
-        (info && info.message) ||
-          'Session expired or invalidated. Please sign in again.'
+        formatAuthErrorMessage(
+          { status: 401, message: info && info.message },
+          'session'
+        )
       );
     });
     return unsubscribe;
@@ -109,7 +114,7 @@ export function AuthProvider({ children }) {
         return result;
       }
       setUser(null);
-      setAuthError(result.error || 'Invalid email or password.');
+      setAuthError(formatAuthErrorMessage(result, 'login'));
       return result;
     } finally {
       setIsLoading(false);
@@ -137,7 +142,7 @@ export function AuthProvider({ children }) {
           return result;
         }
         setUser(null);
-        setAuthError(result.error || 'Registration failed.');
+        setAuthError(formatAuthErrorMessage(result, 'register'));
         return result;
       } finally {
         setIsLoading(false);

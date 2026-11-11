@@ -150,6 +150,324 @@ export async function clearCachedUserProfile() {
   }
 }
 
+let lastAuthDebugDiagnostic = null;
+
+/**
+ * Redacts sensitive tokens, cookies, JWTs, CSRF tokens, passwords, database URIs,
+ * internal file paths, and stack frames from any diagnostic or error string.
+ *
+ * Guarantees that JWTs, session cookies, CSRF tokens, MongoDB connection strings,
+ * and internal stack traces never appear in user-facing messages or debug logs.
+ *
+ * @param {string} rawText
+ * @returns {string}
+ */
+export function sanitizeSensitiveDiagnosticText(rawText) {
+  if (typeof rawText !== 'string' || !rawText) {
+    return '';
+  }
+
+  let sanitized = rawText;
+
+  // 1. Strip stack trace lines
+  sanitized = sanitized.replace(/\r?\n\s*at\s+[^\r\n]+/g, '');
+  sanitized = sanitized.replace(/\b(?:at\s+)[A-Za-z0-9_$.<>]+\s*\([^)]*\)/g, '');
+
+  // 2. Redact JWTs (header.payload.signature)
+  sanitized = sanitized.replace(
+    /\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b/g,
+    '[REDACTED_JWT]'
+  );
+
+  // 3. Redact Bearer tokens
+  sanitized = sanitized.replace(
+    /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi,
+    'Bearer [REDACTED]'
+  );
+
+  // 4. Redact Qavora session and CSRF cookies or generic Set-Cookie values
+  sanitized = sanitized.replace(
+    /(__Host-)?qavora_(session|csrf|token|auth)\s*=\s*[^;\s"'&,]+/gi,
+    '[REDACTED_COOKIE]'
+  );
+  sanitized = sanitized.replace(
+    /\b(set-cookie|cookie|x-csrf-token|csrf-token|csrftoken|authorization|password| passwordHash|secret|jwt)\s*[:=]\s*("[^"]*"|'[^']*'|[^\s,;}\]]+)/gi,
+    '$1=[REDACTED]'
+  );
+
+  // 5. Redact hex/base64-like long tokens following token/key labels
+  sanitized = sanitized.replace(
+    /\b(token|csrf|session|signature|key)\s*[:=]\s*[A-Za-z0-9._-]{16,}/gi,
+    '$1=[REDACTED]'
+  );
+
+  // 6. Redact database connection strings (mongodb://, mongodb+srv://, postgres://, redis://)
+  sanitized = sanitized.replace(
+    /\b(mongodb(?:\+srv)?|postgres(?:ql)?|redis):\/\/[^\s"'<>]+/gi,
+    '[REDACTED_DB_URI]'
+  );
+
+  // 7. Redact internal server file paths
+  sanitized = sanitized.replace(
+    /(?:\/var\/task\/|\/app\/|\/Users\/|\/home\/|\/opt\/|[A-Z]:\\)[^\s:)"',]+/g,
+    '[INTERNAL_PATH]'
+  );
+
+  // 8. Redact raw MongoDB collection/index duplicate key internals
+  sanitized = sanitized.replace(
+    /E11000 duplicate key error[^\r\n]*/gi,
+    'Duplicate account record'
+  );
+
+  return sanitized.trim();
+}
+
+/**
+ * Builds and records a sanitized development diagnostic entry without exposing
+ * sensitive tokens, cookies, passwords, database details, or stack traces.
+ *
+ * @param {any} errOrResult
+ * @param {string} [context='auth']
+ * @returns {object}
+ */
+export function buildSafeDebugDiagnostics(errOrResult, context = 'auth') {
+  const isObj = Boolean(errOrResult && typeof errOrResult === 'object');
+  const status = isObj && typeof errOrResult.status === 'number' ? errOrResult.status : null;
+  const code =
+    (isObj && typeof errOrResult.code === 'string' && errOrResult.code) ||
+    (status ? `HTTP_${status}` : 'AUTH_ERROR');
+  const isNetworkError = Boolean(isObj && errOrResult.isNetworkError);
+  const isTimeout = Boolean(isObj && errOrResult.isTimeout);
+
+  const rawMsg =
+    typeof errOrResult === 'string'
+      ? errOrResult
+      : isObj
+      ? errOrResult.error || errOrResult.message || ''
+      : '';
+
+  const sanitizedSummary = sanitizeSensitiveDiagnosticText(String(rawMsg || '')).slice(
+    0,
+    240
+  );
+
+  const diagnostic = {
+    context,
+    status,
+    code,
+    isNetworkError,
+    isTimeout,
+    sanitizedSummary,
+    timestamp: new Date().toISOString(),
+  };
+
+  lastAuthDebugDiagnostic = diagnostic;
+  return diagnostic;
+}
+
+/**
+ * Returns the most recent sanitized authentication diagnostic for development debugging.
+ *
+ * @returns {object | null}
+ */
+export function getLastAuthDebugDiagnostic() {
+  return lastAuthDebugDiagnostic;
+}
+
+/**
+ * Maps raw API errors, HTTP statuses, network/timeout failures, and backend
+ * responses into safe, clear, actionable user-facing messages.
+ *
+ * Preserves meaningful HTTP status handling (400, 401, 403, 409, 429, 5xx) and
+ * field-level validation feedback while never exposing JWTs, cookies, CSRF tokens,
+ * internal URLs, stack traces, or database/server implementation details.
+ *
+ * @param {any} errOrResult
+ * @param {'login' | 'register' | 'session' | 'health' | 'logout'} [context='login']
+ * @returns {string}
+ */
+export function formatAuthErrorMessage(errOrResult, context = 'login') {
+  const isObj = Boolean(errOrResult && typeof errOrResult === 'object');
+  const status =
+    isObj && typeof errOrResult.status === 'number' ? errOrResult.status : null;
+  const code =
+    isObj && typeof errOrResult.code === 'string'
+      ? errOrResult.code.trim().toUpperCase()
+      : '';
+  const isTimeout = Boolean(
+    (isObj && errOrResult.isTimeout) ||
+      code === 'REQUEST_TIMEOUT' ||
+      status === 408 ||
+      status === 504
+  );
+  const isNetworkError = Boolean(
+    (isObj && errOrResult.isNetworkError) ||
+      code === 'NETWORK_ERROR' ||
+      status === 0
+  );
+
+  const rawMessage =
+    typeof errOrResult === 'string'
+      ? errOrResult
+      : isObj
+      ? String(
+          errOrResult.userMessage ||
+            errOrResult.error ||
+            errOrResult.message ||
+            ''
+        )
+      : '';
+
+  const sanitized = sanitizeSensitiveDiagnosticText(rawMessage);
+  const lower = sanitized.toLowerCase();
+
+  // 1. Timeout handling
+  if (isTimeout || /\btimed?\s*out\b/i.test(lower)) {
+    if (context === 'health') {
+      return 'Server connection timed out. Tap Check to retry.';
+    }
+    return 'The server took too long to respond. Please check your internet connection and try again.';
+  }
+
+  // 2. Network / offline connectivity handling (only when no HTTP status >= 400 was returned)
+  if (
+    isNetworkError ||
+    ((status === null || status === 0) &&
+      /\b(network request failed|fetch failed|failed to fetch|network error|econnrefused|enotfound|ehostunreach|econnreset|socket hang up|offline|unable to resolve host)\b/i.test(
+        lower
+      ))
+  ) {
+    if (context === 'health') {
+      return 'Unable to reach the Qavora server. Check your internet connection.';
+    }
+    return 'Unable to connect to the Qavora server. Please check your internet connection and try again.';
+  }
+
+  // 3. Configuration errors
+  if (
+    code === 'INVALID_BASE_URL' ||
+    code === 'INSECURE_PRODUCTION_URL' ||
+    code === 'UNCONFIGURED_BASE_URL' ||
+    /\b(expo_public_api_base_url|invalid api base url|insecure_production_url)\b/i.test(
+      lower
+    )
+  ) {
+    if (context === 'health') {
+      return 'Server connection URL is not configured properly.';
+    }
+    return 'The Qavora server connection is not configured properly. Please check the application environment settings.';
+  }
+
+  // 4. HTTP 429 Rate Limit
+  if (
+    status === 429 ||
+    code === 'HTTP_429' ||
+    code === 'RATE_LIMITED' ||
+    code === 'TOO_MANY_REQUESTS' ||
+    /\b(too many requests|too many.*attempts|rate limit|slow down)\b/i.test(lower)
+  ) {
+    return 'Too many authentication attempts. Please wait a moment before trying again.';
+  }
+
+  // 5. HTTP 409 Conflict / Duplicate Account
+  if (
+    status === 409 ||
+    code === 'HTTP_409' ||
+    code === 'DUPLICATE_EMAIL' ||
+    code === 'USER_ALREADY_EXISTS' ||
+    /\b(already exists|already registered|already in use|email.*taken|duplicate account record|e11000)\b/i.test(
+      lower
+    )
+  ) {
+    return 'An account with this email address already exists. Please sign in or use a different email address.';
+  }
+
+  // 6. HTTP 401 Unauthorized / Invalid Credentials / Session Expired
+  if (
+    status === 401 ||
+    code === 'HTTP_401' ||
+    /\b(invalid email or password|invalid credentials|incorrect password|wrong password|authentication failed)\b/i.test(
+      lower
+    )
+  ) {
+    if (context === 'session') {
+      return 'Your session has expired or is no longer valid. Please sign in again.';
+    }
+    if (context === 'register') {
+      return 'Authentication failed while creating your account. Please verify your details and try again.';
+    }
+    return 'Invalid email or password. Please check your credentials and try again.';
+  }
+
+  if (
+    context === 'session' &&
+    /\b(session.*expired|session.*revoked|unauthorized|not authenticated|sign in again)\b/i.test(
+      lower
+    )
+  ) {
+    return 'Your session has expired or is no longer valid. Please sign in again.';
+  }
+
+  // 7. HTTP 403 Forbidden (Trusted Origin / CSRF / Security Policy)
+  if (
+    status === 403 ||
+    code === 'HTTP_403' ||
+    /\b(forbidden|cross-origin request rejected|origin header required|csrf)\b/i.test(
+      lower
+    )
+  ) {
+    if (/\bcsrf\b/i.test(lower)) {
+      return 'Your security verification token expired (HTTP 403). Please try submitting again.';
+    }
+    if (/\b(cross-origin|origin)\b/i.test(lower)) {
+      return 'Request origin was rejected by the server (HTTP 403). Please verify your application configuration and try again.';
+    }
+    return 'Access was denied by the server security policy (HTTP 403). Please try again.';
+  }
+
+  // 8. Server / Database / Malformed Payload Errors (5xx or technical driver messages)
+  const hasTechnicalLeakIndicators =
+    /\b(mongo|mongoose|bson|collection:|index:|dup key|prisma|postgres|sql|syntaxerror|typeerror|referenceerror|unexpected token|expected valid json|non-json|function_invocation_failed|internal server error|bad gateway|service unavailable|gateway timeout|stack|\[redacted_|\[internal_path\])\b/i.test(
+      lower
+    ) ||
+    /https?:\/\/[^\s]+/i.test(sanitized) ||
+    /<\/?[a-z][\s\S]*>/i.test(sanitized);
+
+  if (
+    (status !== null && status >= 500) ||
+    code === 'INVALID_JSON_RESPONSE' ||
+    code === 'BACKEND_UNHEALTHY' ||
+    code === 'INVALID_HEALTH_PAYLOAD' ||
+    hasTechnicalLeakIndicators
+  ) {
+    if (context === 'health') {
+      return 'The Qavora server is temporarily unavailable. Tap Check to retry.';
+    }
+    return 'The Qavora server is temporarily unavailable. Please try again in a few moments.';
+  }
+
+  // 9. Preserve clean field-level validation messages (400 / 422 or client validation)
+  if (
+    sanitized &&
+    sanitized.length <= 180 &&
+    !/request failed with http/i.test(sanitized)
+  ) {
+    return sanitized;
+  }
+
+  // 10. Context-specific safe fallbacks
+  if (context === 'register') {
+    return 'Unable to create your account right now. Please check your details and try again.';
+  }
+  if (context === 'session') {
+    return 'Unable to verify your session right now. Please sign in again.';
+  }
+  if (context === 'health') {
+    return 'Unable to reach the Qavora server. Tap Check to retry.';
+  }
+  return 'Unable to sign in right now. Please check your credentials and try again.';
+}
+
 /**
  * Fetches or refreshes a session-bound CSRF token via `GET /api/auth/csrf`.
  *
@@ -173,11 +491,13 @@ export async function fetchCsrfToken(options = {}) {
     };
   } catch (err) {
     const isApiErr = err instanceof ApiClientError;
+    const debugDiagnostic = buildSafeDebugDiagnostics(err, 'csrf');
     return {
       ok: false,
       status: isApiErr ? err.status : null,
       csrfToken: null,
-      error: (err && err.message) || 'Failed to issue CSRF token.',
+      error: formatAuthErrorMessage(err, 'session'),
+      debugDiagnostic,
     };
   }
 }
@@ -230,7 +550,8 @@ export async function registerUser(
       ok: false,
       status: 400,
       user: null,
-      error: 'Full name is required and must be a non-empty string.',
+      field: 'name',
+      error: 'Full name is required.',
     };
   }
 
@@ -239,7 +560,8 @@ export async function registerUser(
       ok: false,
       status: 400,
       user: null,
-      error: 'A valid email address is required.',
+      field: 'email',
+      error: 'Please enter a valid email address.',
     };
   }
 
@@ -248,6 +570,7 @@ export async function registerUser(
       ok: false,
       status: 400,
       user: null,
+      field: 'password',
       error: 'Password must be at least 8 characters long.',
     };
   }
@@ -266,11 +589,21 @@ export async function registerUser(
 
     const safeUser = sanitizeUserProfile(response.data && response.data.user);
     if (!safeUser) {
+      const debugDiagnostic = buildSafeDebugDiagnostics(
+        {
+          status: response.status,
+          code: 'INVALID_USER_PROFILE',
+          message: 'Registration response did not include a valid user profile.',
+        },
+        'register'
+      );
       return {
         ok: false,
         status: response.status,
         user: null,
-        error: 'Registration response did not include a valid user profile.',
+        error:
+          'Unable to complete account registration right now. Please try again.',
+        debugDiagnostic,
       };
     }
 
@@ -289,13 +622,20 @@ export async function registerUser(
     };
   } catch (err) {
     const isApiErr = err instanceof ApiClientError;
+    const status = isApiErr && typeof err.status === 'number' ? err.status : 0;
+    const debugDiagnostic = buildSafeDebugDiagnostics(err, 'register');
+    const safeErrorMessage = formatAuthErrorMessage(err, 'register');
+
     return {
       ok: false,
-      status: isApiErr ? err.status : 0,
+      status,
       user: null,
-      error: (err && err.message) || 'Failed to register user.',
+      error: safeErrorMessage,
       code: isApiErr ? err.code : 'REGISTER_ERROR',
-      isNetworkError: isApiErr ? err.isNetworkError : false,
+      isNetworkError: isApiErr ? Boolean(err.isNetworkError) : false,
+      isTimeout: isApiErr ? Boolean(err.isTimeout) : false,
+      field: status === 409 ? 'email' : undefined,
+      debugDiagnostic,
     };
   }
 }
@@ -330,12 +670,23 @@ export async function loginUser(
 
   const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 
-  if (!normalizedEmail || typeof password !== 'string' || password === '') {
+  if (!normalizedEmail || !EMAIL_REGEX.test(normalizedEmail)) {
     return {
       ok: false,
       status: 400,
       user: null,
-      error: 'Email and password are required.',
+      field: 'email',
+      error: 'Please enter a valid email address.',
+    };
+  }
+
+  if (typeof password !== 'string' || password === '') {
+    return {
+      ok: false,
+      status: 400,
+      user: null,
+      field: 'password',
+      error: 'Please enter your password.',
     };
   }
 
@@ -351,11 +702,20 @@ export async function loginUser(
 
     const safeUser = sanitizeUserProfile(response.data && response.data.user);
     if (!safeUser) {
+      const debugDiagnostic = buildSafeDebugDiagnostics(
+        {
+          status: response.status,
+          code: 'INVALID_USER_PROFILE',
+          message: 'Login response did not include a valid user profile.',
+        },
+        'login'
+      );
       return {
         ok: false,
         status: response.status,
         user: null,
-        error: 'Login response did not include a valid user profile.',
+        error: 'Unable to sign in right now. Please try again.',
+        debugDiagnostic,
       };
     }
 
@@ -376,13 +736,19 @@ export async function loginUser(
     await clearAllCookies();
     await clearCachedUserProfile();
     const isApiErr = err instanceof ApiClientError;
+    const status = isApiErr && typeof err.status === 'number' ? err.status : 0;
+    const debugDiagnostic = buildSafeDebugDiagnostics(err, 'login');
+    const safeErrorMessage = formatAuthErrorMessage(err, 'login');
+
     return {
       ok: false,
-      status: isApiErr ? err.status : 0,
+      status,
       user: null,
-      error: (err && err.message) || 'Invalid email or password.',
+      error: safeErrorMessage,
       code: isApiErr ? err.code : 'LOGIN_ERROR',
-      isNetworkError: isApiErr ? err.isNetworkError : false,
+      isNetworkError: isApiErr ? Boolean(err.isNetworkError) : false,
+      isTimeout: isApiErr ? Boolean(err.isTimeout) : false,
+      debugDiagnostic,
     };
   }
 }
@@ -401,7 +767,7 @@ export async function fetchCurrentUser(options = {}) {
         ok: false,
         status: response.status,
         user: null,
-        error: 'Invalid user profile returned from /api/auth/me.',
+        error: 'Unable to verify your session right now. Please sign in again.',
       };
     }
 
@@ -415,7 +781,8 @@ export async function fetchCurrentUser(options = {}) {
     };
   } catch (err) {
     const isApiErr = err instanceof ApiClientError;
-    const status = isApiErr ? err.status : 0;
+    const status = isApiErr && typeof err.status === 'number' ? err.status : 0;
+    const debugDiagnostic = buildSafeDebugDiagnostics(err, 'session');
 
     if (status === 401) {
       await clearAllCookies();
@@ -427,8 +794,10 @@ export async function fetchCurrentUser(options = {}) {
       status,
       user: null,
       isExpired: status === 401,
-      isNetworkError: isApiErr ? err.isNetworkError : false,
-      error: (err && err.message) || 'Failed to verify session.',
+      isNetworkError: isApiErr ? Boolean(err.isNetworkError) : false,
+      isTimeout: isApiErr ? Boolean(err.isTimeout) : false,
+      error: formatAuthErrorMessage(err, 'session'),
+      debugDiagnostic,
     };
   }
 }
@@ -502,9 +871,10 @@ export async function restoreAuthenticatedSession(options = {}) {
       status: 401,
       user: null,
       isExpired: true,
-      error:
-        meResult.error ||
-        'Your session has expired or been revoked. Please sign in again.',
+      error: formatAuthErrorMessage(
+        { status: 401, error: meResult.error },
+        'session'
+      ),
     };
   }
 
@@ -533,7 +903,7 @@ export async function restoreAuthenticatedSession(options = {}) {
     user: null,
     isExpired: false,
     isNetworkError: Boolean(meResult.isNetworkError),
-    error: meResult.error || 'Unable to verify session with server.',
+    error: formatAuthErrorMessage(meResult, 'session'),
   };
 }
 
@@ -569,7 +939,8 @@ export async function logoutUser(options = {}) {
   } catch (err) {
     const isApiErr = err instanceof ApiClientError;
     serverStatus = isApiErr ? err.status : 0;
-    serverError = (err && err.message) || 'Logout request failed.';
+    buildSafeDebugDiagnostics(err, 'logout');
+    serverError = formatAuthErrorMessage(err, 'logout');
   } finally {
     await clearAllCookies();
     await clearCachedUserProfile();
@@ -591,6 +962,10 @@ export const authService = {
   restoreSession: restoreAuthenticatedSession,
   loadCachedUserProfile,
   clearCachedUserProfile,
+  sanitizeSensitiveDiagnosticText,
+  buildSafeDebugDiagnostics,
+  getLastAuthDebugDiagnostic,
+  formatAuthErrorMessage,
   cookieManager,
   apiClient,
 };
