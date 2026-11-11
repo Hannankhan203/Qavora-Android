@@ -29,6 +29,7 @@ import TestCasesScreen from './src/components/TestCasesScreen';
 import TestRunsScreen from './src/components/TestRunsScreen';
 import DefectsScreen from './src/components/DefectsScreen';
 import ProfileSettingsScreen from './src/components/ProfileSettingsScreen';
+import DataManagementSection from './src/components/DataManagementSection';
 import VectorIcon from './src/components/VectorIcon';
 import { startConnectivityMonitoring } from './src/services/offlineSyncService';
 
@@ -338,14 +339,20 @@ function QavoraQAShell() {
       return true;
     }
 
-    // 9. Workspace view without a selected project (e.g. Profile/Data Management) -> return to My Projects
+    // 9. Data Management dedicated screen -> return to Settings screen first (whether or not a project is active)
+    if (activeTab === 'profile' && profileSubView === 'data') {
+      setProfileSubView('settings');
+      return true;
+    }
+
+    // 10. Workspace view without a selected project (e.g. Settings when no project is active) -> return to My Projects
     if (!selectedProject && effectiveViewMode === 'workspace') {
       setProfileSubView('all');
       setProjectViewMode('selection');
       return true;
     }
 
-    // 10. Nested Dashboard sub-tabs (Reports or embedded Checklists) -> return to QA Dashboard Overview
+    // 11. Nested Dashboard sub-tabs (Reports or embedded Checklists) -> return to QA Dashboard Overview
     if (
       activeTab === 'dashboard' &&
       (dashboardSubTab === 'reports' || dashboardSubTab === 'checklists')
@@ -354,7 +361,7 @@ function QavoraQAShell() {
       return true;
     }
 
-    // 11. Nested Test Cases sub-tabs (Test Plans or Test Suites) -> return to Test Cases list
+    // 12. Nested Test Cases sub-tabs (Test Plans or Test Suites) -> return to Test Cases list
     if (
       activeTab === 'testcases' &&
       (testCasesSubTab === 'plan' || testCasesSubTab === 'suites')
@@ -363,19 +370,13 @@ function QavoraQAShell() {
       return true;
     }
 
-    // 12. Nested Test Execution History view -> return to Test Runs view
+    // 13. Nested Test Execution History view -> return to Test Runs view
     if (activeTab === 'testruns' && testRunsViewMode === 'history') {
       setTestRunsViewMode('runs');
       return true;
     }
 
-    // 13. Nested Data Management section inside Profile -> return to Settings / Profile overview
-    if (activeTab === 'profile' && profileSubView === 'data') {
-      setProfileSubView('settings');
-      return true;
-    }
-
-    // 14. Non-Dashboard primary workspace tabs -> return to Dashboard (or My Projects if no project)
+    // 14. Non-Dashboard primary workspace tabs (including Settings) -> return to Dashboard (or My Projects if no project)
     if (activeTab !== 'dashboard') {
       setProfileSubView('all');
       if (selectedProject) {
@@ -967,7 +968,8 @@ function QavoraQAShell() {
                 selected:
                   !isChecklistsActive &&
                   effectiveViewMode === 'workspace' &&
-                  activeTab === 'profile',
+                  activeTab === 'profile' &&
+                  profileSubView !== 'data',
               }}
               accessibilityLabel="Profile and Settings"
               style={[
@@ -976,13 +978,15 @@ function QavoraQAShell() {
                   backgroundColor:
                     !isChecklistsActive &&
                     effectiveViewMode === 'workspace' &&
-                    activeTab === 'profile'
+                    activeTab === 'profile' &&
+                    profileSubView !== 'data'
                       ? colors.primary
                       : colors.surfaceAccent,
                   borderColor:
                     !isChecklistsActive &&
                     effectiveViewMode === 'workspace' &&
-                    activeTab === 'profile'
+                    activeTab === 'profile' &&
+                    profileSubView !== 'data'
                       ? colors.primary
                       : colors.border,
                 },
@@ -994,7 +998,8 @@ function QavoraQAShell() {
                 color={
                   !isChecklistsActive &&
                   effectiveViewMode === 'workspace' &&
-                  activeTab === 'profile'
+                  activeTab === 'profile' &&
+                  profileSubView !== 'data'
                     ? colors.textOnPrimary
                     : colors.primary
                 }
@@ -1125,12 +1130,15 @@ function QavoraQAShell() {
                   onOpenProjectDetails={() => setProjectViewMode('details')}
                 />
               ))}
-            {activeTab === 'profile' && (
-              <ProfileSettingsScreen
-                activeSection={profileSubView}
-                onChangeSection={setProfileSubView}
-              />
-            )}
+            {activeTab === 'profile' &&
+              (profileSubView === 'data' ? (
+                <DataManagementSection />
+              ) : (
+                <ProfileSettingsScreen
+                  activeSection={profileSubView}
+                  onChangeSection={setProfileSubView}
+                />
+              ))}
           </>
         )}
       </View>
@@ -1150,7 +1158,8 @@ function QavoraQAShell() {
                 : tab.id === 'profile'
                 ? !isChecklistsActive &&
                   effectiveViewMode === 'workspace' &&
-                  activeTab === 'profile'
+                  activeTab === 'profile' &&
+                  profileSubView !== 'data'
                 : tab.id === 'dashboard'
                 ? !isChecklistsActive &&
                   effectiveViewMode === 'workspace' &&
@@ -1182,8 +1191,6 @@ function QavoraQAShell() {
                 ? executingTestCaseId
                   ? 'Runner'
                   : 'History'
-                : active && tab.id === 'profile' && profileSubView === 'data'
-                ? 'Data'
                 : null;
 
             return (

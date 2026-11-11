@@ -25,6 +25,8 @@ import {
   ScrollView,
   Modal,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useTheme, monoFontFamily } from '../theme/theme.js';
 import { useAuth } from '../context/AuthContext.js';
@@ -78,9 +80,26 @@ export default function DataManagementSection() {
     clearProjectDataError,
     checklists,
     setChecklists,
+    profile,
+    suites,
+    testCases,
+    testRuns,
+    executions,
+    defects,
+    lastPersistedAt,
+    openSettingsView,
+    openProjectSelection,
+    getSampleRestorePreview,
+    resetToSampleData,
+    isRestoringSampleData,
+    clearAllWorkspaceData,
+    isClearingWorkspaceData,
   } = useWorkspace();
 
   const activeUserId = user && user.userId ? String(user.userId) : null;
+  const samplePreview = getSampleRestorePreview
+    ? getSampleRestorePreview()
+    : null;
 
   // Storage & Snapshot states
   const [storageStats, setStorageStats] = useState(null);
@@ -673,6 +692,20 @@ export default function DataManagementSection() {
         } else {
           showToast(res.error || 'Failed to reset workspace data', 'danger');
         }
+        return;
+      }
+
+      if (type === 'restore_sample_dataset') {
+        await resetToSampleData();
+        await loadStorageAndSnapshots();
+        setConfirmActionModal(null);
+        return;
+      }
+
+      if (type === 'clear_active_project_dataset') {
+        await clearAllWorkspaceData();
+        await loadStorageAndSnapshots();
+        setConfirmActionModal(null);
       }
     } finally {
       setIsExecutingConfirmAction(false);
@@ -704,16 +737,123 @@ export default function DataManagementSection() {
       : 'ONLINE & SYNCED';
 
   return (
-    <View style={styles.sectionStack}>
-      {/* =================================================================== */}
-      {/* 1. OFFLINE & SYNCHRONIZATION CENTER                                 */}
-      {/* =================================================================== */}
-      <View
-        style={[
-          styles.card,
-          { backgroundColor: colors.surface, borderColor: colors.border },
-        ]}
+    <KeyboardAvoidingView
+      style={styles.screenContainer}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 24}
+    >
+      <ScrollView
+        style={styles.screenContainer}
+        contentContainerStyle={styles.screenContent}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        showsVerticalScrollIndicator={false}
       >
+        <View style={styles.sectionStack}>
+          {/* =================================================================== */}
+          {/* 0. DEDICATED DATA MANAGEMENT SCREEN HEADER & NAVIGATION             */}
+          {/* =================================================================== */}
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.cardHeaderRow}>
+              <View style={styles.cardHeaderTextCol}>
+                <Text
+                  style={[
+                    styles.sectionKicker,
+                    { color: colors.primary, fontFamily: monoFontFamily },
+                  ]}
+                >
+                  DATA MANAGEMENT & OFFLINE SYNC
+                </Text>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  Backup, Restore & Storage Center
+                </Text>
+                <Text
+                  style={[styles.sectionDesc, { color: colors.textSecondary, marginBottom: 0 }]}
+                >
+                  Active project:{' '}
+                  {selectedProject
+                    ? `${selectedProject.name} (${selectedProject.projectKey || 'QA'})`
+                    : 'No project selected (account-level backup & sync ready)'}
+                  {lastPersistedAt
+                    ? ` · Saved ${new Date(lastPersistedAt).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}`
+                    : ''}
+                </Text>
+              </View>
+              <View style={styles.headerNavActionsRow}>
+                {openSettingsView ? (
+                  <Pressable
+                    onPress={openSettingsView}
+                    accessibilityRole="button"
+                    accessibilityLabel="Back to Profile and Settings"
+                    style={[
+                      styles.secondaryBtn,
+                      {
+                        backgroundColor: colors.background,
+                        borderColor: colors.borderStrong,
+                      },
+                    ]}
+                  >
+                    <VectorIcon
+                      name="chevron-left"
+                      size={14}
+                      color={colors.text}
+                    />
+                    <Text
+                      style={[styles.secondaryBtnText, { color: colors.text }]}
+                    >
+                      Settings
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {openProjectSelection ? (
+                  <Pressable
+                    onPress={openProjectSelection}
+                    accessibilityRole="button"
+                    accessibilityLabel="Switch Active Project"
+                    style={[
+                      styles.secondaryBtn,
+                      {
+                        backgroundColor: colors.surfaceAccent,
+                        borderColor: colors.primary,
+                      },
+                    ]}
+                  >
+                    <VectorIcon
+                      name="folder"
+                      size={14}
+                      color={colors.primary}
+                    />
+                    <Text
+                      style={[
+                        styles.secondaryBtnText,
+                        { color: colors.primary },
+                      ]}
+                    >
+                      My Projects
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            </View>
+          </View>
+
+          {/* =================================================================== */}
+          {/* 1. OFFLINE & SYNCHRONIZATION CENTER                                 */}
+          {/* =================================================================== */}
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
         <View style={styles.cardHeaderRow}>
           <View style={styles.cardHeaderTextCol}>
             <Text
@@ -1732,7 +1872,157 @@ export default function DataManagementSection() {
       </View>
 
       {/* =================================================================== */}
-      {/* 6. DANGER ZONE: CLOUD WORKSPACE RESET (/api/data/reset)             */}
+      {/* 6. SAMPLE QA DATASET & ACTIVE PROJECT DATASET MANAGEMENT            */}
+      {/* =================================================================== */}
+      <View
+        style={[
+          styles.card,
+          {
+            backgroundColor: colors.surface,
+            borderColor: colors.border,
+          },
+        ]}
+      >
+        <Text
+          style={[
+            styles.sectionKicker,
+            { color: colors.primary, fontFamily: monoFontFamily },
+          ]}
+        >
+          SAMPLE QA DATASET & PROJECT RESET
+        </Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          Active Project Dataset Controls
+        </Text>
+        <Text style={[styles.sectionDesc, { color: colors.textSecondary }]}>
+          Seed realistic Qavora mobile QA suites, test cases, execution runs,
+          and defects into the active project ({selectedProject?.name || 'Active Project'}), or clear the active project dataset while keeping your project record intact.
+        </Text>
+
+        {samplePreview ? (
+          <View
+            style={[
+              styles.metricsGrid,
+              {
+                backgroundColor: colors.background,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View style={styles.metricCell}>
+              <Text
+                style={[
+                  styles.metricValue,
+                  { color: colors.primary, fontFamily: monoFontFamily },
+                ]}
+              >
+                {samplePreview.suitesCount}
+              </Text>
+              <Text style={[styles.metricLabel, { color: colors.textMuted }]}>
+                Sample Suites
+              </Text>
+            </View>
+            <View style={styles.metricCell}>
+              <Text
+                style={[
+                  styles.metricValue,
+                  { color: colors.text, fontFamily: monoFontFamily },
+                ]}
+              >
+                {samplePreview.testCasesCount}
+              </Text>
+              <Text style={[styles.metricLabel, { color: colors.textMuted }]}>
+                Sample Cases
+              </Text>
+            </View>
+            <View style={styles.metricCell}>
+              <Text
+                style={[
+                  styles.metricValue,
+                  { color: colors.success, fontFamily: monoFontFamily },
+                ]}
+              >
+                {samplePreview.executionsCount}
+              </Text>
+              <Text style={[styles.metricLabel, { color: colors.textMuted }]}>
+                Executions
+              </Text>
+            </View>
+            <View style={styles.metricCell}>
+              <Text
+                style={[
+                  styles.metricValue,
+                  { color: colors.danger, fontFamily: monoFontFamily },
+                ]}
+              >
+                {samplePreview.defectsCount}
+              </Text>
+              <Text style={[styles.metricLabel, { color: colors.textMuted }]}>
+                Sample Defects
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        <View style={styles.actionButtonsRow}>
+          <Pressable
+            disabled={isRestoringSampleData || isClearingWorkspaceData}
+            onPress={() =>
+              setConfirmActionModal({
+                type: 'restore_sample_dataset',
+                title: 'Restore Sample QA Dataset?',
+                description: `Replace current active project data (${testCases.length} cases, ${testRuns.length} runs, ${defects.length} defects) with the default Qavora sample dataset (${samplePreview?.suitesCount || 4} suites, ${samplePreview?.testCasesCount || 8} cases, ${samplePreview?.testRunsCount || 3} runs, ${samplePreview?.defectsCount || 3} defects).`,
+              })
+            }
+            style={[
+              styles.secondaryBtn,
+              {
+                backgroundColor: colors.surfaceAccent,
+                borderColor: colors.primary,
+                opacity:
+                  isRestoringSampleData || isClearingWorkspaceData ? 0.6 : 1,
+              },
+            ]}
+          >
+            <VectorIcon name="refresh" size={14} color={colors.primary} />
+            <Text style={[styles.secondaryBtnText, { color: colors.primary }]}>
+              {isRestoringSampleData
+                ? 'Restoring Sample Data...'
+                : 'Restore Sample QA Dataset'}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            disabled={isRestoringSampleData || isClearingWorkspaceData}
+            onPress={() =>
+              setConfirmActionModal({
+                type: 'clear_active_project_dataset',
+                title: 'Clear Active Project Dataset?',
+                description: `Permanently delete ${suites.length} suites, ${testCases.length} test cases, ${testRuns.length} test runs, ${executions.length} execution records, and ${defects.length} defects in "${selectedProject?.name || profile?.projectName || 'Active Project'}".`,
+              })
+            }
+            style={[
+              styles.dangerBtn,
+              {
+                backgroundColor: colors.dangerSoft,
+                borderColor: colors.danger,
+                opacity:
+                  isRestoringSampleData || isClearingWorkspaceData ? 0.6 : 1,
+              },
+            ]}
+          >
+            <VectorIcon name="trash" size={14} color={colors.danger} />
+            <Text style={[styles.dangerBtnText, { color: colors.danger }]}>
+              {isClearingWorkspaceData
+                ? 'Clearing Dataset...'
+                : 'Clear Active Project Dataset'}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+
+      {/* =================================================================== */}
+      {/* 7. DANGER ZONE: CLOUD WORKSPACE RESET (/api/data/reset)             */}
       {/* =================================================================== */}
       <View
         style={[
@@ -2205,7 +2495,12 @@ export default function DataManagementSection() {
                 disabled={isExecutingConfirmAction}
                 style={[
                   styles.primaryBtn,
-                  { backgroundColor: colors.danger },
+                  {
+                    backgroundColor:
+                      confirmActionModal?.type === 'restore_sample_dataset'
+                        ? colors.primary
+                        : colors.danger,
+                  },
                 ]}
               >
                 <Text
@@ -2239,13 +2534,28 @@ export default function DataManagementSection() {
           </View>
         </View>
       </Modal>
-    </View>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  screenContainer: {
+    flex: 1,
+  },
+  screenContent: {
+    padding: 14,
+    paddingBottom: 32,
+  },
   sectionStack: {
     gap: 14,
+  },
+  headerNavActionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
   },
   card: {
     borderRadius: 16,

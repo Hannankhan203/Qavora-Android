@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -8,20 +8,14 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  Modal,
-  ActivityIndicator,
 } from 'react-native';
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useAuth } from '../context/AuthContext';
 import { useProjects } from '../context/ProjectContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
-import DataManagementSection from './DataManagementSection';
 
-export default function ProfileSettingsScreen({
-  activeSection: controlledSection,
-  onChangeSection,
-}) {
+export default function ProfileSettingsScreen() {
   const { colors, themePreference, setThemePreference } = useTheme();
   const {
     user,
@@ -32,54 +26,14 @@ export default function ProfileSettingsScreen({
   const { selectedProject, projects } = useProjects();
   const {
     profile,
-    suites,
-    testCases,
-    testRuns,
-    executions,
-    defects,
     metrics,
-    lastPersistedAt,
-    profileSubView: contextProfileSubView,
-    setProfileSubView: setContextProfileSubView,
     openProjectSelection,
     openProjectDetails,
-    openReportsView,
-    openChecklistsView,
+    openDataManagementView,
     updateProfile,
     isSavingProfile,
-    getSampleRestorePreview,
-    resetToSampleData,
-    isRestoringSampleData,
-    clearAllWorkspaceData,
-    isClearingWorkspaceData,
     showToast,
   } = useWorkspace();
-
-  const scrollViewRef = useRef(null);
-  const sectionOffsetsRef = useRef({ data: 0, settings: 0 });
-  const resolvedSection =
-    controlledSection !== undefined
-      ? controlledSection
-      : contextProfileSubView || 'all';
-
-  useEffect(() => {
-    if (!scrollViewRef.current) return undefined;
-    const timer = setTimeout(() => {
-      if (!scrollViewRef.current) return;
-      if (resolvedSection === 'data' && sectionOffsetsRef.current.data > 0) {
-        scrollViewRef.current.scrollTo({
-          y: Math.max(0, sectionOffsetsRef.current.data - 8),
-          animated: true,
-        });
-      } else if (resolvedSection === 'settings') {
-        scrollViewRef.current.scrollTo({
-          y: 0,
-          animated: true,
-        });
-      }
-    }, 80);
-    return () => clearTimeout(timer);
-  }, [resolvedSection]);
 
   const [testerName, setTesterName] = useState(profile.testerName || '');
   const [role, setRole] = useState(profile.role || '');
@@ -89,11 +43,12 @@ export default function ProfileSettingsScreen({
   const [targetVersion, setTargetVersion] = useState(
     (selectedProject && selectedProject.version) || profile.targetVersion || ''
   );
-  const [defaultDevice, setDefaultDevice] = useState(profile.defaultDevice || '');
+  const [defaultDevice, setDefaultDevice] = useState(
+    profile.defaultDevice || ''
+  );
   const [defaultBuild, setDefaultBuild] = useState(profile.defaultBuild || '');
   const [verifyingSession, setVerifyingSession] = useState(false);
   const [profileFeedback, setProfileFeedback] = useState(null);
-  const [confirmDatasetAction, setConfirmDatasetAction] = useState(null); // 'restore_sample' | 'clear_all' | null
 
   useEffect(() => {
     setTesterName(profile.testerName || '');
@@ -102,7 +57,9 @@ export default function ProfileSettingsScreen({
       (selectedProject && selectedProject.name) || profile.projectName || ''
     );
     setTargetVersion(
-      (selectedProject && selectedProject.version) || profile.targetVersion || ''
+      (selectedProject && selectedProject.version) ||
+        profile.targetVersion ||
+        ''
     );
     setDefaultDevice(profile.defaultDevice || '');
     setDefaultBuild(profile.defaultBuild || '');
@@ -150,60 +107,6 @@ export default function ProfileSettingsScreen({
     }
   };
 
-  const handleOpenRestoreSampleModal = () => {
-    if (isRestoringSampleData || isClearingWorkspaceData) return;
-    setConfirmDatasetAction('restore_sample');
-  };
-
-  const handleOpenClearDataModal = () => {
-    if (isRestoringSampleData || isClearingWorkspaceData) return;
-    setConfirmDatasetAction('clear_all');
-  };
-
-  const handleConfirmDatasetAction = async () => {
-    if (!confirmDatasetAction) return;
-    if (isRestoringSampleData || isClearingWorkspaceData) return;
-
-    if (confirmDatasetAction === 'restore_sample') {
-      const res = await resetToSampleData({ confirmed: true });
-      if (res && (res.ok || !res.skipped)) {
-        setConfirmDatasetAction(null);
-      }
-      return;
-    }
-
-    if (confirmDatasetAction === 'clear_all') {
-      const res = await clearAllWorkspaceData({ confirmed: true });
-      if (res && (res.ok || !res.skipped)) {
-        setConfirmDatasetAction(null);
-      }
-    }
-  };
-
-  const restorePreview = getSampleRestorePreview
-    ? getSampleRestorePreview()
-    : {
-        projectName:
-          (selectedProject && selectedProject.name) ||
-          profile.projectName ||
-          'Active Project',
-        willOverwriteBackend: Boolean(selectedProject),
-        currentCounts: {
-          suites: Array.isArray(suites) ? suites.length : 0,
-          testCases: Array.isArray(testCases) ? testCases.length : 0,
-          testRuns: Array.isArray(testRuns) ? testRuns.length : 0,
-          executions: Array.isArray(executions) ? executions.length : 0,
-          defects: Array.isArray(defects) ? defects.length : 0,
-        },
-        sampleCounts: {
-          suites: 4,
-          testCases: 10,
-          testRuns: 2,
-          executions: 0,
-          defects: 4,
-        },
-      };
-
   const handleVerifySession = async () => {
     setVerifyingSession(true);
     try {
@@ -240,11 +143,11 @@ export default function ProfileSettingsScreen({
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView
-        ref={scrollViewRef}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        {/* Authenticated Cloud Session & QA Summary Card */}
+        {/* 1. Profile & Authenticated Account Card */}
         <View
           style={[
             styles.card,
@@ -252,16 +155,24 @@ export default function ProfileSettingsScreen({
           ]}
         >
           <View style={styles.profileRow}>
-            <View style={[styles.avatarBox, { backgroundColor: colors.primary }]}>
-              <Text style={[styles.avatarText, { color: colors.textOnPrimary }]}>
+            <View
+              style={[styles.avatarBox, { backgroundColor: colors.primary }]}
+            >
+              <Text
+                style={[styles.avatarText, { color: colors.textOnPrimary }]}
+              >
                 {initials || 'QA'}
               </Text>
             </View>
             <View style={styles.profileTextCol}>
-              <Text style={[styles.profileName, { color: colors.text }]}>
+              <Text
+                numberOfLines={1}
+                style={[styles.profileName, { color: colors.text }]}
+              >
                 {displayUserName}
               </Text>
               <Text
+                numberOfLines={1}
                 style={[
                   styles.profileRole,
                   { color: colors.textSecondary, fontFamily: monoFontFamily },
@@ -272,125 +183,170 @@ export default function ProfileSettingsScreen({
               </Text>
               {user ? (
                 <Text
+                  numberOfLines={1}
                   style={[
                     styles.storageModeText,
                     { color: colors.success, fontFamily: monoFontFamily },
                   ]}
                 >
-                  Authenticated: {user.email} · {projects.length}{' '}
+                  {user.email} · {projects.length}{' '}
                   {projects.length === 1 ? 'project' : 'projects'}
                 </Text>
               ) : (
-                <Text style={[styles.storageModeText, { color: colors.textMuted }]}>
+                <Text
+                  style={[styles.storageModeText, { color: colors.textMuted }]}
+                >
                   Storage: Local Device AsyncStorage
                 </Text>
               )}
             </View>
           </View>
 
-          <View style={[styles.dataButtonsRow, { marginBottom: 12 }]}>
+          {selectedProject ? (
+            <View
+              style={[styles.statsRow, { borderTopColor: colors.border }]}
+            >
+              <View style={styles.statCell}>
+                <Text
+                  style={[
+                    styles.statVal,
+                    { color: colors.primary, fontFamily: monoFontFamily },
+                  ]}
+                >
+                  {metrics.totalTestCases}
+                </Text>
+                <Text style={[styles.statLabel, { color: colors.textMuted }]}>
+                  Cases
+                </Text>
+              </View>
+              <View style={styles.statCell}>
+                <Text
+                  style={[
+                    styles.statVal,
+                    { color: colors.success, fontFamily: monoFontFamily },
+                  ]}
+                >
+                  {metrics.passRate}%
+                </Text>
+                <Text style={[styles.statLabel, { color: colors.textMuted }]}>
+                  Pass Rate
+                </Text>
+              </View>
+              <View style={styles.statCell}>
+                <Text
+                  style={[
+                    styles.statVal,
+                    { color: colors.text, fontFamily: monoFontFamily },
+                  ]}
+                >
+                  {metrics.totalRuns}
+                </Text>
+                <Text style={[styles.statLabel, { color: colors.textMuted }]}>
+                  Runs
+                </Text>
+              </View>
+              <View style={styles.statCell}>
+                <Text
+                  style={[
+                    styles.statVal,
+                    {
+                      color:
+                        metrics.openDefects > 0
+                          ? colors.danger
+                          : colors.success,
+                      fontFamily: monoFontFamily,
+                    },
+                  ]}
+                >
+                  {metrics.openDefects}
+                </Text>
+                <Text style={[styles.statLabel, { color: colors.textMuted }]}>
+                  Defects
+                </Text>
+              </View>
+            </View>
+          ) : null}
+
+          <View style={[styles.actionGridRow, { marginTop: 10 }]}>
             <Pressable
-              onPress={openChecklistsView}
+              onPress={openProjectSelection}
               style={[
-                styles.secondaryBtn,
+                styles.compactActionBtn,
                 {
-                  backgroundColor: colors.surfaceAccent,
-                  borderColor: colors.primary,
-                  flexDirection: 'row',
-                  gap: 6,
+                  backgroundColor: colors.background,
+                  borderColor: colors.borderStrong,
                 },
               ]}
             >
-              <VectorIcon name="clipboard" size={15} color={colors.primary} />
-              <Text style={[styles.secondaryBtnText, { color: colors.primary }]}>
-                QA Checklists
+              <VectorIcon name="folder" size={14} color={colors.primary} />
+              <Text
+                numberOfLines={1}
+                style={[styles.compactActionBtnText, { color: colors.text }]}
+              >
+                {selectedProject ? 'Switch Project' : 'Select Project'} (
+                {projects.length})
               </Text>
             </Pressable>
 
             {selectedProject ? (
               <Pressable
-                onPress={openReportsView}
-                style={[
-                  styles.secondaryBtn,
-                  {
-                    backgroundColor: colors.surfaceAccent,
-                    borderColor: colors.primary,
-                    flexDirection: 'row',
-                    gap: 6,
-                  },
-                ]}
-              >
-                <VectorIcon name="file-text" size={15} color={colors.primary} />
-                <Text
-                  style={[styles.secondaryBtnText, { color: colors.primary }]}
-                >
-                  Reports & Export
-                </Text>
-              </Pressable>
-            ) : null}
-
-            {selectedProject ? (
-              <Pressable
                 onPress={openProjectDetails}
                 style={[
-                  styles.secondaryBtn,
+                  styles.compactActionBtn,
                   {
                     backgroundColor: colors.background,
                     borderColor: colors.borderStrong,
-                    flexDirection: 'row',
-                    gap: 6,
                   },
                 ]}
               >
-                <VectorIcon name="info" size={15} color={colors.primary} />
-                <Text style={[styles.secondaryBtnText, { color: colors.text }]}>
+                <VectorIcon name="info" size={14} color={colors.primary} />
+                <Text
+                  numberOfLines={1}
+                  style={[styles.compactActionBtnText, { color: colors.text }]}
+                >
                   Project Details
                 </Text>
               </Pressable>
             ) : null}
 
             <Pressable
-              onPress={openProjectSelection}
+              onPress={openDataManagementView}
               style={[
-                styles.secondaryBtn,
+                styles.compactActionBtn,
                 {
-                  backgroundColor: colors.background,
-                  borderColor: colors.borderStrong,
-                  flexDirection: 'row',
-                  gap: 6,
+                  backgroundColor: colors.surfaceAccent,
+                  borderColor: colors.primary,
                 },
               ]}
             >
-              <VectorIcon name="switch" size={15} color={colors.text} />
-              <Text style={[styles.secondaryBtnText, { color: colors.text }]}>
-                {selectedProject ? 'Switch Project' : 'Select Project'} (
-                {projects.length})
+              <VectorIcon name="refresh" size={14} color={colors.primary} />
+              <Text
+                numberOfLines={1}
+                style={[styles.compactActionBtnText, { color: colors.primary }]}
+              >
+                Data Management →
               </Text>
             </Pressable>
           </View>
 
           {user ? (
-            <View
-              style={[
-                styles.dataButtonsRow,
-                { marginBottom: 12 },
-              ]}
-            >
+            <View style={[styles.actionGridRow, { marginTop: 8 }]}>
               <Pressable
                 onPress={handleVerifySession}
                 disabled={verifyingSession || isAuthBusy}
                 style={[
-                  styles.secondaryBtn,
+                  styles.compactActionBtn,
                   {
                     backgroundColor: colors.background,
                     borderColor: colors.borderStrong,
                   },
                 ]}
               >
-                <Text style={[styles.secondaryBtnText, { color: colors.text }]}>
-                  {verifyingSession
-                    ? 'Verifying...'
-                    : 'Verify Session (/api/auth/me)'}
+                <Text
+                  numberOfLines={1}
+                  style={[styles.compactActionBtnText, { color: colors.text }]}
+                >
+                  {verifyingSession ? 'Verifying...' : 'Verify Session'}
                 </Text>
               </Pressable>
 
@@ -398,129 +354,52 @@ export default function ProfileSettingsScreen({
                 onPress={logout}
                 disabled={isAuthBusy}
                 style={[
-                  styles.dangerBtn,
+                  styles.compactDangerBtn,
                   {
                     backgroundColor: colors.dangerSoft,
                     borderColor: colors.danger,
                   },
                 ]}
               >
-                <Text style={[styles.dangerBtnText, { color: colors.danger }]}>
+                <Text
+                  numberOfLines={1}
+                  style={[styles.compactDangerBtnText, { color: colors.danger }]}
+                >
                   {isAuthBusy ? 'Signing out...' : 'Sign Out'}
                 </Text>
               </Pressable>
             </View>
           ) : null}
-
-          <View style={[styles.statsRow, { borderTopColor: colors.border }]}>
-            <View style={styles.statCell}>
-              <Text
-                style={[
-                  styles.statVal,
-                  { color: colors.primary, fontFamily: monoFontFamily },
-                ]}
-              >
-                {metrics.totalTestCases}
-              </Text>
-              <Text style={[styles.statLabel, { color: colors.textMuted }]}>
-                Test Cases
-              </Text>
-            </View>
-            <View style={styles.statCell}>
-              <Text
-                style={[
-                  styles.statVal,
-                  { color: colors.success, fontFamily: monoFontFamily },
-                ]}
-              >
-                {metrics.passRate}%
-              </Text>
-              <Text style={[styles.statLabel, { color: colors.textMuted }]}>
-                Pass Rate
-              </Text>
-            </View>
-            <View style={styles.statCell}>
-              <Text
-                style={[
-                  styles.statVal,
-                  { color: colors.text, fontFamily: monoFontFamily },
-                ]}
-              >
-                {metrics.totalRuns}
-              </Text>
-              <Text style={[styles.statLabel, { color: colors.textMuted }]}>
-                Test Runs
-              </Text>
-            </View>
-            <View style={styles.statCell}>
-              <Text
-                style={[
-                  styles.statVal,
-                  {
-                    color: metrics.openDefects > 0 ? colors.danger : colors.success,
-                    fontFamily: monoFontFamily,
-                  },
-                ]}
-              >
-                {metrics.openDefects}
-              </Text>
-              <Text style={[styles.statLabel, { color: colors.textMuted }]}>
-                Open Defects
-              </Text>
-            </View>
-          </View>
         </View>
 
-        {/* Phase 2F: Data Management, Backup, Restore & Offline Synchronization */}
+        {/* 2. Appearance & Theme Preferences */}
         <View
-          onLayout={(e) => {
-            const yOffset = e.nativeEvent.layout.y;
-            sectionOffsetsRef.current.data = yOffset;
-            if (
-              resolvedSection === 'data' &&
-              yOffset > 0 &&
-              scrollViewRef.current
-            ) {
-              scrollViewRef.current.scrollTo({
-                y: Math.max(0, yOffset - 8),
-                animated: true,
-              });
-            }
-          }}
-        >
-          <DataManagementSection />
-        </View>
-
-        {/* Adaptive Theme Toggle */}
-        <View
-          onLayout={(e) => {
-            sectionOffsetsRef.current.settings = e.nativeEvent.layout.y;
-          }}
           style={[
             styles.card,
             { backgroundColor: colors.surface, borderColor: colors.border },
           ]}
         >
-          <Text
-            style={[
-              styles.sectionKicker,
-              { color: colors.primary, fontFamily: monoFontFamily },
-            ]}
-          >
-            APPEARANCE & THEME
-          </Text>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            Interface Color Mode
-          </Text>
-          <Text style={[styles.sectionDesc, { color: colors.textSecondary }]}>
-            Persisted locally in AsyncStorage across Android and Web sessions.
-          </Text>
+          <View style={styles.compactHeaderRow}>
+            <View style={{ flex: 1 }}>
+              <Text
+                style={[
+                  styles.sectionKicker,
+                  { color: colors.primary, fontFamily: monoFontFamily },
+                ]}
+              >
+                APPEARANCE & PREFERENCES
+              </Text>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                Interface Color Mode
+              </Text>
+            </View>
+          </View>
 
           <View style={styles.themeButtonsRow}>
             {[
-              { id: 'light', label: 'Light' },
-              { id: 'dark', label: 'Dark' },
-              { id: 'system', label: 'System' },
+              { id: 'light', label: 'Light', icon: 'sun' },
+              { id: 'dark', label: 'Dark', icon: 'moon' },
+              { id: 'system', label: 'System', icon: 'globe' },
             ].map((mode) => {
               const active = themePreference === mode.id;
               return (
@@ -530,11 +409,18 @@ export default function ProfileSettingsScreen({
                   style={[
                     styles.themeBtn,
                     {
-                      backgroundColor: active ? colors.primary : colors.background,
+                      backgroundColor: active
+                        ? colors.primary
+                        : colors.background,
                       borderColor: active ? colors.primary : colors.border,
                     },
                   ]}
                 >
+                  <VectorIcon
+                    name={mode.icon}
+                    size={14}
+                    color={active ? colors.textOnPrimary : colors.textSecondary}
+                  />
                   <Text
                     style={[
                       styles.themeBtnText,
@@ -549,7 +435,7 @@ export default function ProfileSettingsScreen({
           </View>
         </View>
 
-        {/* QA Tester & Default Project Defaults */}
+        {/* 3. Application & QA Workspace Defaults */}
         <View
           style={[
             styles.card,
@@ -562,50 +448,60 @@ export default function ProfileSettingsScreen({
               { color: colors.primary, fontFamily: monoFontFamily },
             ]}
           >
-            QA WORKSPACE & DEVICE DEFAULTS
+            APPLICATION & QA WORKSPACE SETTINGS
           </Text>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            Local Profile & Default Environment
+            Profile & Default Environment
           </Text>
           <Text style={[styles.sectionDesc, { color: colors.textSecondary }]}>
-            Used to pre-fill new Test Runs and Defect reports on this device.
+            Pre-fills new Test Runs and Defect reports on this device.
           </Text>
 
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-            QA Tester Name
-          </Text>
-          <TextInput
-            value={testerName}
-            onChangeText={setTesterName}
-            placeholder="QA Engineer"
-            placeholderTextColor={colors.textMuted}
-            style={[
-              styles.input,
-              {
-                backgroundColor: colors.background,
-                borderColor: colors.border,
-                color: colors.text,
-              },
-            ]}
-          />
+          <View style={styles.twoColRow}>
+            <View style={styles.colHalf}>
+              <Text
+                style={[styles.fieldLabel, { color: colors.textSecondary }]}
+              >
+                QA Tester Name
+              </Text>
+              <TextInput
+                value={testerName}
+                onChangeText={setTesterName}
+                placeholder="QA Engineer"
+                placeholderTextColor={colors.textMuted}
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: colors.background,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                ]}
+              />
+            </View>
 
-          <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-            QA Role / Title
-          </Text>
-          <TextInput
-            value={role}
-            onChangeText={setRole}
-            placeholder="Lead QA Analyst"
-            placeholderTextColor={colors.textMuted}
-            style={[
-              styles.input,
-              {
-                backgroundColor: colors.background,
-                borderColor: colors.border,
-                color: colors.text,
-              },
-            ]}
-          />
+            <View style={styles.colHalf}>
+              <Text
+                style={[styles.fieldLabel, { color: colors.textSecondary }]}
+              >
+                QA Role / Title
+              </Text>
+              <TextInput
+                value={role}
+                onChangeText={setRole}
+                placeholder="Lead QA Analyst"
+                placeholderTextColor={colors.textMuted}
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: colors.background,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                ]}
+              />
+            </View>
+          </View>
 
           <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
             {selectedProject
@@ -633,7 +529,9 @@ export default function ProfileSettingsScreen({
 
           <View style={styles.twoColRow}>
             <View style={styles.colHalf}>
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+              <Text
+                style={[styles.fieldLabel, { color: colors.textSecondary }]}
+              >
                 Target Release Version
               </Text>
               <TextInput
@@ -654,7 +552,9 @@ export default function ProfileSettingsScreen({
             </View>
 
             <View style={styles.colHalf}>
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+              <Text
+                style={[styles.fieldLabel, { color: colors.textSecondary }]}
+              >
                 Default Build Number
               </Text>
               <TextInput
@@ -744,251 +644,12 @@ export default function ProfileSettingsScreen({
           >
             <Text style={[styles.saveBtnText, { color: colors.textOnPrimary }]}>
               {isSavingProfile
-                ? 'Saving Profile & Project...'
-                : 'Save Profile & Project Settings'}
+                ? 'Saving Profile & Settings...'
+                : 'Save Profile & Settings'}
             </Text>
           </Pressable>
         </View>
-
-        {/* Local & Active Project Dataset Reset Controls */}
-        <View
-          style={[
-            styles.card,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-          ]}
-        >
-          <Text
-            style={[
-              styles.sectionKicker,
-              { color: colors.textMuted, fontFamily: monoFontFamily },
-            ]}
-          >
-            PROJECT DATASET & RESET CONTROLS
-          </Text>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            Sample QA Dataset & Project Reset
-          </Text>
-          <Text style={[styles.sectionDesc, { color: colors.textSecondary }]}>
-            Restoring the sample QA dataset or clearing project data will replace all test suites, test cases, test runs, executions, and defects for the active project ({activeProjectTitle}). Explicit confirmation is required.
-            {lastPersistedAt ? ` Last saved: ${lastPersistedAt}.` : ''}
-          </Text>
-
-          <View style={styles.dataButtonsRow}>
-            <Pressable
-              onPress={handleOpenRestoreSampleModal}
-              disabled={isRestoringSampleData || isClearingWorkspaceData}
-              style={[
-                styles.secondaryBtn,
-                {
-                  backgroundColor: colors.background,
-                  borderColor: colors.borderStrong,
-                  opacity:
-                    isRestoringSampleData || isClearingWorkspaceData ? 0.6 : 1,
-                },
-              ]}
-            >
-              <Text style={[styles.secondaryBtnText, { color: colors.text }]}>
-                {isRestoringSampleData
-                  ? 'Restoring Sample Dataset...'
-                  : 'Restore Sample QA Dataset'}
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={handleOpenClearDataModal}
-              disabled={isRestoringSampleData || isClearingWorkspaceData}
-              style={[
-                styles.dangerBtn,
-                {
-                  backgroundColor: colors.dangerSoft,
-                  borderColor: colors.danger,
-                  opacity:
-                    isRestoringSampleData || isClearingWorkspaceData ? 0.6 : 1,
-                },
-              ]}
-            >
-              <Text style={[styles.dangerBtnText, { color: colors.danger }]}>
-                {isClearingWorkspaceData
-                  ? 'Clearing Data...'
-                  : 'Clear All Local Data'}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
       </ScrollView>
-
-      {/* Explicit Confirmation Modal for Sample Dataset Restoration & Clear All Data */}
-      <Modal
-        visible={Boolean(confirmDatasetAction)}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          if (!isRestoringSampleData && !isClearingWorkspaceData) {
-            setConfirmDatasetAction(null);
-          }
-        }}
-      >
-        <View style={styles.modalBackdrop}>
-          <View
-            style={[
-              styles.modalCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <View style={styles.modalHeaderRow}>
-              <VectorIcon
-                name="alert-triangle"
-                size={20}
-                color={
-                  confirmDatasetAction === 'clear_all'
-                    ? colors.danger
-                    : colors.warning
-                }
-              />
-              <Text style={[styles.modalTitle, { color: colors.text }]}>
-                {confirmDatasetAction === 'restore_sample'
-                  ? 'Confirm Sample QA Dataset Restore'
-                  : 'Confirm Clear Project QA Data'}
-              </Text>
-            </View>
-
-            <Text
-              style={[styles.modalDescription, { color: colors.textSecondary }]}
-            >
-              {confirmDatasetAction === 'restore_sample'
-                ? `You are about to overwrite the active project "${restorePreview.projectName}" with the Qavora Sample QA Dataset. Existing suites, test cases, test runs, execution logs, and defects in this project will be replaced on the backend and local cache.`
-                : `You are about to permanently clear all test suites, test cases, test runs, execution logs, and defects from the active project "${restorePreview.projectName}".`}
-            </Text>
-
-            <View
-              style={[
-                styles.previewBox,
-                {
-                  backgroundColor: colors.background,
-                  borderColor: colors.border,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.previewBoxTitle,
-                  { color: colors.text, fontFamily: monoFontFamily },
-                ]}
-              >
-                DATA REPLACEMENT SUMMARY ({restorePreview.projectName})
-              </Text>
-              <Text
-                style={[
-                  styles.previewLine,
-                  { color: colors.textSecondary, fontFamily: monoFontFamily },
-                ]}
-              >
-                • Test Suites: {restorePreview.currentCounts.suites} current →{' '}
-                {confirmDatasetAction === 'restore_sample'
-                  ? `${restorePreview.sampleCounts.suites} sample suites`
-                  : '1 empty default suite'}
-              </Text>
-              <Text
-                style={[
-                  styles.previewLine,
-                  { color: colors.textSecondary, fontFamily: monoFontFamily },
-                ]}
-              >
-                • Test Cases: {restorePreview.currentCounts.testCases} current →{' '}
-                {confirmDatasetAction === 'restore_sample'
-                  ? `${restorePreview.sampleCounts.testCases} sample cases`
-                  : '0 cases'}
-              </Text>
-              <Text
-                style={[
-                  styles.previewLine,
-                  { color: colors.textSecondary, fontFamily: monoFontFamily },
-                ]}
-              >
-                • Test Runs: {restorePreview.currentCounts.testRuns} current →{' '}
-                {confirmDatasetAction === 'restore_sample'
-                  ? `${restorePreview.sampleCounts.testRuns} sample runs`
-                  : '0 runs'}
-              </Text>
-              <Text
-                style={[
-                  styles.previewLine,
-                  { color: colors.textSecondary, fontFamily: monoFontFamily },
-                ]}
-              >
-                • Executions: {restorePreview.currentCounts.executions} current
-                → 0 execution logs
-              </Text>
-              <Text
-                style={[
-                  styles.previewLine,
-                  { color: colors.textSecondary, fontFamily: monoFontFamily },
-                ]}
-              >
-                • Defects: {restorePreview.currentCounts.defects} current →{' '}
-                {confirmDatasetAction === 'restore_sample'
-                  ? `${restorePreview.sampleCounts.defects} sample defects`
-                  : '0 defects'}
-              </Text>
-            </View>
-
-            <View style={styles.modalActionsRow}>
-              <Pressable
-                onPress={() => setConfirmDatasetAction(null)}
-                disabled={isRestoringSampleData || isClearingWorkspaceData}
-                style={[
-                  styles.secondaryBtn,
-                  {
-                    backgroundColor: colors.background,
-                    borderColor: colors.borderStrong,
-                  },
-                ]}
-              >
-                <Text style={[styles.secondaryBtnText, { color: colors.text }]}>
-                  Cancel
-                </Text>
-              </Pressable>
-
-              <Pressable
-                onPress={handleConfirmDatasetAction}
-                disabled={isRestoringSampleData || isClearingWorkspaceData}
-                style={[
-                  styles.dangerBtn,
-                  {
-                    backgroundColor:
-                      confirmDatasetAction === 'restore_sample'
-                        ? colors.primary
-                        : colors.danger,
-                    borderColor:
-                      confirmDatasetAction === 'restore_sample'
-                        ? colors.primary
-                        : colors.danger,
-                    flexDirection: 'row',
-                    gap: 8,
-                    opacity:
-                      isRestoringSampleData || isClearingWorkspaceData
-                        ? 0.7
-                        : 1,
-                  },
-                ]}
-              >
-                {isRestoringSampleData || isClearingWorkspaceData ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : null}
-                <Text style={[styles.dangerBtnText, { color: '#FFFFFF' }]}>
-                  {confirmDatasetAction === 'restore_sample'
-                    ? isRestoringSampleData
-                      ? 'Restoring...'
-                      : 'Confirm & Overwrite Project Data'
-                    : isClearingWorkspaceData
-                    ? 'Clearing...'
-                    : 'Confirm & Clear Project Data'}
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -998,239 +659,190 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    paddingHorizontal: 14,
-    paddingTop: 14,
-    paddingBottom: 96,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 24,
     maxWidth: 920,
     width: '100%',
     alignSelf: 'center',
-    gap: 14,
+    gap: 10,
   },
   card: {
-    borderRadius: 16,
+    borderRadius: 14,
     borderWidth: 1,
-    padding: 16,
+    padding: 13,
   },
   profileRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 14,
+    gap: 10,
+    marginBottom: 8,
   },
   avatarBox: {
-    width: 50,
-    height: 50,
-    borderRadius: 14,
+    width: 44,
+    height: 44,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarText: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
   },
   profileTextCol: {
     flex: 1,
     flexShrink: 1,
-    minWidth: 160,
+    minWidth: 0,
   },
   profileName: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
-    marginBottom: 2,
+    marginBottom: 1,
   },
   profileRole: {
-    fontSize: 12,
-    marginBottom: 2,
+    fontSize: 11.5,
+    marginBottom: 1,
   },
   storageModeText: {
-    fontSize: 11,
+    fontSize: 10.5,
   },
   statsRow: {
     flexDirection: 'row',
     borderTopWidth: 1,
-    paddingTop: 12,
-    flexWrap: 'wrap',
-    gap: 8,
+    paddingTop: 9,
+    gap: 6,
   },
   statCell: {
     flex: 1,
-    minWidth: 64,
     alignItems: 'center',
   },
   statVal: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '700',
   },
   statLabel: {
-    fontSize: 11,
-    marginTop: 2,
+    fontSize: 10,
+    marginTop: 1,
+  },
+  actionGridRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  compactActionBtn: {
+    flex: 1,
+    minWidth: 98,
+    minHeight: 38,
+    borderRadius: 9,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 9,
+    gap: 5,
+  },
+  compactActionBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  compactDangerBtn: {
+    flex: 1,
+    minWidth: 98,
+    minHeight: 38,
+    borderRadius: 9,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 9,
+  },
+  compactDangerBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  compactHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
   },
   sectionKicker: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.4,
-    marginBottom: 3,
+    marginBottom: 2,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
-    marginBottom: 4,
   },
   sectionDesc: {
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 12,
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 2,
+    marginBottom: 10,
   },
   themeButtonsRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 8,
   },
   themeBtn: {
     flex: 1,
-    minWidth: 82,
-    minHeight: 44,
-    borderRadius: 10,
+    minHeight: 40,
+    borderRadius: 9,
     borderWidth: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 8,
+    gap: 6,
   },
   themeBtnText: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: '700',
   },
   fieldLabel: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   input: {
-    minHeight: 44,
+    minHeight: 40,
     borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    fontSize: 14,
-    marginBottom: 12,
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    fontSize: 13.5,
+    marginBottom: 9,
   },
   twoColRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
   },
   colHalf: {
     flex: 1,
-    minWidth: 140,
+    minWidth: 138,
   },
   saveBtn: {
-    minHeight: 46,
-    borderRadius: 10,
+    minHeight: 42,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,
   },
   saveBtnText: {
-    fontSize: 14,
+    fontSize: 13.5,
     fontWeight: '700',
-  },
-  dataButtonsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  secondaryBtn: {
-    flex: 1,
-    minWidth: 140,
-    minHeight: 44,
-    borderRadius: 10,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-  },
-  secondaryBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  dangerBtn: {
-    flex: 1,
-    minWidth: 140,
-    minHeight: 44,
-    borderRadius: 10,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-  },
-  dangerBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    textAlign: 'center',
   },
   feedbackBanner: {
     borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 12,
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 9,
   },
   feedbackBannerText: {
-    fontSize: 13,
-    fontWeight: '600',
-    lineHeight: 18,
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.68)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 18,
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 480,
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 18,
-    gap: 12,
-  },
-  modalHeaderRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 8,
-  },
-  modalTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    flex: 1,
-    flexShrink: 1,
-  },
-  modalDescription: {
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  previewBox: {
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: 12,
-    gap: 5,
-  },
-  previewBoxTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  previewLine: {
     fontSize: 12,
-    lineHeight: 17,
-  },
-  modalActionsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 4,
+    fontWeight: '600',
+    lineHeight: 16,
   },
 });
