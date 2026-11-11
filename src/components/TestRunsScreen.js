@@ -707,6 +707,10 @@ export default function TestRunsScreen({
                 borderColor: theme.border,
               },
             ]}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: Boolean(isSyncingWorkspace) }}
+            accessibilityLabel="Refresh test runs"
             onPress={() => reloadCurrentProject()}
             disabled={isSyncingWorkspace}
           >
@@ -813,6 +817,7 @@ export default function TestRunsScreen({
         ]}
       >
         <View
+          accessibilityRole="tablist"
           style={[
             styles.modeSwitcherTrack,
             {
@@ -828,6 +833,10 @@ export default function TestRunsScreen({
                 backgroundColor: theme.primary,
               },
             ]}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeViewMode === 'runs' }}
+            accessibilityLabel={`Test Runs (${testRuns.length})`}
             onPress={() => setActiveViewMode('runs')}
           >
             <VectorIcon
@@ -857,6 +866,12 @@ export default function TestRunsScreen({
                 backgroundColor: theme.primary,
               },
             ]}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeViewMode === 'history' }}
+            accessibilityLabel={`Execution History (${
+              executions?.length || 0
+            })`}
             onPress={() => setActiveViewMode('history')}
           >
             <VectorIcon
@@ -884,6 +899,9 @@ export default function TestRunsScreen({
 
         <TouchableOpacity
           style={[styles.newRunTopBtn, { backgroundColor: theme.primary }]}
+          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+          accessibilityRole="button"
+          accessibilityLabel="Create New Test Run"
           onPress={openCreateRunModal}
         >
           <VectorIcon name="plus" size={14} color="#FFFFFF" />
@@ -922,6 +940,9 @@ export default function TestRunsScreen({
                   <TouchableOpacity
                     key={run.id}
                     onPress={() => setSelectedTestRunId(run.id)}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: isSelected }}
+                    accessibilityLabel={`Select test run ${run.id} ${run.name}, status ${run.status}`}
                     style={[
                       styles.runTabCard,
                       {
@@ -1286,6 +1307,11 @@ export default function TestRunsScreen({
                   ].map((item) => (
                     <TouchableOpacity
                       key={item.label}
+                      accessibilityRole="tab"
+                      accessibilityState={{
+                        selected: resultFilter === item.filterKey,
+                      }}
+                      accessibilityLabel={`Filter run by ${item.label}: ${item.val} cases`}
                       style={[
                         styles.counterChip,
                         {
@@ -1335,11 +1361,17 @@ export default function TestRunsScreen({
                     style={[styles.searchInput, { color: theme.text }]}
                     placeholder="Filter run test cases by ID, title, or notes..."
                     placeholderTextColor={theme.textMuted}
+                    accessibilityLabel="Filter run test cases by ID, title, or notes"
                     value={searchQuery}
                     onChangeText={setSearchQuery}
                   />
                   {searchQuery.length > 0 && (
-                    <TouchableOpacity onPress={() => setSearchQuery('')}>
+                    <TouchableOpacity
+                      onPress={() => setSearchQuery('')}
+                      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Clear test run search"
+                    >
                       <VectorIcon
                         name="close"
                         size={14}
@@ -1360,6 +1392,12 @@ export default function TestRunsScreen({
                       <TouchableOpacity
                         key={f}
                         onPress={() => setResultFilter(f)}
+                        hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                        accessibilityRole="tab"
+                        accessibilityState={{ selected: active }}
+                        accessibilityLabel={`Filter run results: ${
+                          f === 'Untested' ? 'Not Run or Untested' : f
+                        }`}
                         style={[
                           styles.filterPill,
                           {
@@ -1683,6 +1721,9 @@ export default function TestRunsScreen({
                                 backgroundColor: theme.surfaceMuted,
                               },
                             ]}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Reset ${tc.id} to untested`}
                             onPress={() => handleQuickOutcome(tc, 'Untested')}
                             disabled={isSubmittingExec}
                           >
@@ -2130,6 +2171,7 @@ export default function TestRunsScreen({
                       {executingCase.id} • {activeRun?.id} ({activeRun?.name})
                     </Text>
                     <Text
+                      accessibilityRole="header"
                       style={[styles.modalTitle, { color: theme.text }]}
                       numberOfLines={2}
                     >
@@ -2138,6 +2180,9 @@ export default function TestRunsScreen({
                   </View>
                   <TouchableOpacity
                     onPress={() => setExecutingCaseId(null)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Close execution runner"
                     style={[
                       styles.closeBtn,
                       { backgroundColor: theme.surfaceMuted },
@@ -2198,6 +2243,9 @@ export default function TestRunsScreen({
                           styles.passAllStepsBtn,
                           { backgroundColor: theme.successSoft },
                         ]}
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Pass all steps"
                         onPress={markAllStepsPassed}
                       >
                         <VectorIcon
@@ -2272,6 +2320,10 @@ export default function TestRunsScreen({
                         <View style={styles.stepToggles}>
                           <TouchableOpacity
                             onPress={() => toggleStepStatus(idx, 'Passed')}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: st === 'Passed' }}
+                            accessibilityLabel={`Mark step ${idx + 1} passed`}
                             style={[
                               styles.stepToggleBtn,
                               {
@@ -2293,6 +2345,10 @@ export default function TestRunsScreen({
                           </TouchableOpacity>
                           <TouchableOpacity
                             onPress={() => toggleStepStatus(idx, 'Failed')}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: st === 'Failed' }}
+                            accessibilityLabel={`Mark step ${idx + 1} failed`}
                             style={[
                               styles.stepToggleBtn,
                               {

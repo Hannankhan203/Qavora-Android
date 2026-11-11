@@ -284,6 +284,10 @@ export default function ReportsView() {
           <Pressable
             onPress={handleRefreshAnalytics}
             disabled={isRefreshingAny}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: Boolean(isRefreshingAny) }}
+            accessibilityLabel="Refresh QA report analytics"
             style={[
               styles.refreshBtn,
               {
@@ -325,6 +329,10 @@ export default function ReportsView() {
                 <Pressable
                   key={rt.id}
                   onPress={() => handleChangeReportType(rt.id)}
+                  hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`Report type: ${rt.shortLabel}`}
                   style={[
                     styles.filterPill,
                     {
@@ -364,7 +372,12 @@ export default function ReportsView() {
               DATE RANGE FILTER
             </Text>
             {hasActiveFilters ? (
-              <Pressable onPress={handleResetFilters}>
+              <Pressable
+                onPress={handleResetFilters}
+                hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="Reset all report filters"
+              >
                 <Text
                   style={[styles.resetFiltersLink, { color: colors.primary }]}
                 >
@@ -384,6 +397,10 @@ export default function ReportsView() {
                 <Pressable
                   key={df.id}
                   onPress={() => setDateFilter(df.id)}
+                  hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`Date range filter: ${df.label}`}
                   style={[
                     styles.filterPillSmall,
                     {
@@ -435,6 +452,9 @@ export default function ReportsView() {
                     onChangeText={setCustomStartInput}
                     placeholder="2026-01-01"
                     placeholderTextColor={colors.textMuted}
+                    accessibilityLabel="Custom report start date YYYY-MM-DD"
+                    keyboardType="numbers-and-punctuation"
+                    autoCapitalize="none"
                     style={[
                       styles.customDateInput,
                       {
@@ -460,6 +480,9 @@ export default function ReportsView() {
                     onChangeText={setCustomEndInput}
                     placeholder="2026-12-31"
                     placeholderTextColor={colors.textMuted}
+                    accessibilityLabel="Custom report end date YYYY-MM-DD"
+                    keyboardType="numbers-and-punctuation"
+                    autoCapitalize="none"
                     style={[
                       styles.customDateInput,
                       {
@@ -474,6 +497,8 @@ export default function ReportsView() {
               </View>
               <Pressable
                 onPress={handleApplyCustomDates}
+                accessibilityRole="button"
+                accessibilityLabel="Apply custom date range"
                 style={[
                   styles.applyCustomDateBtn,
                   { backgroundColor: colors.primary },
@@ -510,6 +535,10 @@ export default function ReportsView() {
             >
               <Pressable
                 onPress={() => setSelectedSuiteId('ALL')}
+                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: selectedSuiteId === 'ALL' }}
+                accessibilityLabel={`All Suites (${suites.length})`}
                 style={[
                   styles.filterPillSmall,
                   {
@@ -543,6 +572,10 @@ export default function ReportsView() {
                   <Pressable
                     key={su.id}
                     onPress={() => setSelectedSuiteId(su.id)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`Filter by suite: ${su.name}`}
                     style={[
                       styles.filterPillSmall,
                       {
@@ -593,6 +626,12 @@ export default function ReportsView() {
                   <Pressable
                     key={st}
                     onPress={() => setStatusFilter(st)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`Status filter: ${
+                      st === 'ALL' ? 'All Statuses' : st
+                    }`}
                     style={[
                       styles.filterPillSmall,
                       {
@@ -643,6 +682,12 @@ export default function ReportsView() {
                   <Pressable
                     key={sev}
                     onPress={() => setSeverityFilter(sev)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`Severity filter: ${
+                      sev === 'ALL' ? 'All Severities' : sev
+                    }`}
                     style={[
                       styles.filterPillSmall,
                       {
@@ -686,6 +731,9 @@ export default function ReportsView() {
             </Text>
             <Pressable
               onPress={() => handleExportFormat('markdown', true)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Inspect and preview report output"
               style={styles.previewLinkBtn}
             >
               <Text style={[styles.previewLinkText, { color: colors.primary }]}>
@@ -716,6 +764,10 @@ export default function ReportsView() {
                 key={fmt.id}
                 onPress={() => handleExportFormat(fmt.id, false)}
                 disabled={isExporting}
+                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isExporting) }}
+                accessibilityLabel={`Export report as ${fmt.label}`}
                 style={[
                   styles.exportBtn,
                   {
@@ -1867,7 +1919,7 @@ export default function ReportsView() {
         animationType="slide"
         onRequestClose={() => setPreviewModalVisible(false)}
       >
-        <View style={styles.modalBackdrop}>
+        <View style={styles.modalBackdrop} accessibilityViewIsModal={true}>
           <View
             style={[
               styles.modalSheet,
@@ -1884,7 +1936,10 @@ export default function ReportsView() {
               ]}
             >
               <View style={styles.modalTitleCol}>
-                <Text style={[styles.modalTitle, { color: colors.text }]}>
+                <Text
+                  accessibilityRole="header"
+                  style={[styles.modalTitle, { color: colors.text }]}
+                >
                   Report Export Preview
                 </Text>
                 <Text
@@ -1898,6 +1953,9 @@ export default function ReportsView() {
               </View>
               <Pressable
                 onPress={() => setPreviewModalVisible(false)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="Close report export preview"
                 style={[
                   styles.closeModalBtn,
                   { backgroundColor: colors.surfaceElevated },
@@ -1910,7 +1968,7 @@ export default function ReportsView() {
             </View>
 
             {/* Switch format inside preview modal */}
-            <View style={styles.modalFormatTabs}>
+            <View style={styles.modalFormatTabs} accessibilityRole="tablist">
               {exportFormats.map((fmt) => {
                 const active =
                   previewPayload && previewPayload.format === fmt.id;
@@ -1918,6 +1976,10 @@ export default function ReportsView() {
                   <Pressable
                     key={fmt.id}
                     onPress={() => handleExportFormat(fmt.id, true)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: Boolean(active) }}
+                    accessibilityLabel={`Preview ${fmt.label} format`}
                     style={[
                       styles.filterPillSmall,
                       {
@@ -1970,6 +2032,8 @@ export default function ReportsView() {
             <View style={styles.modalFooter}>
               <Pressable
                 onPress={handleShareFromPreview}
+                accessibilityRole="button"
+                accessibilityLabel="Share report output"
                 style={[
                   styles.shareModalBtn,
                   { backgroundColor: colors.primary },

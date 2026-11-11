@@ -763,7 +763,7 @@ export default function ProjectDetailsScreen({
             Update the lifecycle state of this project across your Qavora workspace.
           </Text>
 
-          <View style={styles.statusButtonsRow}>
+          <View style={styles.statusButtonsRow} accessibilityRole="radiogroup">
             {projectStatuses.map((statusOption) => {
               const isCurrent = selectedProject.status === statusOption;
               const isUpdatingThis = statusUpdatingTo === statusOption;
@@ -772,6 +772,14 @@ export default function ProjectDetailsScreen({
                   key={statusOption}
                   disabled={isCurrent || isMutating}
                   onPress={() => handleStatusChange(statusOption)}
+                  hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                  accessibilityRole="radio"
+                  accessibilityState={{
+                    selected: isCurrent,
+                    checked: isCurrent,
+                    disabled: Boolean(isCurrent || isMutating),
+                  }}
+                  accessibilityLabel={`Set project status to ${statusOption}`}
                   style={[
                     styles.statusOptionBtn,
                     {
@@ -840,6 +848,11 @@ export default function ProjectDetailsScreen({
           <Pressable
             onPress={() => setIsDeleteConfirmOpen(true)}
             disabled={isMutating || isDeleting}
+            accessibilityRole="button"
+            accessibilityState={{
+              disabled: Boolean(isMutating || isDeleting),
+            }}
+            accessibilityLabel={`Delete project ${selectedProject.name}`}
             style={[
               styles.deleteDangerBtn,
               {
@@ -880,6 +893,7 @@ export default function ProjectDetailsScreen({
         }}
       >
         <View
+          accessibilityViewIsModal={true}
           style={[styles.confirmOverlay, { backgroundColor: colors.overlay }]}
         >
           <View
@@ -900,7 +914,10 @@ export default function ProjectDetailsScreen({
               <VectorIcon name="trash" size={22} color={colors.danger} />
             </View>
 
-            <Text style={[styles.confirmTitle, { color: colors.text }]}>
+            <Text
+              accessibilityRole="header"
+              style={[styles.confirmTitle, { color: colors.text }]}
+            >
               Delete "{selectedProject.name}"?
             </Text>
 
@@ -915,6 +932,8 @@ export default function ProjectDetailsScreen({
               <Pressable
                 onPress={() => setIsDeleteConfirmOpen(false)}
                 disabled={isDeleting}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel project deletion"
                 style={[
                   styles.confirmCancelBtn,
                   {
@@ -933,6 +952,8 @@ export default function ProjectDetailsScreen({
               <Pressable
                 onPress={handleConfirmDelete}
                 disabled={isDeleting}
+                accessibilityRole="button"
+                accessibilityLabel={`Confirm permanent deletion of project ${selectedProject.name}`}
                 style={[
                   styles.confirmDeleteBtn,
                   { backgroundColor: colors.danger },
@@ -1021,7 +1042,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   navBtn: {
-    minHeight: 38,
+    minHeight: 44,
     paddingHorizontal: 11,
     borderRadius: 10,
     borderWidth: 1,

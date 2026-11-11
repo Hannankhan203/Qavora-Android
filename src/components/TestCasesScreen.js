@@ -163,7 +163,11 @@ export default function TestCasesScreen({
   const [isDeletingPhase, setIsDeletingPhase] = useState(false);
 
   const selectedTestCase = useMemo(
-    () => testCases.find((tc) => tc.id === selectedTestCaseId) || null,
+    () =>
+      testCases.find(
+        (tc) =>
+          tc.id === selectedTestCaseId || tc.testCaseId === selectedTestCaseId
+      ) || null,
     [testCases, selectedTestCaseId]
   );
 
@@ -802,6 +806,10 @@ export default function TestCasesScreen({
               <Pressable
                 key={tab.key}
                 onPress={() => setSubTab(tab.key)}
+                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={tab.label}
                 style={[
                   styles.segmentBtn,
                   active && {
@@ -910,10 +918,16 @@ export default function TestCasesScreen({
                   onChangeText={setSearchQuery}
                   placeholder="Search ID, title, suite, tag..."
                   placeholderTextColor={colors.textMuted}
+                  accessibilityLabel="Search test cases by ID, title, suite, or tag"
                   style={[styles.searchInput, { color: colors.text }]}
                 />
                 {searchQuery.length > 0 && (
-                  <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
+                  <Pressable
+                    onPress={() => setSearchQuery('')}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear test case search"
+                  >
                     <VectorIcon
                       name="close"
                       size={14}
@@ -924,6 +938,8 @@ export default function TestCasesScreen({
               </View>
               <Pressable
                 onPress={() => openCreateCaseModal()}
+                accessibilityRole="button"
+                accessibilityLabel="Create New Test Case"
                 style={({ pressed }) => [
                   styles.addCaseBtn,
                   {
@@ -945,6 +961,10 @@ export default function TestCasesScreen({
             >
               <Pressable
                 onPress={() => setSelectedSuiteId('all')}
+                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: selectedSuiteId === 'all' }}
+                accessibilityLabel={`All Suites (${testCases.length})`}
                 style={[
                   styles.suiteChip,
                   {
@@ -979,6 +999,10 @@ export default function TestCasesScreen({
                   <Pressable
                     key={suite.id}
                     onPress={() => setSelectedSuiteId(suite.id)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`Filter by suite: ${suite.name} (${count} cases)`}
                     style={[
                       styles.suiteChip,
                       {
@@ -1003,6 +1027,9 @@ export default function TestCasesScreen({
 
               <Pressable
                 onPress={openCreateSuiteModal}
+                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                accessibilityRole="button"
+                accessibilityLabel="Create New Test Suite"
                 style={[
                   styles.suiteChip,
                   {
@@ -1029,6 +1056,12 @@ export default function TestCasesScreen({
                   <Pressable
                     key={`prio-${p}`}
                     onPress={() => setSelectedPriority(p)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`Filter by priority: ${
+                      p === 'all' ? 'All Priority' : p
+                    }`}
                     style={[
                       styles.miniFilterChip,
                       {
@@ -1998,6 +2031,9 @@ export default function TestCasesScreen({
                     <View style={styles.phaseRowActions}>
                       <Pressable
                         onPress={() => openEditPhaseModal(phase)}
+                        hitSlop={{ top: 9, bottom: 9, left: 9, right: 9 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Edit testing phase ${phase.name}`}
                         style={[
                           styles.iconSquareBtn,
                           {
@@ -2014,6 +2050,9 @@ export default function TestCasesScreen({
                       </Pressable>
                       <Pressable
                         onPress={() => setDeletingPhase(phase)}
+                        hitSlop={{ top: 9, bottom: 9, left: 9, right: 9 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Delete testing phase ${phase.name}`}
                         style={[
                           styles.iconSquareBtn,
                           {
@@ -2189,6 +2228,7 @@ export default function TestCasesScreen({
                       </Text>
                     </View>
                     <Text
+                      accessibilityRole="header"
                       style={[
                         styles.modalTitle,
                         { color: colors.text },
@@ -2199,6 +2239,9 @@ export default function TestCasesScreen({
                   </View>
                   <Pressable
                     onPress={() => setSelectedTestCaseId(null)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Close test case details"
                     style={[
                       styles.closeCircle,
                       { backgroundColor: colors.surfaceMuted },
@@ -2684,13 +2727,19 @@ export default function TestCasesScreen({
                 { borderBottomColor: colors.border },
               ]}
             >
-              <Text style={[styles.modalTitle, { color: colors.text }]}>
+              <Text
+                accessibilityRole="header"
+                style={[styles.modalTitle, { color: colors.text }]}
+              >
                 {editingCase
                   ? `Edit ${editingCase.testCaseId || editingCase.id}`
                   : 'Create New Test Case'}
               </Text>
               <Pressable
                 onPress={() => !isSubmittingCase && setIsFormModalOpen(false)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="Close test case form"
                 style={[
                   styles.closeCircle,
                   { backgroundColor: colors.surfaceMuted },
@@ -2733,6 +2782,7 @@ export default function TestCasesScreen({
                 onChangeText={setFormTitle}
                 placeholder="e.g., Verify biometric login fallback to PIN"
                 placeholderTextColor={colors.textMuted}
+                accessibilityLabel="Test Case Title, required"
                 style={[
                   styles.textInput,
                   {

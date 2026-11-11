@@ -1545,6 +1545,7 @@ export default function DataManagementSection() {
           }}
           placeholder='Select a .json backup file above, paste Qavora Backup JSON here, or tap "Load Current Backup JSON"...'
           placeholderTextColor={colors.textMuted}
+          accessibilityLabel="Backup JSON payload input"
           multiline
           numberOfLines={5}
           style={[
@@ -1736,6 +1737,7 @@ export default function DataManagementSection() {
             onChangeText={setSnapshotLabelInput}
             placeholder="Snapshot label (e.g., Pre-Release Regression)"
             placeholderTextColor={colors.textMuted}
+            accessibilityLabel="Local recovery snapshot label"
             style={[
               styles.snapshotInput,
               {
@@ -1747,6 +1749,8 @@ export default function DataManagementSection() {
           />
           <Pressable
             onPress={handleCreateLocalSnapshot}
+            accessibilityRole="button"
+            accessibilityLabel="Create Local Recovery Snapshot"
             style={[
               styles.createSnapshotBtn,
               { backgroundColor: colors.primary },
@@ -2085,7 +2089,7 @@ export default function DataManagementSection() {
         animationType="fade"
         onRequestClose={() => setExportPreview(null)}
       >
-        <View style={styles.modalBackdrop}>
+        <View style={styles.modalBackdrop} accessibilityViewIsModal={true}>
           <View
             style={[
               styles.modalCard,
@@ -2102,7 +2106,10 @@ export default function DataManagementSection() {
                 >
                   EXPORT GENERATED
                 </Text>
-                <Text style={[styles.modalTitle, { color: colors.text }]}>
+                <Text
+                  accessibilityRole="header"
+                  style={[styles.modalTitle, { color: colors.text }]}
+                >
                   {exportPreview?.title}
                 </Text>
                 <Text
@@ -2118,6 +2125,9 @@ export default function DataManagementSection() {
               </View>
               <Pressable
                 onPress={() => setExportPreview(null)}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                accessibilityRole="button"
+                accessibilityLabel="Close export preview"
                 style={[
                   styles.tinyBtn,
                   {
@@ -2158,6 +2168,8 @@ export default function DataManagementSection() {
               <Pressable
                 onPress={handleShareFromExportPreview}
                 disabled={isExporting}
+                accessibilityRole="button"
+                accessibilityLabel="Share or save exported file"
                 style={[
                   styles.primaryBtn,
                   { backgroundColor: colors.primary },
@@ -2191,7 +2203,7 @@ export default function DataManagementSection() {
         animationType="fade"
         onRequestClose={() => setImportPreview(null)}
       >
-        <View style={styles.modalBackdrop}>
+        <View style={styles.modalBackdrop} accessibilityViewIsModal={true}>
           <View
             style={[
               styles.modalCard,
@@ -2206,7 +2218,10 @@ export default function DataManagementSection() {
             >
               VALIDATED IMPORT PREVIEW
             </Text>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>
+            <Text
+              accessibilityRole="header"
+              style={[styles.modalTitle, { color: colors.text }]}
+            >
               Confirm Workspace Restore ({importPreview?.formatType})
             </Text>
             <Text
@@ -2316,9 +2331,15 @@ export default function DataManagementSection() {
               SELECT IMPORT MODE:
             </Text>
 
-            <View style={styles.modeSelectorCol}>
+            <View style={styles.modeSelectorCol} accessibilityRole="radiogroup">
               <Pressable
                 onPress={() => setImportMode('merge')}
+                accessibilityRole="radio"
+                accessibilityState={{
+                  selected: importMode === 'merge',
+                  checked: importMode === 'merge',
+                }}
+                accessibilityLabel="Safe Merge import mode"
                 style={[
                   styles.modeOptionCard,
                   {
@@ -2355,6 +2376,12 @@ export default function DataManagementSection() {
 
               <Pressable
                 onPress={() => setImportMode('replace')}
+                accessibilityRole="radio"
+                accessibilityState={{
+                  selected: importMode === 'replace',
+                  checked: importMode === 'replace',
+                }}
+                accessibilityLabel="Destructive Replace import mode"
                 style={[
                   styles.modeOptionCard,
                   {
@@ -2394,6 +2421,12 @@ export default function DataManagementSection() {
               <Pressable
                 onPress={handleExecuteImport}
                 disabled={isImporting}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  importMode === 'replace'
+                    ? 'Confirm Destructive Replace'
+                    : 'Execute Safe Merge'
+                }
                 style={[
                   styles.primaryBtn,
                   {
@@ -2419,6 +2452,8 @@ export default function DataManagementSection() {
               <Pressable
                 onPress={() => setImportPreview(null)}
                 disabled={isImporting}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel import"
                 style={[
                   styles.secondaryBtn,
                   {
@@ -2445,7 +2480,7 @@ export default function DataManagementSection() {
         animationType="fade"
         onRequestClose={() => setConfirmActionModal(null)}
       >
-        <View style={styles.modalBackdrop}>
+        <View style={styles.modalBackdrop} accessibilityViewIsModal={true}>
           <View
             style={[
               styles.modalCard,
@@ -2460,7 +2495,10 @@ export default function DataManagementSection() {
             >
               CONFIRM PROTECTED DATA OPERATION
             </Text>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>
+            <Text
+              accessibilityRole="header"
+              style={[styles.modalTitle, { color: colors.text }]}
+            >
               {confirmActionModal?.title}
             </Text>
             <Text
@@ -2472,6 +2510,8 @@ export default function DataManagementSection() {
             {confirmActionModal?.type === 'workspace_reset' ? (
               <Pressable
                 onPress={handleExportFullBackupJSON}
+                accessibilityRole="button"
+                accessibilityLabel="Download Full Backup First"
                 style={[
                   styles.secondaryBtn,
                   {
@@ -2493,6 +2533,8 @@ export default function DataManagementSection() {
               <Pressable
                 onPress={handleConfirmProtectedAction}
                 disabled={isExecutingConfirmAction}
+                accessibilityRole="button"
+                accessibilityLabel="Confirm and Proceed"
                 style={[
                   styles.primaryBtn,
                   {
@@ -2518,6 +2560,8 @@ export default function DataManagementSection() {
               <Pressable
                 onPress={() => setConfirmActionModal(null)}
                 disabled={isExecutingConfirmAction}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel operation"
                 style={[
                   styles.secondaryBtn,
                   {
@@ -2717,7 +2761,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   smallActionBtn: {
-    minHeight: 38,
+    minHeight: 42,
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
@@ -2766,7 +2810,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   tinyBtn: {
-    minHeight: 34,
+    minHeight: 40,
     paddingHorizontal: 10,
     borderRadius: 8,
     borderWidth: 1,
@@ -2853,14 +2897,14 @@ const styles = StyleSheet.create({
   snapshotInput: {
     flex: 1,
     minWidth: 180,
-    minHeight: 42,
+    minHeight: 44,
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 12,
     fontSize: 13,
   },
   createSnapshotBtn: {
-    minHeight: 42,
+    minHeight: 44,
     paddingHorizontal: 14,
     borderRadius: 10,
     flexDirection: 'row',

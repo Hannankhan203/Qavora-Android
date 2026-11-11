@@ -143,6 +143,7 @@ export default function DashboardScreen({ onNavigateToDestination }) {
       <View style={styles.container}>
         {/* Top Segmented Mode Toggle: QA Overview | Reports & Analytics */}
         <View
+          accessibilityRole="tablist"
           style={[
             styles.modeToggleContainer,
             { backgroundColor: colors.surface, borderColor: colors.border },
@@ -150,6 +151,10 @@ export default function DashboardScreen({ onNavigateToDestination }) {
         >
           <Pressable
             onPress={() => setDashboardSubTab('overview')}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: dashboardSubTab === 'overview' }}
+            accessibilityLabel="QA Dashboard overview"
             style={[
               styles.modeToggleBtn,
               {
@@ -187,6 +192,10 @@ export default function DashboardScreen({ onNavigateToDestination }) {
 
           <Pressable
             onPress={() => setDashboardSubTab('checklists')}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: dashboardSubTab === 'checklists' }}
+            accessibilityLabel="QA Checklists"
             style={[
               styles.modeToggleBtn,
               {
@@ -224,6 +233,10 @@ export default function DashboardScreen({ onNavigateToDestination }) {
 
           <Pressable
             onPress={() => setDashboardSubTab('reports')}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: dashboardSubTab === 'reports' }}
+            accessibilityLabel="Reports and Analytics"
             style={[
               styles.modeToggleBtn,
               {
@@ -1649,7 +1662,7 @@ const styles = StyleSheet.create({
   modeToggleBtn: {
     flex: 1,
     minWidth: 96,
-    minHeight: 38,
+    minHeight: 44,
     borderRadius: 9,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1731,7 +1744,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
   },
   projectActionBtn: {
-    minHeight: 36,
+    minHeight: 44,
     paddingHorizontal: 11,
     borderRadius: 9,
     borderWidth: 1,
@@ -1752,7 +1765,7 @@ const styles = StyleSheet.create({
   quickActionBtn: {
     flex: 1,
     minWidth: 96,
-    minHeight: 40,
+    minHeight: 48,
     borderRadius: 10,
     borderWidth: 1,
     alignItems: 'center',

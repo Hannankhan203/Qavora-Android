@@ -503,11 +503,15 @@ export default function ProjectSelectionScreen({
                 onChangeText={setSearchQuery}
                 placeholder="Search projects by name, version, environment, or tag..."
                 placeholderTextColor={colors.textMuted}
+                accessibilityLabel="Search projects by name, version, environment, or tag"
                 style={[styles.searchInput, { color: colors.text }]}
               />
               {searchQuery ? (
                 <Pressable
                   onPress={() => setSearchQuery('')}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear project search"
                   style={styles.clearSearchBtn}
                 >
                   <VectorIcon name="close" size={14} color={colors.textMuted} />
@@ -515,13 +519,17 @@ export default function ProjectSelectionScreen({
               ) : null}
             </View>
 
-            <View style={styles.statusFilterRow}>
+            <View style={styles.statusFilterRow} accessibilityRole="tablist">
               {['All', ...projectStatuses].map((st) => {
                 const active = statusFilter === st;
                 return (
                   <Pressable
                     key={st}
                     onPress={() => setStatusFilter(st)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`Filter projects by status: ${st}`}
                     style={[
                       styles.filterChip,
                       {
@@ -811,6 +819,9 @@ export default function ProjectSelectionScreen({
 
                 <Pressable
                   onPress={() => openEditProjectModal(project)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit project ${project.name}`}
                   style={[
                     styles.iconActionBtn,
                     {

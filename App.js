@@ -755,8 +755,13 @@ function QavoraQAShell() {
                   syncStatus.isSyncing))) ? (
               <Pressable
                 onPress={openDataManagementView}
-                hitSlop={{ top: 6, bottom: 6, left: 3, right: 3 }}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                 accessibilityRole="button"
+                accessibilityState={{
+                  selected:
+                    activeDestination ===
+                    NAVIGATION_DESTINATIONS.DATA_MANAGEMENT,
+                }}
                 accessibilityLabel={
                   syncStatus && syncStatus.conflictCount > 0
                     ? `Sync conflicts: ${syncStatus.conflictCount}. Open Data Management`
@@ -828,8 +833,12 @@ function QavoraQAShell() {
             {selectedProject ? (
               <Pressable
                 onPress={() => openDefectsView()}
-                hitSlop={{ top: 6, bottom: 6, left: 3, right: 3 }}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                 accessibilityRole="button"
+                accessibilityState={{
+                  selected:
+                    activeDestination === NAVIGATION_DESTINATIONS.DEFECTS,
+                }}
                 accessibilityLabel={`Defects${
                   metrics.openDefects > 0
                     ? `, ${metrics.openDefects} open`
@@ -902,7 +911,7 @@ function QavoraQAShell() {
                   openProjectSelection();
                 }
               }}
-              hitSlop={{ top: 6, bottom: 6, left: 3, right: 3 }}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
               accessibilityRole="button"
               accessibilityState={{
                 selected:
@@ -940,7 +949,7 @@ function QavoraQAShell() {
 
             <Pressable
               onPress={toggleTheme}
-              hitSlop={{ top: 6, bottom: 6, left: 3, right: 3 }}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
               accessibilityRole="button"
               accessibilityLabel={
                 isDark ? 'Switch to light theme' : 'Switch to dark theme'
@@ -962,7 +971,7 @@ function QavoraQAShell() {
 
             <Pressable
               onPress={openSettingsView}
-              hitSlop={{ top: 6, bottom: 6, left: 3, right: 3 }}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
               accessibilityRole="button"
               accessibilityState={{
                 selected:
@@ -1013,6 +1022,8 @@ function QavoraQAShell() {
       {toast ? (
         <Pressable
           onPress={dismissToast}
+          accessibilityRole="button"
+          accessibilityLabel={`Dismiss notification: ${toast.message}`}
           style={[
             styles.toastBanner,
             {
@@ -1395,6 +1406,7 @@ function QavoraQAShell() {
                 </View>
                 <Pressable
                   onPress={closeDrawer}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                   accessibilityRole="button"
                   accessibilityLabel="Close navigation drawer"
                   style={[
@@ -1439,6 +1451,9 @@ function QavoraQAShell() {
                       openProjectDetails();
                       closeDrawer();
                     }}
+                    hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Open Project Details"
                   >
                     <Text
                       style={[
@@ -1600,6 +1615,11 @@ function QavoraQAShell() {
               </Text>
               <Pressable
                 onPress={toggleTheme}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  isDark ? 'Switch to light theme' : 'Switch to dark theme'
+                }
                 style={[
                   styles.drawerFooterThemeBtn,
                   {
@@ -1823,6 +1843,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   toastBanner: {
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1958,8 +1979,8 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   drawerCloseBtn: {
-    width: 30,
-    height: 30,
+    width: 36,
+    height: 36,
     borderRadius: 8,
     borderWidth: 1,
     alignItems: 'center',
@@ -2006,7 +2027,7 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   drawerItemBtn: {
-    minHeight: 40,
+    minHeight: 48,
     borderRadius: 9,
     borderWidth: 1,
     paddingHorizontal: 10,
@@ -2061,8 +2082,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   drawerFooterThemeBtn: {
-    paddingHorizontal: 9,
-    paddingVertical: 5,
+    minHeight: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 7,
     borderWidth: 1,
   },

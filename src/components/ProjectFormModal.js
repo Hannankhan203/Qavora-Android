@@ -249,7 +249,10 @@ export default function ProjectFormModal({
                 />
               </View>
               <View style={styles.headerTextCol}>
-                <Text style={[styles.headerTitle, { color: colors.text }]}>
+                <Text
+                  accessibilityRole="header"
+                  style={[styles.headerTitle, { color: colors.text }]}
+                >
                   {isEditMode ? 'Edit Project' : 'Create New Project'}
                 </Text>
                 <Text
@@ -268,6 +271,9 @@ export default function ProjectFormModal({
             <Pressable
               onPress={handleClose}
               disabled={busy}
+              hitSlop={{ top: 7, bottom: 7, left: 7, right: 7 }}
+              accessibilityRole="button"
+              accessibilityLabel="Close project form"
               style={[
                 styles.closeBtn,
                 { backgroundColor: colors.surfaceMuted },
@@ -338,6 +344,7 @@ export default function ProjectFormModal({
               editable={!busy}
               placeholder="e.g. Qavora Android Checkout Regression"
               placeholderTextColor={colors.textMuted}
+              accessibilityLabel="Project Name, required"
               style={[
                 styles.input,
                 {
@@ -352,7 +359,7 @@ export default function ProjectFormModal({
             <Text style={[styles.label, { color: colors.textSecondary }]}>
               Lifecycle Status
             </Text>
-            <View style={styles.chipRow}>
+            <View style={styles.chipRow} accessibilityRole="radiogroup">
               {projectStatuses.map((statusOption) => {
                 const selected = status === statusOption;
                 return (
@@ -360,6 +367,10 @@ export default function ProjectFormModal({
                     key={statusOption}
                     disabled={busy}
                     onPress={() => setStatus(statusOption)}
+                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected, checked: selected }}
+                    accessibilityLabel={`Lifecycle status: ${statusOption}`}
                     style={[
                       styles.choiceChip,
                       {
@@ -397,6 +408,10 @@ export default function ProjectFormModal({
                     key={preset}
                     disabled={busy}
                     onPress={() => setType(preset)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={`Application type preset: ${preset}`}
                     style={[
                       styles.typePresetChip,
                       {
@@ -429,6 +444,7 @@ export default function ProjectFormModal({
               editable={!busy}
               placeholder="Custom project type (e.g. Mobile Application)"
               placeholderTextColor={colors.textMuted}
+              accessibilityLabel="Custom Application Type"
               style={[
                 styles.input,
                 {
@@ -451,6 +467,8 @@ export default function ProjectFormModal({
                   editable={!busy}
                   placeholder="v1.0.0"
                   placeholderTextColor={colors.textMuted}
+                  accessibilityLabel="Target Version"
+                  autoCapitalize="none"
                   style={[
                     styles.input,
                     {
@@ -473,6 +491,7 @@ export default function ProjectFormModal({
                   editable={!busy}
                   placeholder="Staging / Production"
                   placeholderTextColor={colors.textMuted}
+                  accessibilityLabel="Environment"
                   style={[
                     styles.input,
                     {
@@ -497,6 +516,7 @@ export default function ProjectFormModal({
               keyboardType="url"
               placeholder="https://staging.example.com"
               placeholderTextColor={colors.textMuted}
+              accessibilityLabel="Target Base URL"
               style={[
                 styles.input,
                 {
@@ -520,6 +540,7 @@ export default function ProjectFormModal({
               numberOfLines={3}
               placeholder="Describe the QA scope, release goals, and target platforms..."
               placeholderTextColor={colors.textMuted}
+              accessibilityLabel="Project Description"
               style={[
                 styles.textArea,
                 {
@@ -541,6 +562,7 @@ export default function ProjectFormModal({
               autoCapitalize="none"
               placeholder="android, regression, checkout"
               placeholderTextColor={colors.textMuted}
+              accessibilityLabel="Project Tags comma-separated"
               style={[
                 styles.input,
                 {
@@ -559,6 +581,8 @@ export default function ProjectFormModal({
             <Pressable
               onPress={handleClose}
               disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel project form"
               style={[
                 styles.cancelBtn,
                 {
@@ -575,6 +599,9 @@ export default function ProjectFormModal({
             <Pressable
               onPress={handleSubmit}
               disabled={busy}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: Boolean(busy) }}
+              accessibilityLabel={isEditMode ? 'Save Changes' : 'Create Project'}
               style={[
                 styles.submitBtn,
                 {

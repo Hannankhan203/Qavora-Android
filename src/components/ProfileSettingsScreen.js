@@ -270,6 +270,11 @@ export default function ProfileSettingsScreen() {
           <View style={[styles.actionGridRow, { marginTop: 10 }]}>
             <Pressable
               onPress={openProjectSelection}
+              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+              accessibilityRole="button"
+              accessibilityLabel={`${
+                selectedProject ? 'Switch Project' : 'Select Project'
+              }, ${projects.length} total`}
               style={[
                 styles.compactActionBtn,
                 {
@@ -291,6 +296,9 @@ export default function ProfileSettingsScreen() {
             {selectedProject ? (
               <Pressable
                 onPress={openProjectDetails}
+                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                accessibilityRole="button"
+                accessibilityLabel="Open Project Details"
                 style={[
                   styles.compactActionBtn,
                   {
@@ -311,6 +319,9 @@ export default function ProfileSettingsScreen() {
 
             <Pressable
               onPress={openDataManagementView}
+              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+              accessibilityRole="button"
+              accessibilityLabel="Open Data Management"
               style={[
                 styles.compactActionBtn,
                 {
@@ -334,6 +345,12 @@ export default function ProfileSettingsScreen() {
               <Pressable
                 onPress={handleVerifySession}
                 disabled={verifyingSession || isAuthBusy}
+                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                accessibilityRole="button"
+                accessibilityState={{
+                  disabled: Boolean(verifyingSession || isAuthBusy),
+                }}
+                accessibilityLabel="Verify authenticated session"
                 style={[
                   styles.compactActionBtn,
                   {
@@ -353,6 +370,10 @@ export default function ProfileSettingsScreen() {
               <Pressable
                 onPress={logout}
                 disabled={isAuthBusy}
+                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isAuthBusy) }}
+                accessibilityLabel="Sign out of Qavora account"
                 style={[
                   styles.compactDangerBtn,
                   {
@@ -395,7 +416,7 @@ export default function ProfileSettingsScreen() {
             </View>
           </View>
 
-          <View style={styles.themeButtonsRow}>
+          <View style={styles.themeButtonsRow} accessibilityRole="radiogroup">
             {[
               { id: 'light', label: 'Light', icon: 'sun' },
               { id: 'dark', label: 'Dark', icon: 'moon' },
@@ -406,6 +427,10 @@ export default function ProfileSettingsScreen() {
                 <Pressable
                   key={mode.id}
                   onPress={() => setThemePreference(mode.id)}
+                  hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: active, checked: active }}
+                  accessibilityLabel={`${mode.label} color theme`}
                   style={[
                     styles.themeBtn,
                     {
@@ -469,6 +494,8 @@ export default function ProfileSettingsScreen() {
                 onChangeText={setTesterName}
                 placeholder="QA Engineer"
                 placeholderTextColor={colors.textMuted}
+                accessibilityLabel="QA Tester Name"
+                autoCapitalize="words"
                 style={[
                   styles.input,
                   {
@@ -491,6 +518,8 @@ export default function ProfileSettingsScreen() {
                 onChangeText={setRole}
                 placeholder="Lead QA Analyst"
                 placeholderTextColor={colors.textMuted}
+                accessibilityLabel="QA Role or Title"
+                autoCapitalize="words"
                 style={[
                   styles.input,
                   {
@@ -516,6 +545,9 @@ export default function ProfileSettingsScreen() {
             }}
             placeholder="Enter project name"
             placeholderTextColor={colors.textMuted}
+            accessibilityLabel={
+              selectedProject ? 'Active Project Name' : 'Default Project Name'
+            }
             maxLength={120}
             style={[
               styles.input,
@@ -539,6 +571,8 @@ export default function ProfileSettingsScreen() {
                 onChangeText={setTargetVersion}
                 placeholder="v1.0.0"
                 placeholderTextColor={colors.textMuted}
+                accessibilityLabel="Target Release Version"
+                autoCapitalize="none"
                 style={[
                   styles.input,
                   {
@@ -562,6 +596,8 @@ export default function ProfileSettingsScreen() {
                 onChangeText={setDefaultBuild}
                 placeholder="1.0.0-build.104"
                 placeholderTextColor={colors.textMuted}
+                accessibilityLabel="Default Build Number"
+                autoCapitalize="none"
                 style={[
                   styles.input,
                   {
@@ -583,6 +619,7 @@ export default function ProfileSettingsScreen() {
             onChangeText={setDefaultDevice}
             placeholder="Android 15 · Pixel 8 (360dp)"
             placeholderTextColor={colors.textMuted}
+            accessibilityLabel="Default Test Device and Android Version"
             style={[
               styles.input,
               {
@@ -634,6 +671,9 @@ export default function ProfileSettingsScreen() {
           <Pressable
             onPress={handleSaveSettings}
             disabled={isSavingProfile}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: Boolean(isSavingProfile) }}
+            accessibilityLabel="Save Profile and Settings"
             style={[
               styles.saveBtn,
               {
@@ -732,7 +772,7 @@ const styles = StyleSheet.create({
   compactActionBtn: {
     flex: 1,
     minWidth: 98,
-    minHeight: 38,
+    minHeight: 44,
     borderRadius: 9,
     borderWidth: 1,
     flexDirection: 'row',
@@ -748,7 +788,7 @@ const styles = StyleSheet.create({
   compactDangerBtn: {
     flex: 1,
     minWidth: 98,
-    minHeight: 38,
+    minHeight: 44,
     borderRadius: 9,
     borderWidth: 1,
     alignItems: 'center',
@@ -787,7 +827,7 @@ const styles = StyleSheet.create({
   },
   themeBtn: {
     flex: 1,
-    minHeight: 40,
+    minHeight: 44,
     borderRadius: 9,
     borderWidth: 1,
     flexDirection: 'row',
@@ -806,7 +846,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   input: {
-    minHeight: 40,
+    minHeight: 44,
     borderWidth: 1,
     borderRadius: 9,
     paddingHorizontal: 10,
@@ -823,7 +863,7 @@ const styles = StyleSheet.create({
     minWidth: 138,
   },
   saveBtn: {
-    minHeight: 42,
+    minHeight: 48,
     borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',

@@ -720,6 +720,10 @@ export default function DefectsScreen() {
                 borderColor: theme.border,
               },
             ]}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: Boolean(isSyncingWorkspace) }}
+            accessibilityLabel="Refresh defects"
             onPress={() => reloadCurrentProject()}
             disabled={isSyncingWorkspace}
           >
@@ -905,11 +909,17 @@ export default function DefectsScreen() {
               style={[styles.searchInput, { color: theme.text }]}
               placeholder="Search ID, title, steps, case, or environment..."
               placeholderTextColor={theme.textMuted}
+              accessibilityLabel="Search defects by ID, title, steps, case, or environment"
               value={searchQuery}
               onChangeText={setSearchQuery}
             />
             {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <TouchableOpacity
+                onPress={() => setSearchQuery('')}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                accessibilityRole="button"
+                accessibilityLabel="Clear defect search"
+              >
                 <VectorIcon name="close" size={14} color={theme.textMuted} />
               </TouchableOpacity>
             )}
@@ -917,6 +927,9 @@ export default function DefectsScreen() {
 
           <TouchableOpacity
             style={[styles.logBugBtn, { backgroundColor: theme.danger }]}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+            accessibilityRole="button"
+            accessibilityLabel="Report New Defect"
             onPress={openNewDefectForm}
           >
             <VectorIcon name="plus" size={15} color="#FFFFFF" />
@@ -936,6 +949,12 @@ export default function DefectsScreen() {
               <TouchableOpacity
                 key={st}
                 onPress={() => setStatusFilter(st)}
+                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`Filter defects by status: ${
+                  st === 'All' ? 'All Statuses' : st
+                }`}
                 style={[
                   styles.filterChip,
                   {
@@ -971,6 +990,12 @@ export default function DefectsScreen() {
               <TouchableOpacity
                 key={`sev-${sev}`}
                 onPress={() => setSeverityFilter(sev)}
+                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`Filter defects by severity: ${
+                  sev === 'All' ? 'All Severities' : sev
+                }`}
                 style={[
                   styles.sevChip,
                   {
@@ -997,6 +1022,12 @@ export default function DefectsScreen() {
               <TouchableOpacity
                 key={`pri-${pri}`}
                 onPress={() => setPriorityFilter(pri)}
+                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`Filter defects by priority: ${
+                  pri === 'All' ? 'All Priorities' : pri
+                }`}
                 style={[
                   styles.sevChip,
                   {
@@ -1224,6 +1255,11 @@ export default function DefectsScreen() {
                           borderColor: theme.border,
                         },
                       ]}
+                      hitSlop={{ top: 11, bottom: 11, left: 11, right: 11 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Edit defect ${
+                        bug.defectId || bug.id
+                      }`}
                       onPress={() => openEditDefectForm(bug)}
                     >
                       <VectorIcon
@@ -1240,6 +1276,11 @@ export default function DefectsScreen() {
                           borderColor: theme.danger,
                         },
                       ]}
+                      hitSlop={{ top: 11, bottom: 11, left: 11, right: 11 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Delete defect ${
+                        bug.defectId || bug.id
+                      }`}
                       onPress={() => setDefectPendingDelete(bug)}
                     >
                       <VectorIcon name="trash" size={12} color={theme.danger} />
@@ -1365,6 +1406,7 @@ export default function DefectsScreen() {
                       </View>
                     </View>
                     <Text
+                      accessibilityRole="header"
                       style={[styles.modalTitle, { color: theme.text }]}
                       numberOfLines={2}
                     >
@@ -1373,6 +1415,9 @@ export default function DefectsScreen() {
                   </View>
                   <TouchableOpacity
                     onPress={closeDetailModal}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Close defect details"
                     style={[
                       styles.closeBtn,
                       { backgroundColor: theme.surfaceMuted },
@@ -1413,6 +1458,13 @@ export default function DefectsScreen() {
                             handleQuickStatusChange(viewingDefect, st)
                           }
                           disabled={isUpdatingStatus}
+                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                          accessibilityRole="button"
+                          accessibilityState={{
+                            selected: active,
+                            disabled: Boolean(isUpdatingStatus),
+                          }}
+                          accessibilityLabel={`Set defect status to ${st}`}
                           style={[
                             styles.statusStepBtn,
                             {
@@ -1868,13 +1920,19 @@ export default function DefectsScreen() {
                 { borderBottomColor: theme.border },
               ]}
             >
-              <Text style={[styles.modalTitle, { color: theme.text }]}>
+              <Text
+                accessibilityRole="header"
+                style={[styles.modalTitle, { color: theme.text }]}
+              >
                 {editingDefectId
                   ? `Edit Defect (${editingDefectId})`
                   : 'Report New Defect'}
               </Text>
               <TouchableOpacity
                 onPress={() => setFormModalVisible(false)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="Close defect form"
                 style={[
                   styles.closeBtn,
                   { backgroundColor: theme.surfaceMuted },
@@ -1927,6 +1985,7 @@ export default function DefectsScreen() {
                 ]}
                 placeholder="e.g., Crash when rotating camera during QR scan"
                 placeholderTextColor={theme.textMuted}
+                accessibilityLabel="Defect Title, required"
                 value={title}
                 onChangeText={setTitle}
               />
@@ -1936,13 +1995,17 @@ export default function DefectsScreen() {
               >
                 Severity
               </Text>
-              <View style={styles.optionRow}>
+              <View style={styles.optionRow} accessibilityRole="radiogroup">
                 {DEFECT_SEVERITIES.map((s) => {
                   const active = severity === s;
                   return (
                     <TouchableOpacity
                       key={s}
                       onPress={() => setSeverity(s)}
+                      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: active, checked: active }}
+                      accessibilityLabel={`Defect severity: ${s}`}
                       style={[
                         styles.optionChip,
                         {
@@ -1975,13 +2038,17 @@ export default function DefectsScreen() {
               >
                 Priority
               </Text>
-              <View style={styles.optionRow}>
+              <View style={styles.optionRow} accessibilityRole="radiogroup">
                 {DEFECT_PRIORITIES.map((p) => {
                   const active = priority === p;
                   return (
                     <TouchableOpacity
                       key={p}
                       onPress={() => setPriority(p)}
+                      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: active, checked: active }}
+                      accessibilityLabel={`Defect priority: ${p}`}
                       style={[
                         styles.optionChip,
                         {
@@ -2025,6 +2092,10 @@ export default function DefectsScreen() {
                     <TouchableOpacity
                       key={st}
                       onPress={() => setStatus(st)}
+                      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: active, checked: active }}
+                      accessibilityLabel={`Workflow status: ${st}`}
                       style={[
                         styles.caseSelectPill,
                         {
@@ -2204,6 +2275,7 @@ export default function DefectsScreen() {
                 ]}
                 placeholder="Brief context or root-cause hypothesis..."
                 placeholderTextColor={theme.textMuted}
+                accessibilityLabel="Summary or Description"
                 multiline
                 value={description}
                 onChangeText={setDescription}
@@ -2225,6 +2297,7 @@ export default function DefectsScreen() {
                 ]}
                 placeholder="1. Open screen...\n2. Tap button..."
                 placeholderTextColor={theme.textMuted}
+                accessibilityLabel="Steps to Reproduce, required"
                 multiline
                 value={reproSteps}
                 onChangeText={setReproSteps}
@@ -2246,6 +2319,7 @@ export default function DefectsScreen() {
                 ]}
                 placeholder="What should happen?"
                 placeholderTextColor={theme.textMuted}
+                accessibilityLabel="Expected Result"
                 multiline
                 value={expectedResult}
                 onChangeText={setExpectedResult}
@@ -2267,6 +2341,7 @@ export default function DefectsScreen() {
                 ]}
                 placeholder="What actually happened or stacktrace..."
                 placeholderTextColor={theme.textMuted}
+                accessibilityLabel="Actual Result or Crash Log, required"
                 multiline
                 value={actualResult}
                 onChangeText={setActualResult}
@@ -2286,6 +2361,7 @@ export default function DefectsScreen() {
                     color: theme.text,
                   },
                 ]}
+                accessibilityLabel="Device and Build Environment"
                 value={environment}
                 onChangeText={setEnvironment}
               />
@@ -2306,6 +2382,7 @@ export default function DefectsScreen() {
                 ]}
                 placeholder="https://jira.example.com/browse/QAV-102"
                 placeholderTextColor={theme.textMuted}
+                accessibilityLabel="External Issue URL"
                 keyboardType="url"
                 autoCapitalize="none"
                 autoCorrect={false}

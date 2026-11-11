@@ -1957,7 +1957,7 @@ export default function ChecklistsScreen({
                 Checklist Items ({filteredActiveItems.length})
               </Text>
 
-              <View style={styles.itemFilterTabs}>
+              <View style={styles.itemFilterTabs} accessibilityRole="tablist">
                 {[
                   { id: 'all', label: `All (${activeChecklist.totalItems})` },
                   { id: 'pending', label: `Pending (${activeChecklist.pendingItems})` },
@@ -1971,6 +1971,10 @@ export default function ChecklistsScreen({
                     <Pressable
                       key={tab.id}
                       onPress={() => setItemFilterMode(tab.id)}
+                      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                      accessibilityRole="tab"
+                      accessibilityState={{ selected: active }}
+                      accessibilityLabel={`Filter steps: ${tab.label}`}
                       style={[
                         styles.itemFilterBtn,
                         {
@@ -2035,6 +2039,15 @@ export default function ChecklistsScreen({
                       <Pressable
                         onPress={() => handleToggleItem(item)}
                         disabled={isBusy}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        accessibilityRole="checkbox"
+                        accessibilityState={{
+                          checked: Boolean(item.completed),
+                          disabled: Boolean(isBusy),
+                        }}
+                        accessibilityLabel={`Mark step "${item.title}" as ${
+                          item.completed ? 'incomplete' : 'completed'
+                        }`}
                         style={[
                           styles.checkboxHitbox,
                           {
@@ -2133,6 +2146,9 @@ export default function ChecklistsScreen({
                       <View style={styles.itemRowActions}>
                         <Pressable
                           onPress={() => openEditItemModal(item)}
+                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Edit step ${item.title}`}
                           style={[
                             styles.iconBtn,
                             {
@@ -2151,6 +2167,10 @@ export default function ChecklistsScreen({
                         <Pressable
                           onPress={() => handleDeleteItem(item.id)}
                           disabled={isBusy}
+                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                          accessibilityRole="button"
+                          accessibilityState={{ disabled: Boolean(isBusy) }}
+                          accessibilityLabel={`Delete step ${item.title}`}
                           style={[
                             styles.iconBtn,
                             {
@@ -2181,14 +2201,20 @@ export default function ChecklistsScreen({
           animationType="fade"
           onRequestClose={() => setEditingItem(null)}
         >
-          <View style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}>
+          <View
+            accessibilityViewIsModal={true}
+            style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+          >
             <View
               style={[
                 styles.modalCard,
                 { backgroundColor: colors.surface, borderColor: colors.border },
               ]}
             >
-              <Text style={[styles.modalTitle, { color: colors.text }]}>
+              <Text
+                accessibilityRole="header"
+                style={[styles.modalTitle, { color: colors.text }]}
+              >
                 Edit Verification Step
               </Text>
               <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
@@ -2197,6 +2223,7 @@ export default function ChecklistsScreen({
               <TextInput
                 value={editItemTitle}
                 onChangeText={setEditItemTitle}
+                accessibilityLabel="Step Title, required"
                 style={[
                   styles.input,
                   {
@@ -2210,13 +2237,20 @@ export default function ChecklistsScreen({
               <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                 Priority
               </Text>
-              <View style={[styles.priorityPillsRow, { marginBottom: 12 }]}>
+              <View
+                accessibilityRole="radiogroup"
+                style={[styles.priorityPillsRow, { marginBottom: 12 }]}
+              >
                 {CHECKLIST_PRIORITIES.map((prio) => {
                   const active = editItemPriority === prio;
                   return (
                     <Pressable
                       key={prio}
                       onPress={() => setEditItemPriority(prio)}
+                      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: active, checked: active }}
+                      accessibilityLabel={`Step priority: ${prio}`}
                       style={[
                         styles.miniPill,
                         {
@@ -2251,6 +2285,7 @@ export default function ChecklistsScreen({
                 value={editItemNotes}
                 onChangeText={setEditItemNotes}
                 multiline
+                accessibilityLabel="Notes or Expected Outcome"
                 style={[
                   styles.input,
                   {
@@ -2267,6 +2302,8 @@ export default function ChecklistsScreen({
               <View style={styles.modalActionsRow}>
                 <Pressable
                   onPress={() => setEditingItem(null)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel editing step"
                   style={[
                     styles.modalCancelBtn,
                     {
@@ -2282,6 +2319,11 @@ export default function ChecklistsScreen({
                 <Pressable
                   onPress={handleSaveEditedItem}
                   disabled={busyMutation || !editItemTitle.trim()}
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    disabled: Boolean(busyMutation || !editItemTitle.trim()),
+                  }}
+                  accessibilityLabel="Save Step"
                   style={[
                     styles.modalConfirmBtn,
                     {
@@ -3900,10 +3942,16 @@ export default function ChecklistsScreen({
           </View>
 
           {/* Scope Selector: Active Project vs All Workspace Checklists */}
-          <View style={styles.scopeToggleRow}>
+          <View style={styles.scopeToggleRow} accessibilityRole="tablist">
             {selectedProjectId ? (
               <Pressable
                 onPress={() => setScopeFilter('project')}
+                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: scopeFilter === 'project' }}
+                accessibilityLabel={`Project scope: ${
+                  selectedProject?.name || 'Selected'
+                }`}
                 style={[
                   styles.scopeTab,
                   {
@@ -3943,6 +3991,10 @@ export default function ChecklistsScreen({
 
             <Pressable
               onPress={() => setScopeFilter('all')}
+              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: scopeFilter === 'all' }}
+              accessibilityLabel={`All My Checklists (${checklists.length})`}
               style={[
                 styles.scopeTab,
                 {
@@ -4207,10 +4259,16 @@ export default function ChecklistsScreen({
               onChangeText={setSearchQuery}
               placeholder="Search checklists by title, category, project, or step..."
               placeholderTextColor={colors.textMuted}
+              accessibilityLabel="Search checklists by title, category, project, or step"
               style={[styles.searchInput, { color: colors.text }]}
             />
             {searchQuery ? (
-              <Pressable onPress={() => setSearchQuery('')}>
+              <Pressable
+                onPress={() => setSearchQuery('')}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                accessibilityRole="button"
+                accessibilityLabel="Clear checklist search"
+              >
                 <VectorIcon name="close" size={15} color={colors.textMuted} />
               </Pressable>
             ) : null}
@@ -4231,6 +4289,12 @@ export default function ChecklistsScreen({
                 <Pressable
                   key={st}
                   onPress={() => setStatusFilter(st)}
+                  hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`Filter checklists by status: ${
+                    st === 'All' ? 'All Statuses' : st
+                  }`}
                   style={[
                     styles.filterPill,
                     {
@@ -4270,6 +4334,12 @@ export default function ChecklistsScreen({
                 <Pressable
                   key={cat}
                   onPress={() => setCategoryFilter(cat)}
+                  hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`Filter checklists by category: ${
+                    cat === 'All' ? 'All Categories' : cat
+                  }`}
                   style={[
                     styles.filterPill,
                     {
@@ -4507,6 +4577,9 @@ export default function ChecklistsScreen({
                           }
                           openPromoteModal(chk);
                         }}
+                        hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Promote checklist ${chk.title} to test cases`}
                         style={[
                           styles.promoteCardBtn,
                           {
@@ -4537,6 +4610,9 @@ export default function ChecklistsScreen({
                           }
                           openEditModal(chk);
                         }}
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Edit checklist ${chk.title}`}
                         style={[
                           styles.iconBtn,
                           {
@@ -4559,6 +4635,9 @@ export default function ChecklistsScreen({
                           }
                           setDeleteTargetChecklist(chk);
                         }}
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Delete checklist ${chk.title}`}
                         style={[
                           styles.iconBtn,
                           {
