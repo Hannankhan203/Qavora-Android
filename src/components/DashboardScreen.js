@@ -1095,7 +1095,16 @@ export default function DashboardScreen({ onNavigateToDestination }) {
               ]}
             >
               <View style={styles.sectionHeader}>
-                <View style={styles.sectionTitleCol}>
+                <Pressable
+                  onPress={() => {
+                    if (typeof openTestPlansView === 'function') {
+                      openTestPlansView();
+                    } else {
+                      setActiveTab('testcases', { testCasesSubTab: 'plan' });
+                    }
+                  }}
+                  style={styles.sectionTitleCol}
+                >
                   <Text style={[styles.sectionTitle, { color: colors.text }]}>
                     Test Plan & Suite Progress
                   </Text>
@@ -1110,13 +1119,13 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                       {metrics.totalSuites} suites)
                     </Text>
                   ) : null}
-                </View>
+                </Pressable>
                 <Pressable
                   onPress={() => {
                     if (typeof openTestSuitesView === 'function') {
                       openTestSuitesView();
                     } else {
-                      setActiveTab('testcases');
+                      setActiveTab('testcases', { testCasesSubTab: 'suites' });
                     }
                   }}
                 >
@@ -1138,7 +1147,15 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                   {suiteProgressList.map((sp) => (
                     <Pressable
                       key={sp.id}
-                      onPress={() => setActiveTab('testcases')}
+                      onPress={() => {
+                        if (typeof openTestSuitesView === 'function') {
+                          openTestSuitesView();
+                        } else {
+                          setActiveTab('testcases', {
+                            testCasesSubTab: 'suites',
+                          });
+                        }
+                      }}
                       style={[
                         styles.suiteProgressItem,
                         {
@@ -1351,11 +1368,13 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                           <Pressable
                             key={ex.id || `${ex.testCaseId}-${idx}`}
                             onPress={() => {
-                              if (ex.testRunId) {
-                                setSelectedTestRunId(ex.testRunId);
+                              const targetRunId = ex.testRunId || ex.runId;
+                              const targetCaseId = ex.testCaseId || ex.caseId;
+                              if (targetRunId) {
+                                setSelectedTestRunId(targetRunId);
                                 setActiveTab('testruns');
-                              } else if (ex.testCaseId) {
-                                setSelectedTestCaseId(ex.testCaseId);
+                              } else if (targetCaseId) {
+                                setSelectedTestCaseId(targetCaseId);
                                 setActiveTab('testcases');
                               }
                             }}

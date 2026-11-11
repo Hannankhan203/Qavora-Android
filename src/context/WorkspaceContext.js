@@ -1089,8 +1089,8 @@ export function WorkspaceProvider({ children }) {
   const [checklistCreateTemplateId, setChecklistCreateTemplateId] = useState('none');
   const [profileSubView, setProfileSubViewState] = useState('all'); // 'all' | 'data' | 'settings'
   const [navigationHistory, setNavigationHistory] = useState([]);
-  const [selectedTestCaseId, setSelectedTestCaseId] = useState(null);
-  const [selectedTestRunId, setSelectedTestRunId] = useState(null);
+  const [selectedTestCaseId, setSelectedTestCaseIdState] = useState(null);
+  const [selectedTestRunId, setSelectedTestRunIdState] = useState(null);
   const [selectedDefectId, setSelectedDefectId] = useState(null);
   const [checklists, setChecklists] = useState([]);
 
@@ -1154,6 +1154,22 @@ export function WorkspaceProvider({ children }) {
     setProfileSubViewState(cleanSection);
   }, []);
 
+  const setSelectedTestCaseId = useCallback((nextCaseId) => {
+    setSelectedTestCaseIdState(nextCaseId);
+    if (nextCaseId) {
+      testCasesSubTabRef.current = 'cases';
+      setTestCasesSubTabState('cases');
+    }
+  }, []);
+
+  const setSelectedTestRunId = useCallback((nextRunId) => {
+    setSelectedTestRunIdState(nextRunId);
+    if (nextRunId) {
+      testRunsViewModeRef.current = 'runs';
+      setTestRunsViewModeState('runs');
+    }
+  }, []);
+
   const pushNavigationHistory = useCallback((snapshotOverride = null) => {
     const entry = snapshotOverride || {
       projectViewMode: projectViewModeRef.current,
@@ -1192,10 +1208,16 @@ export function WorkspaceProvider({ children }) {
           : 'dashboard';
       activeTabRef.current = cleanTab;
       setActiveTabState(cleanTab);
-      if (!options.preserveSelectedCase) {
-        setSelectedTestCaseId(null);
+      if (
+        (cleanTab !== 'testcases' || options.clearSelectedCase === true) &&
+        !options.preserveSelectedCase
+      ) {
+        setSelectedTestCaseIdState(null);
       }
-      if (!options.preserveSelectedDefect) {
+      if (
+        (cleanTab !== 'defects' || options.clearSelectedDefect === true) &&
+        !options.preserveSelectedDefect
+      ) {
         setSelectedDefectId(null);
       }
       if (!options.preserveExecutingCase) {
@@ -1203,6 +1225,9 @@ export function WorkspaceProvider({ children }) {
       }
 
       if (cleanTab === 'dashboard' && !options.preserveDashboardSubTab) {
+        dashboardSubTabRef.current = 'overview';
+        setDashboardSubTabState('overview');
+      } else if (cleanTab !== 'dashboard') {
         dashboardSubTabRef.current = 'overview';
         setDashboardSubTabState('overview');
       }
@@ -1230,10 +1255,14 @@ export function WorkspaceProvider({ children }) {
           setProfileSubViewState(options.profileSubView);
         }
         setProjectViewMode('workspace');
-      } else if (selectedProjectIdRef.current) {
-        setProjectViewMode('workspace');
       } else {
-        setProjectViewMode('selection');
+        profileSubViewRef.current = 'all';
+        setProfileSubViewState('all');
+        if (selectedProjectIdRef.current) {
+          setProjectViewMode('workspace');
+        } else {
+          setProjectViewMode('selection');
+        }
       }
     },
     []
@@ -1252,6 +1281,11 @@ export function WorkspaceProvider({ children }) {
 
   const openProjectSelection = useCallback(() => {
     setChecklistCreateModalOpen(false);
+    setExecutingTestCaseId(null);
+    setSelectedTestCaseIdState(null);
+    setSelectedDefectId(null);
+    profileSubViewRef.current = 'all';
+    setProfileSubViewState('all');
     setProjectViewMode('selection');
   }, []);
 
@@ -1265,6 +1299,11 @@ export function WorkspaceProvider({ children }) {
       return;
     }
     setChecklistCreateModalOpen(false);
+    setExecutingTestCaseId(null);
+    setSelectedTestCaseIdState(null);
+    setSelectedDefectId(null);
+    profileSubViewRef.current = 'all';
+    setProfileSubViewState('all');
     setProjectViewMode('details');
   }, [showToast]);
 
@@ -1289,6 +1328,11 @@ export function WorkspaceProvider({ children }) {
       return;
     }
     setChecklistCreateModalOpen(false);
+    setExecutingTestCaseId(null);
+    setSelectedTestCaseIdState(null);
+    setSelectedDefectId(null);
+    profileSubViewRef.current = 'all';
+    setProfileSubViewState('all');
     setProjectViewMode('workspace');
     activeTabRef.current = 'dashboard';
     setActiveTabState('dashboard');
@@ -1306,6 +1350,11 @@ export function WorkspaceProvider({ children }) {
       return;
     }
     setChecklistCreateModalOpen(false);
+    setExecutingTestCaseId(null);
+    setSelectedTestCaseIdState(null);
+    setSelectedDefectId(null);
+    profileSubViewRef.current = 'all';
+    setProfileSubViewState('all');
     setProjectViewMode('workspace');
     activeTabRef.current = 'dashboard';
     setActiveTabState('dashboard');
@@ -1320,6 +1369,11 @@ export function WorkspaceProvider({ children }) {
     if (!options || !options.keepRunner) {
       setActiveChecklistId(null);
     }
+    setExecutingTestCaseId(null);
+    setSelectedTestCaseIdState(null);
+    setSelectedDefectId(null);
+    profileSubViewRef.current = 'all';
+    setProfileSubViewState('all');
     setProjectViewMode('checklists');
   }, []);
 
@@ -1329,6 +1383,11 @@ export function WorkspaceProvider({ children }) {
         ? templateId.trim()
         : 'none';
     setActiveChecklistId(null);
+    setExecutingTestCaseId(null);
+    setSelectedTestCaseIdState(null);
+    setSelectedDefectId(null);
+    profileSubViewRef.current = 'all';
+    setProfileSubViewState('all');
     setChecklistCreateTemplateId(cleanTpl);
     setChecklistCreateModalOpen(true);
     setProjectViewMode('checklists');
@@ -1337,6 +1396,11 @@ export function WorkspaceProvider({ children }) {
   const openChecklistRunnerView = useCallback(
     (checklistId = null) => {
       setChecklistCreateModalOpen(false);
+      setExecutingTestCaseId(null);
+      setSelectedTestCaseIdState(null);
+      setSelectedDefectId(null);
+      profileSubViewRef.current = 'all';
+      setProfileSubViewState('all');
       setProjectViewMode('checklists');
       const explicitId =
         typeof checklistId === 'string' && checklistId.trim()
@@ -1373,6 +1437,13 @@ export function WorkspaceProvider({ children }) {
       return;
     }
     setChecklistCreateModalOpen(false);
+    setExecutingTestCaseId(null);
+    setSelectedTestCaseIdState(null);
+    setSelectedDefectId(null);
+    profileSubViewRef.current = 'all';
+    setProfileSubViewState('all');
+    dashboardSubTabRef.current = 'overview';
+    setDashboardSubTabState('overview');
     setProjectViewMode('workspace');
     activeTabRef.current = 'testcases';
     setActiveTabState('testcases');
@@ -1381,7 +1452,7 @@ export function WorkspaceProvider({ children }) {
   }, [showToast]);
 
   const openTestCasesView = useCallback(
-    (subTab = 'cases') => {
+    (subTab = 'cases', caseId = null) => {
       if (!selectedProjectIdRef.current) {
         setProjectViewMode('selection');
         showToast(
@@ -1393,11 +1464,22 @@ export function WorkspaceProvider({ children }) {
       const cleanSub =
         subTab === 'suites' || subTab === 'plan' ? subTab : 'cases';
       setChecklistCreateModalOpen(false);
+      setExecutingTestCaseId(null);
+      setSelectedDefectId(null);
+      profileSubViewRef.current = 'all';
+      setProfileSubViewState('all');
+      dashboardSubTabRef.current = 'overview';
+      setDashboardSubTabState('overview');
       setProjectViewMode('workspace');
       activeTabRef.current = 'testcases';
       setActiveTabState('testcases');
       testCasesSubTabRef.current = cleanSub;
       setTestCasesSubTabState(cleanSub);
+      if (typeof caseId === 'string' && caseId.trim()) {
+        setSelectedTestCaseIdState(caseId.trim());
+      } else if (cleanSub !== 'cases') {
+        setSelectedTestCaseIdState(null);
+      }
     },
     [showToast]
   );
@@ -1418,16 +1500,24 @@ export function WorkspaceProvider({ children }) {
       }
       const nextMode = options && options.viewMode === 'history' ? 'history' : 'runs';
       setChecklistCreateModalOpen(false);
+      setSelectedTestCaseIdState(null);
+      setSelectedDefectId(null);
+      profileSubViewRef.current = 'all';
+      setProfileSubViewState('all');
+      dashboardSubTabRef.current = 'overview';
+      setDashboardSubTabState('overview');
       setProjectViewMode('workspace');
       activeTabRef.current = 'testruns';
       setActiveTabState('testruns');
       testRunsViewModeRef.current = nextMode;
       setTestRunsViewModeState(nextMode);
       if (options && options.testRunId) {
-        setSelectedTestRunId(options.testRunId);
+        setSelectedTestRunIdState(options.testRunId);
       }
       if (options && options.executingCaseId !== undefined) {
         setExecutingTestCaseId(options.executingCaseId);
+      } else {
+        setExecutingTestCaseId(null);
       }
     },
     [showToast]
@@ -1444,6 +1534,12 @@ export function WorkspaceProvider({ children }) {
         return;
       }
       setChecklistCreateModalOpen(false);
+      setExecutingTestCaseId(null);
+      setSelectedTestCaseIdState(null);
+      profileSubViewRef.current = 'all';
+      setProfileSubViewState('all');
+      dashboardSubTabRef.current = 'overview';
+      setDashboardSubTabState('overview');
       setProjectViewMode('workspace');
       activeTabRef.current = 'defects';
       setActiveTabState('defects');
@@ -1456,6 +1552,11 @@ export function WorkspaceProvider({ children }) {
 
   const openDataManagementView = useCallback(() => {
     setChecklistCreateModalOpen(false);
+    setExecutingTestCaseId(null);
+    setSelectedTestCaseIdState(null);
+    setSelectedDefectId(null);
+    dashboardSubTabRef.current = 'overview';
+    setDashboardSubTabState('overview');
     setProjectViewMode('workspace');
     activeTabRef.current = 'profile';
     setActiveTabState('profile');
@@ -1465,6 +1566,11 @@ export function WorkspaceProvider({ children }) {
 
   const openSettingsView = useCallback(() => {
     setChecklistCreateModalOpen(false);
+    setExecutingTestCaseId(null);
+    setSelectedTestCaseIdState(null);
+    setSelectedDefectId(null);
+    dashboardSubTabRef.current = 'overview';
+    setDashboardSubTabState('overview');
     setProjectViewMode('workspace');
     activeTabRef.current = 'profile';
     setActiveTabState('profile');

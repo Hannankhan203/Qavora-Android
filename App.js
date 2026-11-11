@@ -291,7 +291,13 @@ function QavoraQAShell() {
       return true;
     }
 
-    // 13. Non-Dashboard primary workspace tabs -> return to Dashboard (or My Projects if no project)
+    // 13. Nested Data Management section inside Profile -> return to Settings / Profile overview
+    if (activeTab === 'profile' && profileSubView === 'data') {
+      setProfileSubView('settings');
+      return true;
+    }
+
+    // 14. Non-Dashboard primary workspace tabs -> return to Dashboard (or My Projects if no project)
     if (activeTab !== 'dashboard') {
       setProfileSubView('all');
       if (selectedProject) {
@@ -316,6 +322,7 @@ function QavoraQAShell() {
     dashboardSubTab,
     testCasesSubTab,
     testRunsViewMode,
+    profileSubView,
     setChecklistCreateModalOpen,
     setActiveChecklistId,
     setProjectViewMode,
@@ -771,7 +778,10 @@ function QavoraQAShell() {
                     return;
                   }
                   setProjectViewMode('workspace');
-                  setActiveTab(tab.id);
+                  setActiveTab(tab.id, {
+                    clearSelectedCase: true,
+                    clearSelectedDefect: true,
+                  });
                   if (tab.id === 'dashboard') {
                     setDashboardSubTab('overview');
                   } else if (tab.id === 'testcases') {

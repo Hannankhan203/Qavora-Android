@@ -312,11 +312,9 @@ export default function DefectsScreen() {
     return () => clearTimeout(timer);
   }, [feedbackBanner]);
 
-  // Open detail modal when selectedDefectId is set externally
+  // Synchronize detail modal with centralized selectedDefectId (including BackHandler clear)
   useEffect(() => {
-    if (selectedDefectId) {
-      setViewingDefectId(selectedDefectId);
-    }
+    setViewingDefectId(selectedDefectId || null);
   }, [selectedDefectId]);
 
   // Handle pre-filled defect creation when triggered from failed test execution
@@ -1055,7 +1053,10 @@ export default function DefectsScreen() {
             >
               <TouchableOpacity
                 activeOpacity={0.85}
-                onPress={() => setViewingDefectId(bug.id)}
+                onPress={() => {
+                  setViewingDefectId(bug.id);
+                  setSelectedDefectId(bug.id);
+                }}
               >
                 <View style={styles.cardTopRow}>
                   <View style={styles.idAndSev}>

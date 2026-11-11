@@ -71,10 +71,7 @@ export default function ProfileSettingsScreen({
           y: Math.max(0, sectionOffsetsRef.current.data - 8),
           animated: true,
         });
-      } else if (
-        resolvedSection === 'settings' &&
-        sectionOffsetsRef.current.settings > 0
-      ) {
+      } else if (resolvedSection === 'settings') {
         scrollViewRef.current.scrollTo({
           y: 0,
           animated: true,
@@ -477,7 +474,18 @@ export default function ProfileSettingsScreen({
         {/* Phase 2F: Data Management, Backup, Restore & Offline Synchronization */}
         <View
           onLayout={(e) => {
-            sectionOffsetsRef.current.data = e.nativeEvent.layout.y;
+            const yOffset = e.nativeEvent.layout.y;
+            sectionOffsetsRef.current.data = yOffset;
+            if (
+              resolvedSection === 'data' &&
+              yOffset > 0 &&
+              scrollViewRef.current
+            ) {
+              scrollViewRef.current.scrollTo({
+                y: Math.max(0, yOffset - 8),
+                animated: true,
+              });
+            }
           }}
         >
           <DataManagementSection />

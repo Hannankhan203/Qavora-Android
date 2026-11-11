@@ -1119,11 +1119,13 @@ export default function ReportsView() {
                     <Pressable
                       key={ex.id || `${ex.testCaseId}-${idx}`}
                       onPress={() => {
-                        if (ex.testRunId) {
-                          setSelectedTestRunId(ex.testRunId);
+                        const targetRunId = ex.testRunId || ex.runId;
+                        const targetCaseId = ex.testCaseId || ex.caseId;
+                        if (targetRunId) {
+                          setSelectedTestRunId(targetRunId);
                           setActiveTab('testruns');
-                        } else if (ex.testCaseId) {
-                          setSelectedTestCaseId(ex.testCaseId);
+                        } else if (targetCaseId) {
+                          setSelectedTestCaseId(targetCaseId);
                           setActiveTab('testcases');
                         }
                       }}
