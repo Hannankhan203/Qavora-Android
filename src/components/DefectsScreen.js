@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import VectorIcon from './VectorIcon';
 import { useTheme, monoFontFamily } from '../theme/theme';
@@ -19,6 +20,208 @@ import {
   DEFECT_PRIORITIES,
   DEFECT_STATUSES,
 } from '../data/initialData';
+
+/**
+ * Validates that a defect externalUrl is a well-formed HTTP or HTTPS URL and
+ * strictly rejects unsafe or non-web schemes (such as `javascript:`, `file:`,
+ * `data:`, `vbscript:`, `intent:`, `ftp:`, `mailto:`, etc.).
+ *
+ * @param {any} rawUrl
+ * @returns {{
+ *   isValid: boolean,
+ *   normalizedUrl: string | null,
+ *   protocol: string | null,
+ *   hostname: string | null,
+ *   reason: string | null
+ * }}
+ */
+export function validateDefectExternalUrl(rawUrl) {
+  if (typeof rawUrl !== 'string') {
+    return {
+      isValid: false,
+      normalizedUrl: null,
+      protocol: null,
+      hostname: null,
+      reason: 'EMPTY',
+    };
+  }
+
+  const trimmed = rawUrl.trim();
+  if (!trimmed) {
+    return {
+      isValid: false,
+      normalizedUrl: null,
+      protocol: null,
+      hostname: null,
+      reason: 'EMPTY',
+    };
+  }
+
+  // Reject embedded whitespace or control characters
+  if (/[\u0000-\u001F\u007F\s]/.test(trimmed)) {
+    return {
+      isValid: false,
+      normalizedUrl: null,
+      protocol: null,
+      hostname: null,
+      reason: 'INVALID_CHARACTERS',
+    };
+  }
+
+  // Explicitly check scheme prefix before URL parsing
+  const schemeMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
+  if (!schemeMatch) {
+    return {
+      isValid: false,
+      normalizedUrl: null,
+      protocol: null,
+      hostname: null,
+      reason: 'MISSING_PROTOCOL',
+    };
+  }
+
+  const rawProtocol = `${schemeMatch[1].toLowerCase()}:`;
+  if (rawProtocol !== 'http:' && rawProtocol !== 'https:') {
+    return {
+      isValid: false,
+      normalizedUrl: null,
+      protocol: rawProtocol,
+      hostname: null,
+      reason: 'UNSUPPORTED_PROTOCOL',
+    };
+  }
+
+  // Require standard authority separator (http:// or https://)
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return {
+      isValid: false,
+      normalizedUrl: null,
+      protocol: rawProtocol,
+      hostname: null,
+      reason: 'INVALID_AUTHORITY',
+    };
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    const protocol = (parsed.protocol || '').toLowerCase();
+    if (protocol !== 'http:' && protocol !== 'https:') {
+      return {
+        isValid: false,
+        normalizedUrl: null,
+        protocol,
+        hostname: null,
+        reason: 'UNSUPPORTED_PROTOCOL',
+      };
+    }
+
+    const hostname = (parsed.hostname || '').trim().toLowerCase();
+    if (
+      !hostname ||
+      hostname.startsWith('.') ||
+      hostname.endsWith('.') ||
+      hostname.includes('..')
+    ) {
+      return {
+        isValid: false,
+        normalizedUrl: null,
+        protocol,
+        hostname: hostname || null,
+        reason: 'INVALID_HOSTNAME',
+      };
+    }
+
+    const isLocalhost = hostname === 'localhost';
+    const isIpv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
+    const isIpv6 = hostname.startsWith('[') && hostname.endsWith(']');
+    const isDomainWithTld =
+      hostname.includes('.') &&
+      /^[a-z0-9.-]+$/i.test(hostname) &&
+      /\.[a-z0-9-]{2,}$/i.test(hostname);
+
+    if (!isLocalhost && !isIpv4 && !isIpv6 && !isDomainWithTld) {
+      return {
+        isValid: false,
+        normalizedUrl: null,
+        protocol,
+        hostname,
+        reason: 'INVALID_HOSTNAME',
+      };
+    }
+
+    return {
+      isValid: true,
+      normalizedUrl: parsed.toString(),
+      protocol,
+      hostname,
+      reason: null,
+    };
+  } catch {
+    return {
+      isValid: false,
+      normalizedUrl: null,
+      protocol: rawProtocol,
+      hostname: null,
+      reason: 'INVALID_URL',
+    };
+  }
+}
+
+/**
+ * Safely validates and opens a defect `externalUrl` via React Native's
+ * `Linking.openURL()`, rejecting unsafe or malformed URLs and catching runtime
+ * errors gracefully.
+ *
+ * @param {any} rawUrl
+ * @param {{ linking?: { openURL: (url: string) => Promise<any> }, onError?: (message: string) => void }} [options]
+ * @returns {Promise<{ ok: boolean, url: string | null, reason: string | null, error: string | null }>}
+ */
+export async function openDefectExternalUrl(rawUrl, options = {}) {
+  const linkingApi =
+    options && options.linking ? options.linking : Linking;
+  const onError =
+    options && typeof options.onError === 'function' ? options.onError : null;
+
+  const validation = validateDefectExternalUrl(rawUrl);
+  if (!validation.isValid || !validation.normalizedUrl) {
+    const errorMsg =
+      'Cannot open external link: only valid http:// or https:// URLs are supported.';
+    if (onError) {
+      onError(errorMsg);
+    }
+    return {
+      ok: false,
+      url: null,
+      reason: validation.reason || 'INVALID_URL',
+      error: errorMsg,
+    };
+  }
+
+  try {
+    if (!linkingApi || typeof linkingApi.openURL !== 'function') {
+      throw new Error('Linking API is unavailable.');
+    }
+    await linkingApi.openURL(validation.normalizedUrl);
+    return {
+      ok: true,
+      url: validation.normalizedUrl,
+      reason: null,
+      error: null,
+    };
+  } catch {
+    const errorMsg =
+      'Unable to open external issue link on this device. Please verify that a browser is installed.';
+    if (onError) {
+      onError(errorMsg);
+    }
+    return {
+      ok: false,
+      url: validation.normalizedUrl,
+      reason: 'OPEN_FAILED',
+      error: errorMsg,
+    };
+  }
+}
 
 function formatShortTimestamp(value) {
   if (!value) return '—';
@@ -294,6 +497,17 @@ export default function DefectsScreen() {
       return;
     }
 
+    const trimmedExternalUrl = externalUrl.trim();
+    if (trimmedExternalUrl) {
+      const urlValidation = validateDefectExternalUrl(trimmedExternalUrl);
+      if (!urlValidation.isValid) {
+        setFormError(
+          'External Issue URL must be a valid http:// or https:// address.'
+        );
+        return;
+      }
+    }
+
     setFormError('');
     setIsSubmittingDefect(true);
     try {
@@ -309,7 +523,7 @@ export default function DefectsScreen() {
           expectedResult.trim() || 'App should function without error.',
         actualResult: actualResult.trim(),
         environment: environment.trim() || 'Android Device',
-        externalUrl: externalUrl.trim(),
+        externalUrl: trimmedExternalUrl,
         linkedTestCaseId: linkedTestCaseId || null,
         linkedTestRunId: linkedTestRunId || null,
         linkedExecutionId: linkedExecutionId || null,
@@ -352,6 +566,12 @@ export default function DefectsScreen() {
     } finally {
       setIsUpdatingStatus(false);
     }
+  };
+
+  const handleOpenExternalUrl = async (rawUrl) => {
+    await openDefectExternalUrl(rawUrl, {
+      onError: (msg) => showFeedback('error', msg),
+    });
   };
 
   const handleConfirmDeleteDefect = async () => {
@@ -946,6 +1166,47 @@ export default function DefectsScreen() {
                         </Text>
                       </View>
                     )}
+                    {bug.externalUrl &&
+                    validateDefectExternalUrl(bug.externalUrl).isValid ? (
+                      <TouchableOpacity
+                        activeOpacity={0.75}
+                        accessibilityRole="link"
+                        accessibilityLabel={`Open external issue link for ${
+                          bug.defectId || bug.id
+                        }`}
+                        accessibilityHint="Opens the external issue URL in your browser"
+                        onPress={() => handleOpenExternalUrl(bug.externalUrl)}
+                        style={[
+                          styles.linkChip,
+                          {
+                            backgroundColor: theme.primarySoft,
+                            borderWidth: 1,
+                            borderColor: theme.primary,
+                            maxWidth: 150,
+                          },
+                        ]}
+                      >
+                        <VectorIcon
+                          name="globe"
+                          size={10}
+                          color={theme.primary}
+                        />
+                        <Text
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                          style={[
+                            styles.linkChipText,
+                            {
+                              color: theme.primary,
+                              textDecorationLine: 'underline',
+                              flexShrink: 1,
+                            },
+                          ]}
+                        >
+                          External Issue
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
                   </View>
 
                   <View style={styles.cardBottomRightActions}>
@@ -1302,16 +1563,91 @@ export default function DefectsScreen() {
                     <Text style={[styles.detailText, { color: theme.text }]}>
                       {viewingDefect.environment || 'Android Device'}
                     </Text>
-                    {viewingDefect.externalUrl ? (
-                      <Text
-                        style={[
-                          styles.externalUrlText,
-                          { color: theme.primary },
-                        ]}
-                      >
-                        External Issue: {viewingDefect.externalUrl}
-                      </Text>
-                    ) : null}
+                    {(() => {
+                      const rawExtUrl =
+                        typeof viewingDefect.externalUrl === 'string'
+                          ? viewingDefect.externalUrl.trim()
+                          : '';
+                      if (!rawExtUrl) {
+                        return null;
+                      }
+                      const urlMeta = validateDefectExternalUrl(rawExtUrl);
+                      if (urlMeta.isValid && urlMeta.normalizedUrl) {
+                        return (
+                          <TouchableOpacity
+                            activeOpacity={0.75}
+                            accessibilityRole="link"
+                            accessibilityLabel={`Open external issue ${urlMeta.normalizedUrl}`}
+                            accessibilityHint="Opens the external issue URL in your browser"
+                            onPress={() =>
+                              handleOpenExternalUrl(urlMeta.normalizedUrl)
+                            }
+                            style={[
+                              styles.externalUrlLinkBtn,
+                              {
+                                backgroundColor: theme.primarySoft,
+                                borderColor: theme.primary,
+                              },
+                            ]}
+                          >
+                            <VectorIcon
+                              name="globe"
+                              size={14}
+                              color={theme.primary}
+                              style={styles.externalUrlIcon}
+                            />
+                            <View style={styles.externalUrlContentWrap}>
+                              <Text
+                                style={[
+                                  styles.externalUrlLabel,
+                                  { color: theme.textSecondary },
+                                ]}
+                              >
+                                EXTERNAL ISSUE LINK (TAP TO OPEN)
+                              </Text>
+                              <Text
+                                selectable
+                                style={[
+                                  styles.externalUrlText,
+                                  { color: theme.primary },
+                                ]}
+                              >
+                                {urlMeta.normalizedUrl}
+                              </Text>
+                            </View>
+                          </TouchableOpacity>
+                        );
+                      }
+                      return (
+                        <View
+                          style={[
+                            styles.externalUrlInvalidBox,
+                            {
+                              backgroundColor: theme.surface,
+                              borderColor: theme.border,
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.externalUrlInvalidLabel,
+                              { color: theme.textMuted },
+                            ]}
+                          >
+                            External Issue (Unsupported / Invalid URL):
+                          </Text>
+                          <Text
+                            selectable
+                            style={[
+                              styles.externalUrlInvalidText,
+                              { color: theme.textSecondary },
+                            ]}
+                          >
+                            {rawExtUrl}
+                          </Text>
+                        </View>
+                      );
+                    })()}
                   </View>
 
                   {/* Bidirectional Execution & Test Case Traceability */}
@@ -1969,6 +2305,9 @@ export default function DefectsScreen() {
                 ]}
                 placeholder="https://jira.example.com/browse/QAV-102"
                 placeholderTextColor={theme.textMuted}
+                keyboardType="url"
+                autoCapitalize="none"
+                autoCorrect={false}
                 value={externalUrl}
                 onChangeText={setExternalUrl}
               />
@@ -2562,10 +2901,56 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
   },
+  externalUrlLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    width: '100%',
+    maxWidth: '100%',
+  },
+  externalUrlIcon: {
+    marginTop: 2,
+  },
+  externalUrlContentWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  externalUrlLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    marginBottom: 2,
+  },
   externalUrlText: {
     fontSize: 12,
     fontWeight: '700',
-    marginTop: 6,
+    lineHeight: 18,
+    textDecorationLine: 'underline',
+    flexShrink: 1,
+  },
+  externalUrlInvalidBox: {
+    marginTop: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    width: '100%',
+    maxWidth: '100%',
+  },
+  externalUrlInvalidLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  externalUrlInvalidText: {
+    fontSize: 12,
+    lineHeight: 17,
+    flexShrink: 1,
   },
   comparisonGrid: {
     gap: 10,
