@@ -26,7 +26,10 @@ import {
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useAuth } from '../context/AuthContext';
 import { useProjects } from '../context/ProjectContext';
-import { useWorkspace } from '../context/WorkspaceContext';
+import {
+  useWorkspace,
+  useWorkspaceBackOverlay,
+} from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
 import ProjectFormModal from './ProjectFormModal';
 import { computeProjectTestCaseCount } from '../services/projectService';
@@ -94,6 +97,14 @@ export default function ProjectSelectionScreen({
   const [searchQuery, setSearchQuery] = useState('');
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
+
+  useWorkspaceBackOverlay(() => {
+    if (isFormModalOpen) {
+      setIsFormModalOpen(false);
+      return true;
+    }
+    return false;
+  });
 
   const handlePullToRefresh = useCallback(async () => {
     await refreshProjects({ pullToRefresh: true });

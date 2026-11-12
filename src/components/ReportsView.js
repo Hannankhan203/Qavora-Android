@@ -12,7 +12,10 @@ import {
 } from 'react-native';
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useProjects } from '../context/ProjectContext';
-import { useWorkspace } from '../context/WorkspaceContext';
+import {
+  useWorkspace,
+  useWorkspaceBackOverlay,
+} from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
 
 export default function ReportsView() {
@@ -37,6 +40,7 @@ export default function ReportsView() {
     setSelectedTestRunId,
     setSelectedDefectId,
     showToast,
+    notifyBlockedSwipeTouchStart,
   } = useWorkspace();
 
   // Filter State
@@ -55,6 +59,14 @@ export default function ReportsView() {
   const [exportError, setExportError] = useState(null);
   const [previewModalVisible, setPreviewModalVisible] = useState(false);
   const [previewPayload, setPreviewPayload] = useState(null);
+
+  useWorkspaceBackOverlay(() => {
+    if (previewModalVisible) {
+      setPreviewModalVisible(false);
+      return true;
+    }
+    return false;
+  });
 
   const isRefreshingAny = isRefreshingProject || isSyncingProjectData;
   const customEndDateRef = useRef(null);
@@ -324,6 +336,7 @@ export default function ReportsView() {
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
+            onTouchStart={notifyBlockedSwipeTouchStart}
             contentContainerStyle={styles.horizontalPillsRow}
           >
             {reportTypes.map((rt) => {
@@ -392,6 +405,7 @@ export default function ReportsView() {
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
+            onTouchStart={notifyBlockedSwipeTouchStart}
             contentContainerStyle={styles.horizontalPillsRow}
           >
             {dateRangeFilters.map((df) => {
@@ -540,6 +554,7 @@ export default function ReportsView() {
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              onTouchStart={notifyBlockedSwipeTouchStart}
               contentContainerStyle={styles.horizontalPillsRow}
             >
               <Pressable
@@ -627,6 +642,7 @@ export default function ReportsView() {
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              onTouchStart={notifyBlockedSwipeTouchStart}
               contentContainerStyle={styles.horizontalPillsRow}
             >
               {contextualStatusOptions.map((st) => {
@@ -683,6 +699,7 @@ export default function ReportsView() {
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              onTouchStart={notifyBlockedSwipeTouchStart}
               contentContainerStyle={styles.horizontalPillsRow}
             >
               {['ALL', 'Critical', 'High', 'Medium', 'Low'].map((sev) => {

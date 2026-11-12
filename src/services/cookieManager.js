@@ -32,30 +32,214 @@ export const CSRF_COOKIE_NAMES = [
   'qavora_csrf_token',
 ];
 
+const AVAILABILITY_RETRY_DELAYS_MS = [35, 85];
+const OPERATION_RETRY_DELAYS_MS = [35, 85];
+
 let memoryCookieJar = {};
 let isHydrated = false;
 let hydrationPromise = null;
 let customStorageAdapter = null;
+let secureStoreImpl = SecureStore;
 let secureStoreAvailability = null;
+let availabilityCheckPromise = null;
+let lastPersistenceError = null;
 
 /**
- * Checks once whether native Expo SecureStore is available in the current runtime.
- *
- * @returns {Promise<boolean>}
+ * Structured error distinguishing temporary availability errors, unavailable storage,
+ * and genuine SecureStore read/write/delete persistence failures.
  */
-async function isNativeSecureStoreAvailable() {
-  if (typeof secureStoreAvailability === 'boolean') {
-    return secureStoreAvailability;
-  }
-  try {
-    if (SecureStore && typeof SecureStore.isAvailableAsync === 'function') {
-      secureStoreAvailability = Boolean(await SecureStore.isAvailableAsync());
-      return secureStoreAvailability;
+export class CookiePersistenceError extends Error {
+  constructor({
+    message,
+    code = 'SECURE_STORE_WRITE_FAILED',
+    category = 'persistence_failure',
+    operation = 'write',
+    isTransient = false,
+    cause = null,
+  }) {
+    super(message);
+    this.name = 'CookiePersistenceError';
+    this.code = code;
+    this.category = category;
+    this.operation = operation;
+    this.isTransient = Boolean(isTransient);
+    if (cause !== undefined && cause !== null) {
+      this.cause = cause;
     }
-  } catch {
-    secureStoreAvailability = false;
   }
-  return false;
+}
+
+function isBrowserDomEnvironment() {
+  return typeof window !== 'undefined' && typeof document !== 'undefined';
+}
+
+function waitMs(ms) {
+  if (!ms || ms <= 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function recordRedactedPersistenceError(err) {
+  if (!err) {
+    lastPersistenceError = null;
+    return;
+  }
+  lastPersistenceError = {
+    code: typeof err.code === 'string' ? err.code : 'SECURE_STORE_ERROR',
+    category:
+      typeof err.category === 'string' ? err.category : 'persistence_failure',
+    operation: typeof err.operation === 'string' ? err.operation : 'unknown',
+    isTransient: Boolean(err.isTransient),
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/**
+ * Checks whether native Expo SecureStore is available in the current runtime.
+ *
+ * - Caches `true` when confirmed available on native.
+ * - Caches `false` only on confirmed Web DOM runtimes where SecureStore is unsupported
+ *   and browser cookies handle persistence (`unavailable_web`).
+ * - Never permanently caches `false` when `SecureStore.isAvailableAsync()` throws a
+ *   transient error or temporarily reports unavailable on native; instead retries
+ *   within strict bounds and distinguishes temporary errors from unavailability.
+ *
+ * @returns {Promise<{ available: boolean, status: 'available' | 'unavailable' | 'unavailable_web' | 'temporary_error', reason?: string, error?: CookiePersistenceError }>}
+ */
+export async function checkSecureStoreAvailability() {
+  if (secureStoreAvailability === true) {
+    return { available: true, status: 'available' };
+  }
+  if (isBrowserDomEnvironment() && secureStoreAvailability === false) {
+    return {
+      available: false,
+      status: 'unavailable_web',
+      reason: 'SecureStore is not supported in browser DOM runtimes.',
+    };
+  }
+
+  if (availabilityCheckPromise) {
+    return availabilityCheckPromise;
+  }
+
+  availabilityCheckPromise = (async () => {
+    const store = secureStoreImpl;
+    if (!store || typeof store.isAvailableAsync !== 'function') {
+      if (isBrowserDomEnvironment()) {
+        secureStoreAvailability = false;
+        return {
+          available: false,
+          status: 'unavailable_web',
+          reason: 'SecureStore is not supported in browser DOM runtimes.',
+        };
+      }
+      const err = new CookiePersistenceError({
+        message: 'Secure device storage is unavailable on this device.',
+        code: 'SECURE_STORE_UNAVAILABLE',
+        category: 'unavailable',
+        operation: 'availability',
+        isTransient: false,
+      });
+      recordRedactedPersistenceError(err);
+      return {
+        available: false,
+        status: 'unavailable',
+        reason: err.message,
+        error: err,
+      };
+    }
+
+    let lastErr = null;
+    const maxAttempts = AVAILABILITY_RETRY_DELAYS_MS.length + 1;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        const available = Boolean(await store.isAvailableAsync());
+        if (available) {
+          secureStoreAvailability = true;
+          if (
+            lastPersistenceError &&
+            lastPersistenceError.operation === 'availability'
+          ) {
+            lastPersistenceError = null;
+          }
+          return { available: true, status: 'available' };
+        }
+
+        if (isBrowserDomEnvironment()) {
+          secureStoreAvailability = false;
+          return {
+            available: false,
+            status: 'unavailable_web',
+            reason: 'SecureStore is not supported in browser DOM runtimes.',
+          };
+        }
+
+        // Native returned false cleanly: do NOT cache false permanently in case
+        // secure storage becomes ready later (e.g., device unlock), and report unavailable.
+        const unavailableErr = new CookiePersistenceError({
+          message: 'Secure device storage is unavailable on this device.',
+          code: 'SECURE_STORE_UNAVAILABLE',
+          category: 'unavailable',
+          operation: 'availability',
+          isTransient: false,
+        });
+        recordRedactedPersistenceError(unavailableErr);
+        return {
+          available: false,
+          status: 'unavailable',
+          reason: unavailableErr.message,
+          error: unavailableErr,
+        };
+      } catch (err) {
+        lastErr = err;
+        if (attempt < AVAILABILITY_RETRY_DELAYS_MS.length) {
+          await waitMs(AVAILABILITY_RETRY_DELAYS_MS[attempt]);
+        }
+      }
+    }
+
+    // Transient availability failure exhausted retries: never cache `false` permanently.
+    const tempErr = new CookiePersistenceError({
+      message:
+        'Secure device storage is temporarily unavailable. Please try again.',
+      code: 'SECURE_STORE_TEMP_ERROR',
+      category: 'temporary_error',
+      operation: 'availability',
+      isTransient: true,
+      cause: lastErr,
+    });
+    recordRedactedPersistenceError(tempErr);
+    return {
+      available: false,
+      status: 'temporary_error',
+      reason: tempErr.message,
+      error: tempErr,
+    };
+  })();
+
+  try {
+    return await availabilityCheckPromise;
+  } finally {
+    availabilityCheckPromise = null;
+  }
+}
+
+async function runWithBoundedRetries(fn) {
+  let lastErr = null;
+  const maxAttempts = OPERATION_RETRY_DELAYS_MS.length + 1;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (attempt < OPERATION_RETRY_DELAYS_MS.length) {
+        await waitMs(OPERATION_RETRY_DELAYS_MS[attempt]);
+      }
+    }
+  }
+  throw lastErr;
 }
 
 /**
@@ -64,24 +248,125 @@ async function isNativeSecureStoreAvailable() {
  */
 const expoSecureStoreAdapter = {
   async getItem(key) {
-    if (!(await isNativeSecureStoreAvailable())) {
+    const availability = await checkSecureStoreAvailability();
+    if (availability.status === 'unavailable_web') {
       return null;
     }
-    return SecureStore.getItemAsync(key);
+    if (!availability.available) {
+      throw (
+        availability.error ||
+        new CookiePersistenceError({
+          message: 'Secure device storage is unavailable on this device.',
+          code: 'SECURE_STORE_UNAVAILABLE',
+          category: 'unavailable',
+          operation: 'read',
+          isTransient: false,
+        })
+      );
+    }
+
+    try {
+      const value = await runWithBoundedRetries(() =>
+        secureStoreImpl.getItemAsync(key)
+      );
+      if (lastPersistenceError && lastPersistenceError.operation === 'read') {
+        lastPersistenceError = null;
+      }
+      return value;
+    } catch (err) {
+      const persistenceErr = new CookiePersistenceError({
+        message: 'Unable to read authentication session from secure storage.',
+        code: 'SECURE_STORE_READ_FAILED',
+        category: 'persistence_failure',
+        operation: 'read',
+        isTransient: false,
+        cause: err,
+      });
+      recordRedactedPersistenceError(persistenceErr);
+      throw persistenceErr;
+    }
   },
   async setItem(key, value) {
-    if (!(await isNativeSecureStoreAvailable())) {
-      return;
+    const availability = await checkSecureStoreAvailability();
+    if (availability.status === 'unavailable_web') {
+      return { persisted: false, status: 'unavailable_web' };
     }
-    await SecureStore.setItemAsync(key, value, {
-      keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
-    });
+    if (!availability.available) {
+      throw (
+        availability.error ||
+        new CookiePersistenceError({
+          message: 'Secure device storage is unavailable on this device.',
+          code: 'SECURE_STORE_UNAVAILABLE',
+          category: 'unavailable',
+          operation: 'write',
+          isTransient: false,
+        })
+      );
+    }
+
+    const keychainAccessible =
+      (secureStoreImpl && secureStoreImpl.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY) ??
+      SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY;
+
+    try {
+      await runWithBoundedRetries(() =>
+        secureStoreImpl.setItemAsync(key, value, {
+          keychainAccessible,
+        })
+      );
+      lastPersistenceError = null;
+      return { persisted: true, status: 'persisted' };
+    } catch (err) {
+      const persistenceErr = new CookiePersistenceError({
+        message:
+          'Unable to securely store your authentication session on this device.',
+        code: 'SECURE_STORE_WRITE_FAILED',
+        category: 'persistence_failure',
+        operation: 'write',
+        isTransient: false,
+        cause: err,
+      });
+      recordRedactedPersistenceError(persistenceErr);
+      throw persistenceErr;
+    }
   },
   async removeItem(key) {
-    if (!(await isNativeSecureStoreAvailable())) {
-      return;
+    const availability = await checkSecureStoreAvailability();
+    if (availability.status === 'unavailable_web') {
+      return { removed: false, status: 'unavailable_web' };
     }
-    await SecureStore.deleteItemAsync(key);
+    if (!availability.available) {
+      throw (
+        availability.error ||
+        new CookiePersistenceError({
+          message: 'Secure device storage is unavailable on this device.',
+          code: 'SECURE_STORE_UNAVAILABLE',
+          category: 'unavailable',
+          operation: 'delete',
+          isTransient: false,
+        })
+      );
+    }
+
+    try {
+      await runWithBoundedRetries(() => secureStoreImpl.deleteItemAsync(key));
+      if (lastPersistenceError && lastPersistenceError.operation === 'delete') {
+        lastPersistenceError = null;
+      }
+      return { removed: true, status: 'deleted' };
+    } catch (err) {
+      const persistenceErr = new CookiePersistenceError({
+        message:
+          'Unable to remove authentication session from secure device storage.',
+        code: 'SECURE_STORE_DELETE_FAILED',
+        category: 'persistence_failure',
+        operation: 'delete',
+        isTransient: false,
+        cause: err,
+      });
+      recordRedactedPersistenceError(persistenceErr);
+      throw persistenceErr;
+    }
   },
 };
 
@@ -102,6 +387,17 @@ function getStorage() {
  */
 export function setCookieStorageAdapter(adapter) {
   customStorageAdapter = adapter;
+}
+
+/**
+ * Allows injecting a mock `expo-secure-store` module for deterministic verification tests.
+ *
+ * @param {object | null} mockStore
+ */
+export function setSecureStoreImplementation(mockStore) {
+  secureStoreImpl = mockStore || SecureStore;
+  secureStoreAvailability = null;
+  availabilityCheckPromise = null;
 }
 
 /**
@@ -341,24 +637,69 @@ function pruneExpiredCookies(nowMs = Date.now()) {
 
 /**
  * Persists the current in-memory cookie jar to SecureStore.
+ * Throws `CookiePersistenceError` if SecureStore is unavailable on native or
+ * if writing fails after bounded retries.
  */
 async function persistCookieJar() {
   pruneExpiredCookies();
-  try {
-    const storage = getStorage();
-    if (storage && typeof storage.setItem === 'function') {
-      await storage.setItem(
-        COOKIE_JAR_SECURE_STORE_KEY,
-        JSON.stringify(memoryCookieJar)
-      );
+  const storage = getStorage();
+  if (!storage || typeof storage.setItem !== 'function') {
+    if (isBrowserDomEnvironment()) {
+      return { persisted: false, status: 'unavailable_web' };
     }
-  } catch {
-    // Ignore storage persistence errors in restricted environments
+    const unavailableErr = new CookiePersistenceError({
+      message: 'Secure device storage is unavailable on this device.',
+      code: 'SECURE_STORE_UNAVAILABLE',
+      category: 'unavailable',
+      operation: 'write',
+      isTransient: false,
+    });
+    recordRedactedPersistenceError(unavailableErr);
+    throw unavailableErr;
+  }
+
+  try {
+    const result = await storage.setItem(
+      COOKIE_JAR_SECURE_STORE_KEY,
+      JSON.stringify(memoryCookieJar)
+    );
+    if (result && result.persisted === false && result.status !== 'unavailable_web') {
+      const writeErr = new CookiePersistenceError({
+        message:
+          'Unable to securely store your authentication session on this device.',
+        code: 'SECURE_STORE_WRITE_FAILED',
+        category: 'persistence_failure',
+        operation: 'write',
+        isTransient: false,
+      });
+      recordRedactedPersistenceError(writeErr);
+      throw writeErr;
+    }
+    return result || { persisted: true, status: 'persisted' };
+  } catch (err) {
+    const persistenceErr =
+      err instanceof CookiePersistenceError
+        ? err
+        : new CookiePersistenceError({
+            message:
+              'Unable to securely store your authentication session on this device.',
+            code: 'SECURE_STORE_WRITE_FAILED',
+            category: 'persistence_failure',
+            operation: 'write',
+            isTransient: false,
+            cause: err,
+          });
+    recordRedactedPersistenceError(persistenceErr);
+    throw persistenceErr;
   }
 }
 
 /**
  * Ensures the cookie jar has been hydrated from SecureStore before making requests.
+ *
+ * - Bounded availability/read retries prevent temporary failures from blocking startup.
+ * - On transient availability/read failures, leaves `isHydrated = false` so subsequent
+ *   operations can retry once SecureStore recovers, without crashing startup.
  */
 export async function ensureCookieJarHydrated() {
   if (isHydrated) {
@@ -372,24 +713,45 @@ export async function ensureCookieJarHydrated() {
   }
 
   hydrationPromise = (async () => {
+    let hydratedSuccessfully = false;
     try {
       const storage = getStorage();
       if (storage && typeof storage.getItem === 'function') {
         const raw = await storage.getItem(COOKIE_JAR_SECURE_STORE_KEY);
         if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            memoryCookieJar = {
-              ...parsed,
-              ...memoryCookieJar,
-            };
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              memoryCookieJar = {
+                ...parsed,
+                ...memoryCookieJar,
+              };
+            }
+          } catch {
+            // Corrupted JSON entry in storage: fall back to empty jar
           }
         }
+        hydratedSuccessfully = true;
+      } else if (isBrowserDomEnvironment()) {
+        hydratedSuccessfully = true;
       }
-    } catch {
-      // Ignore corrupted storage entries
+    } catch (err) {
+      const persistenceErr =
+        err instanceof CookiePersistenceError
+          ? err
+          : new CookiePersistenceError({
+              message: 'Unable to read authentication session from secure storage.',
+              code: 'SECURE_STORE_READ_FAILED',
+              category: 'persistence_failure',
+              operation: 'read',
+              isTransient: false,
+              cause: err,
+            });
+      recordRedactedPersistenceError(persistenceErr);
+      // Allow subsequent calls to re-attempt hydration after transient/unavailable errors
+      hydratedSuccessfully = false;
     } finally {
-      isHydrated = true;
+      isHydrated = hydratedSuccessfully;
       hydrationPromise = null;
       pruneExpiredCookies();
     }
@@ -482,6 +844,7 @@ export async function storeCookiesFromResponse(response, requestUrl = '') {
   const effectiveUrl =
     (response && typeof response.url === 'string' && response.url) || requestUrl || '';
   const nowMs = Date.now();
+  const previousJarSnapshot = { ...memoryCookieJar };
 
   setCookieHeaders.forEach((rawCookie) => {
     const parsed = parseSetCookieString(rawCookie, nowMs);
@@ -490,7 +853,12 @@ export async function storeCookiesFromResponse(response, requestUrl = '') {
     }
   });
 
-  await persistCookieJar();
+  try {
+    await persistCookieJar();
+  } catch (err) {
+    memoryCookieJar = previousJarSnapshot;
+    throw err;
+  }
 }
 
 /**
@@ -506,6 +874,7 @@ export async function setCsrfTokenCookie(csrfToken, requestUrl = '') {
   }
 
   await ensureCookieJarHydrated();
+  const previousJarSnapshot = { ...memoryCookieJar };
 
   const usesHostPrefix =
     Boolean(memoryCookieJar['__Host-qavora_auth_token']) ||
@@ -530,7 +899,12 @@ export async function setCsrfTokenCookie(csrfToken, requestUrl = '') {
     requestUrl
   );
 
-  await persistCookieJar();
+  try {
+    await persistCookieJar();
+  } catch (err) {
+    memoryCookieJar = previousJarSnapshot;
+    throw err;
+  }
 }
 
 /**
@@ -677,10 +1051,33 @@ export async function clearAllCookies() {
   try {
     const storage = getStorage();
     if (storage && typeof storage.removeItem === 'function') {
-      await storage.removeItem(COOKIE_JAR_SECURE_STORE_KEY);
+      const res = await storage.removeItem(COOKIE_JAR_SECURE_STORE_KEY);
+      return {
+        ok: true,
+        removed: Boolean(res ? res.removed !== false : true),
+        error: null,
+      };
     }
-  } catch {
-    // Ignore storage removal errors
+    return { ok: true, removed: false, error: null };
+  } catch (err) {
+    const persistenceErr =
+      err instanceof CookiePersistenceError
+        ? err
+        : new CookiePersistenceError({
+            message:
+              'Unable to remove authentication session from secure device storage.',
+            code: 'SECURE_STORE_DELETE_FAILED',
+            category: 'persistence_failure',
+            operation: 'delete',
+            isTransient: false,
+            cause: err,
+          });
+    recordRedactedPersistenceError(persistenceErr);
+    return {
+      ok: false,
+      removed: false,
+      error: persistenceErr,
+    };
   }
 }
 
@@ -691,6 +1088,9 @@ export function resetCookieMemoryStateForRestart() {
   memoryCookieJar = {};
   isHydrated = false;
   hydrationPromise = null;
+  secureStoreAvailability = null;
+  availabilityCheckPromise = null;
+  lastPersistenceError = null;
 }
 
 /**
@@ -702,14 +1102,23 @@ export function getRedactedCookieStatus() {
     storageBackend: 'expo-secure-store',
     storageKey: COOKIE_JAR_SECURE_STORE_KEY,
     isHydrated,
+    secureStoreAvailability:
+      secureStoreAvailability === true
+        ? 'available'
+        : secureStoreAvailability === false
+        ? 'unavailable_web'
+        : 'unconfirmed',
     hasAuthCookie: hasAuthCookie(),
     hasCsrfCookie: Boolean(getCsrfToken()),
     usesHostPrefix: hasHostPrefixedCookies(),
     cookieNames: Object.keys(memoryCookieJar),
+    lastPersistenceError,
   };
 }
 
 export const cookieManager = {
+  CookiePersistenceError,
+  checkSecureStoreAvailability,
   ensureHydrated: ensureCookieJarHydrated,
   storeCookiesFromResponse,
   setCsrfTokenCookie,
@@ -721,6 +1130,7 @@ export const cookieManager = {
   resetCookieMemoryStateForRestart,
   getRedactedCookieStatus,
   setCookieStorageAdapter,
+  setSecureStoreImplementation,
 };
 
 export default cookieManager;

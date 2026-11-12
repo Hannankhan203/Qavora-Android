@@ -22,7 +22,10 @@ import {
 } from 'react-native';
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useProjects } from '../context/ProjectContext';
-import { useWorkspace } from '../context/WorkspaceContext';
+import {
+  useWorkspace,
+  useWorkspaceBackOverlay,
+} from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
 import ProjectFormModal from './ProjectFormModal';
 import { computeProjectTestCaseCount } from '../services/projectService';
@@ -132,6 +135,20 @@ export default function ProjectDetailsScreen({
   const [statusUpdatingTo, setStatusUpdatingTo] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [actionError, setActionError] = useState(null);
+
+  useWorkspaceBackOverlay(() => {
+    if (isDeleteConfirmOpen) {
+      if (!isDeleting) {
+        setIsDeleteConfirmOpen(false);
+      }
+      return true;
+    }
+    if (isEditModalOpen) {
+      setIsEditModalOpen(false);
+      return true;
+    }
+    return false;
+  });
 
   const mutationLockRef = useRef(false);
 

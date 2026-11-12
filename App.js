@@ -181,6 +181,9 @@ function QavoraQAShell() {
     toast,
     showToast,
     dismissToast,
+    resetBlockedSwipeTouch,
+    isSwipeBlockedByChild,
+    handleActiveBackOverlay,
   } = useWorkspace();
 
   const { width: viewportWidth } = useWindowDimensions();
@@ -261,68 +264,59 @@ function QavoraQAShell() {
   const DRAWER_SWIPE_COMMIT_VX = 0.35;
   const VERTICAL_LOCK_DY = 10;
 
-  const isTouchInsideInputOrHorizontalScroll = useCallback((evt) => {
-    // 1. Check React Fiber hierarchy (works across React Native Android/iOS and Web)
-    let fiber = evt && evt._targetInst;
-    let fiberDepth = 0;
-    while (fiber && fiberDepth < 35) {
-      const props = fiber.memoizedProps;
-      if (props) {
-        if (props.horizontal === true) {
-          return true;
-        }
-        if (
-          typeof props.onChangeText === 'function' ||
-          (typeof props.placeholder === 'string' && props.editable !== false)
-        ) {
-          return true;
-        }
-      }
-      fiber = fiber.return;
-      fiberDepth += 1;
-    }
-
-    // 2. Fallback check for DOM targets (React Native Web preview)
-    const rawTarget =
-      (evt && evt.nativeEvent && evt.nativeEvent.target) || (evt && evt.target);
-    if (!rawTarget || typeof rawTarget !== 'object') {
-      return false;
-    }
-    let node = rawTarget;
-    let depth = 0;
-    while (node && depth < 15) {
-      const tagName =
-        typeof node.tagName === 'string' ? node.tagName.toUpperCase() : '';
-      if (
-        tagName === 'INPUT' ||
-        tagName === 'TEXTAREA' ||
-        node.isContentEditable
-      ) {
+  const isTouchInsideInputOrHorizontalScroll = useCallback(
+    (evt) => {
+      // 1. Check public-API child touch exclusion registered by horizontal ScrollViews
+      if (typeof isSwipeBlockedByChild === 'function' && isSwipeBlockedByChild()) {
         return true;
       }
-      if (
-        typeof node.scrollWidth === 'number' &&
-        typeof node.clientWidth === 'number' &&
-        node.scrollWidth > node.clientWidth + 2 &&
-        typeof window !== 'undefined' &&
-        typeof window.getComputedStyle === 'function'
-      ) {
-        const style = window.getComputedStyle(node);
+
+      // 2. Check standard Web DOM targets (React Native Web preview)
+      const rawTarget =
+        (evt && evt.nativeEvent && evt.nativeEvent.target) || (evt && evt.target);
+      if (!rawTarget || typeof rawTarget !== 'object') {
+        return false;
+      }
+      let node = rawTarget;
+      let depth = 0;
+      while (node && depth < 15) {
+        const tagName =
+          typeof node.tagName === 'string' ? node.tagName.toUpperCase() : '';
         if (
-          style &&
-          (style.overflowX === 'auto' || style.overflowX === 'scroll')
+          tagName === 'INPUT' ||
+          tagName === 'TEXTAREA' ||
+          node.isContentEditable
         ) {
           return true;
         }
+        if (
+          typeof node.scrollWidth === 'number' &&
+          typeof node.clientWidth === 'number' &&
+          node.scrollWidth > node.clientWidth + 2 &&
+          typeof window !== 'undefined' &&
+          typeof window.getComputedStyle === 'function'
+        ) {
+          const style = window.getComputedStyle(node);
+          if (
+            style &&
+            (style.overflowX === 'auto' || style.overflowX === 'scroll')
+          ) {
+            return true;
+          }
+        }
+        node = node.parentElement || node.parentNode;
+        depth += 1;
       }
-      node = node.parentElement || node.parentNode;
-      depth += 1;
-    }
-    return false;
-  }, []);
+      return false;
+    },
+    [isSwipeBlockedByChild]
+  );
 
   const handleTouchStartCapture = useCallback(
     (evt) => {
+      if (typeof resetBlockedSwipeTouch === 'function') {
+        resetBlockedSwipeTouch();
+      }
       const nativeEvent = evt && evt.nativeEvent;
       touchStartXRef.current =
         nativeEvent && typeof nativeEvent.pageX === 'number'
@@ -338,68 +332,88 @@ function QavoraQAShell() {
       // Never intercept touch-start so taps on buttons, cards, and inputs work normally
       return false;
     },
-    [isTouchInsideInputOrHorizontalScroll]
+    [resetBlockedSwipeTouch, isTouchInsideInputOrHorizontalScroll]
   );
 
-  const shouldCaptureDrawerSwipe = useCallback((evt, gestureState) => {
-    if (!gestureState) return false;
+  const shouldCaptureDrawerSwipe = useCallback(
+    (evt, gestureState) => {
+      if (!gestureState) return false;
 
-    const nativeEvent = evt && evt.nativeEvent;
-    const pageX =
-      nativeEvent && typeof nativeEvent.pageX === 'number'
-        ? nativeEvent.pageX
-        : null;
-    const pageY =
-      nativeEvent && typeof nativeEvent.pageY === 'number'
-        ? nativeEvent.pageY
-        : null;
+      if (
+        typeof isSwipeBlockedByChild === 'function' &&
+        isSwipeBlockedByChild()
+      ) {
+        return false;
+      }
 
-    const dx =
-      pageX !== null && typeof touchStartXRef.current === 'number'
-        ? pageX - touchStartXRef.current
-        : gestureState.dx;
-    const dy =
-      pageY !== null && typeof touchStartYRef.current === 'number'
-        ? pageY - touchStartYRef.current
-        : gestureState.dy;
+      const nativeEvent = evt && evt.nativeEvent;
+      const pageX =
+        nativeEvent && typeof nativeEvent.pageX === 'number'
+          ? nativeEvent.pageX
+          : null;
+      const pageY =
+        nativeEvent && typeof nativeEvent.pageY === 'number'
+          ? nativeEvent.pageY
+          : null;
 
-    const absDx = Math.abs(dx);
-    const absDy = Math.abs(dy);
+      const dx =
+        pageX !== null && typeof touchStartXRef.current === 'number'
+          ? pageX - touchStartXRef.current
+          : gestureState.dx;
+      const dy =
+        pageY !== null && typeof touchStartYRef.current === 'number'
+          ? pageY - touchStartYRef.current
+          : gestureState.dy;
 
-    // If vertical movement begins first, lock this gesture to vertical scrolling
-    if (absDy > VERTICAL_LOCK_DY && absDy > absDx) {
-      gestureLockedVerticalRef.current = true;
-      return false;
-    }
+      const absDx = Math.abs(dx);
+      const absDy = Math.abs(dy);
 
-    if (gestureLockedVerticalRef.current || gestureBlockedByTargetRef.current) {
-      return false;
-    }
+      // If vertical movement begins first, lock this gesture to vertical scrolling
+      if (absDy > VERTICAL_LOCK_DY && absDy > absDx) {
+        gestureLockedVerticalRef.current = true;
+        return false;
+      }
 
-    // Require clear horizontal dominance so vertical scrolling is never interrupted
-    if (absDx < DRAWER_SWIPE_CAPTURE_DX || absDx <= absDy * 1.75) {
-      return false;
-    }
+      if (gestureLockedVerticalRef.current || gestureBlockedByTargetRef.current) {
+        return false;
+      }
 
-    const startX =
-      typeof touchStartXRef.current === 'number'
-        ? touchStartXRef.current
-        : typeof gestureState.x0 === 'number' && gestureState.x0 > 0
-        ? gestureState.x0
-        : pageX !== null
-        ? pageX - dx
-        : 0;
+      // Require clear horizontal dominance so vertical scrolling is never interrupted
+      if (absDx < DRAWER_SWIPE_CAPTURE_DX || absDx <= absDy * 1.75) {
+        return false;
+      }
 
-    if (!isDrawerOpenRef.current) {
-      // Closed -> recognize intentional left-to-right swipes starting anywhere horizontally across workspaceBody
-      return dx >= DRAWER_SWIPE_CAPTURE_DX && absDy < 32;
-    }
+      const startX =
+        typeof touchStartXRef.current === 'number'
+          ? touchStartXRef.current
+          : typeof gestureState.x0 === 'number' && gestureState.x0 > 0
+          ? gestureState.x0
+          : pageX !== null
+          ? pageX - dx
+          : 0;
 
-    // Open -> only capture swipe-to-close when touch starts inside the drawer panel,
-    // so outside taps in the uncovered right 20% area are never intercepted
-    const currentDrawerWidth = drawerWidthRef.current || 288;
-    return startX <= currentDrawerWidth && dx <= -DRAWER_SWIPE_CAPTURE_DX;
-  }, []);
+      if (!isDrawerOpenRef.current) {
+        // Closed -> recognize intentional left-to-right swipes starting anywhere horizontally across workspaceBody
+        return dx >= DRAWER_SWIPE_CAPTURE_DX && absDy < 32;
+      }
+
+      // Open -> only capture swipe-to-close when touch starts inside the drawer panel,
+      // so outside taps in the uncovered right 20% area are never intercepted
+      const currentDrawerWidth = drawerWidthRef.current || 288;
+      return startX <= currentDrawerWidth && dx <= -DRAWER_SWIPE_CAPTURE_DX;
+    },
+    [isSwipeBlockedByChild]
+  );
+
+  const shouldCaptureMoveOnlyWhenDrawerOpen = useCallback(
+    (evt, gestureState) => {
+      if (!isDrawerOpenRef.current) {
+        return false;
+      }
+      return shouldCaptureDrawerSwipe(evt, gestureState);
+    },
+    [shouldCaptureDrawerSwipe]
+  );
 
   const drawerPanResponder = useMemo(
     () =>
@@ -407,7 +421,7 @@ function QavoraQAShell() {
         onStartShouldSetPanResponder: () => false,
         onStartShouldSetPanResponderCapture: handleTouchStartCapture,
         onMoveShouldSetPanResponder: shouldCaptureDrawerSwipe,
-        onMoveShouldSetPanResponderCapture: shouldCaptureDrawerSwipe,
+        onMoveShouldSetPanResponderCapture: shouldCaptureMoveOnlyWhenDrawerOpen,
         onPanResponderGrant: () => {
           gestureStartOpenRef.current = isDrawerOpenRef.current;
           if (!gestureStartOpenRef.current) {
@@ -475,7 +489,12 @@ function QavoraQAShell() {
         onPanResponderTerminationRequest: () => false,
         onShouldBlockNativeResponder: () => true,
       }),
-    [drawerAnim, handleTouchStartCapture, shouldCaptureDrawerSwipe]
+    [
+      drawerAnim,
+      handleTouchStartCapture,
+      shouldCaptureDrawerSwipe,
+      shouldCaptureMoveOnlyWhenDrawerOpen,
+    ]
   );
 
   const toggleDrawer = useCallback(() => {
@@ -583,33 +602,47 @@ function QavoraQAShell() {
     }
 
     // 0. Open Global Navigation Drawer -> close drawer first
-    if (isDrawerOpen) {
+    if (isDrawerOpenRef.current || isDrawerOpen) {
       closeDrawer();
       return true;
     }
 
-    // 1. Nested Create Checklist Modal inside Checklists -> return to My QA Checklist / Runner
-    if (isChecklistsActive && checklistCreateModalOpen) {
-      setChecklistCreateModalOpen(false);
+    // 0b. Locally opened modal / overlay on the currently mounted active screen -> dismiss before navigating away
+    if (
+      typeof handleActiveBackOverlay === 'function' &&
+      handleActiveBackOverlay()
+    ) {
       return true;
     }
 
-    // 2. Nested QA Test Runner (activeChecklistId) -> return to My QA Checklist library
-    if (isChecklistsActive && activeChecklistId) {
-      setActiveChecklistId(null);
-      return true;
-    }
-
-    // 3. Top-level Checklists view -> return to Workspace Overview (if project selected) or My Projects
-    if (effectiveViewMode === 'checklists') {
-      if (selectedProject) {
-        setProjectViewMode('workspace');
-        setDashboardSubTab('overview');
-      } else {
-        setProjectViewMode('selection');
-        setDashboardSubTab('overview');
+    // 1–3. Active Checklists flow (strictly scoped to Checklists destination)
+    if (isChecklistsActive) {
+      if (checklistCreateModalOpen) {
+        setChecklistCreateModalOpen(false);
+        return true;
       }
-      return true;
+      if (activeChecklistId) {
+        setActiveChecklistId(null);
+        return true;
+      }
+      if (effectiveViewMode === 'checklists') {
+        if (selectedProject) {
+          setProjectViewMode('workspace');
+          setDashboardSubTab('overview');
+        } else {
+          setProjectViewMode('selection');
+          setDashboardSubTab('overview');
+        }
+        return true;
+      }
+      if (
+        effectiveViewMode === 'workspace' &&
+        activeTab === 'dashboard' &&
+        dashboardSubTab === 'checklists'
+      ) {
+        setDashboardSubTab('overview');
+        return true;
+      }
     }
 
     // 4. Project Details view -> return to Workspace (if project selected) or My Projects
@@ -622,42 +655,46 @@ function QavoraQAShell() {
       return true;
     }
 
-    // 5. My Projects selection view (when a project is already active) -> return to Workspace
-    if (effectiveViewMode === 'selection' && selectedProject) {
-      setProjectViewMode('workspace');
-      return true;
+    // 5. My Projects selection view -> return to Workspace if a project is active; otherwise allow system back exit
+    if (effectiveViewMode === 'selection') {
+      if (selectedProject) {
+        setProjectViewMode('workspace');
+        return true;
+      }
+      return false;
     }
 
-    // 6. Step-by-Step Test Execution Runner Modal inside Test Runs -> close modal back to Test Runs
-    if (
-      effectiveViewMode === 'workspace' &&
-      activeTab === 'testruns' &&
-      executingTestCaseId
-    ) {
+    // Only handle workspace-tab modals and sub-views when workspace is actively visible
+    if (effectiveViewMode !== 'workspace') {
+      return false;
+    }
+
+    // 6. Step-by-Step Test Execution Runner Modal inside active Test Runs tab -> close modal back to Test Runs
+    if (activeTab === 'testruns' && selectedProject && executingTestCaseId) {
       setExecutingTestCaseId(null);
       return true;
     }
 
-    // 7. Open Test Case Detail Modal -> close modal
-    if (selectedTestCaseId) {
+    // 7. Open Test Case Detail Modal inside active Test Cases tab -> close modal
+    if (activeTab === 'testcases' && selectedProject && selectedTestCaseId) {
       setSelectedTestCaseId(null);
       return true;
     }
 
-    // 8. Open Defect Detail Modal -> close modal
-    if (selectedDefectId) {
+    // 8. Open Defect Detail Modal inside active Defects tab -> close modal
+    if (activeTab === 'defects' && selectedProject && selectedDefectId) {
       setSelectedDefectId(null);
       return true;
     }
 
-    // 9. Data Management dedicated screen -> return to Settings screen first (whether or not a project is active)
+    // 9. Data Management dedicated screen inside active Profile tab -> return to Settings screen first
     if (activeTab === 'profile' && profileSubView === 'data') {
       setProfileSubView('settings');
       return true;
     }
 
     // 10. Workspace view without a selected project (e.g. Settings when no project is active) -> return to My Projects
-    if (!selectedProject && effectiveViewMode === 'workspace') {
+    if (!selectedProject) {
       setProfileSubView('all');
       setProjectViewMode('selection');
       return true;
@@ -715,6 +752,7 @@ function QavoraQAShell() {
     profileSubView,
     isDrawerOpen,
     closeDrawer,
+    handleActiveBackOverlay,
     setChecklistCreateModalOpen,
     setActiveChecklistId,
     setProjectViewMode,
@@ -923,14 +961,17 @@ function QavoraQAShell() {
     [closeDrawer]
   );
 
-  // Android Hardware Back Navigation Handler
+  // Single stable Android Hardware Back Navigation listener (no duplicate listeners on state updates)
+  const handleNavigateBackRef = useRef(handleNavigateBack);
+  handleNavigateBackRef.current = handleNavigateBack;
+
   useEffect(() => {
     const subscription = BackHandler.addEventListener(
       'hardwareBackPress',
-      handleNavigateBack
+      () => handleNavigateBackRef.current()
     );
     return () => subscription.remove();
-  }, [handleNavigateBack]);
+  }, []);
 
   const headerSubtitle = !selectedProject
     ? isChecklistsActive

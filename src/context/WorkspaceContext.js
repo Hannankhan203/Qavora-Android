@@ -253,6 +253,47 @@ export function WorkspaceProvider({ children }) {
     setNavigationHistory([]);
   }, []);
 
+  // Public-API touch exclusion tracker so horizontal ScrollViews prevent drawer swipe interception without Fiber inspection
+  const blockedSwipeTouchRef = useRef(false);
+  const notifyBlockedSwipeTouchStart = useCallback(() => {
+    blockedSwipeTouchRef.current = true;
+  }, []);
+  const resetBlockedSwipeTouch = useCallback(() => {
+    blockedSwipeTouchRef.current = false;
+  }, []);
+  const isSwipeBlockedByChild = useCallback(
+    () => blockedSwipeTouchRef.current,
+    []
+  );
+
+  // Centralized LIFO registry for active local screen modals/overlays on hardware Back
+  const backOverlayEntriesRef = useRef([]);
+  const registerBackOverlayHandler = useCallback((id, handleFn) => {
+    if (!id || typeof handleFn !== 'function') {
+      return () => {};
+    }
+    backOverlayEntriesRef.current = backOverlayEntriesRef.current.filter(
+      (entry) => entry.id !== id
+    );
+    backOverlayEntriesRef.current.push({ id, handle: handleFn });
+    return () => {
+      backOverlayEntriesRef.current = backOverlayEntriesRef.current.filter(
+        (entry) => entry.id !== id
+      );
+    };
+  }, []);
+
+  const handleActiveBackOverlay = useCallback(() => {
+    const entries = backOverlayEntriesRef.current;
+    for (let i = entries.length - 1; i >= 0; i -= 1) {
+      const entry = entries[i];
+      if (entry && typeof entry.handle === 'function' && entry.handle() === true) {
+        return true;
+      }
+    }
+    return false;
+  }, []);
+
   // Cross-module prefill state for creating a defect directly from a failed test case execution
   const [draftDefectFromExecution, setDraftDefectFromExecution] = useState(null);
 
@@ -3780,6 +3821,11 @@ export function WorkspaceProvider({ children }) {
     toast,
     showToast,
     dismissToast: () => setToast(null),
+    notifyBlockedSwipeTouchStart,
+    resetBlockedSwipeTouch,
+    isSwipeBlockedByChild,
+    registerBackOverlayHandler,
+    handleActiveBackOverlay,
   };
 
   return React.createElement(
@@ -3795,4 +3841,33 @@ export function useWorkspace() {
     throw new Error('useWorkspace must be used within a WorkspaceProvider');
   }
   return context;
+}
+
+let backOverlaySeq = 0;
+
+/**
+ * Registers a local modal/overlay hardware-back dismissal handler for the currently
+ * mounted screen and automatically cleans up on unmount so hidden/inactive tabs
+ * never intercept Android back presses.
+ *
+ * @param {() => boolean} handlerFn - Should return true if a local modal/overlay handled Back.
+ */
+export function useWorkspaceBackOverlay(handlerFn) {
+  const { registerBackOverlayHandler } = useWorkspace();
+  const handlerRef = useRef(handlerFn);
+  handlerRef.current = handlerFn;
+  const idRef = useRef(null);
+  if (!idRef.current) {
+    backOverlaySeq += 1;
+    idRef.current = `workspace-back-overlay-${backOverlaySeq}`;
+  }
+
+  useEffect(() => {
+    return registerBackOverlayHandler(idRef.current, () => {
+      if (typeof handlerRef.current === 'function') {
+        return handlerRef.current() === true;
+      }
+      return false;
+    });
+  }, [registerBackOverlayHandler]);
 }

@@ -9,7 +9,10 @@ import {
   Keyboard,
 } from 'react-native';
 import { useTheme, monoFontFamily } from '../theme/theme';
-import { useWorkspace } from '../context/WorkspaceContext';
+import {
+  useWorkspace,
+  useWorkspaceBackOverlay,
+} from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
 import styles from './testCases/testCasesStyles';
 import TestCaseDetailModal from './testCases/TestCaseDetailModal';
@@ -57,6 +60,7 @@ export default function TestCasesScreen({
     moveTestCaseToSuite,
     deleteTestCase,
     showToast,
+    notifyBlockedSwipeTouchStart,
   } = useWorkspace();
 
   // Top-level Phase 2C sub-navigation: 'cases' | 'suites' | 'plan' (Synchronized with centralized navigation state)
@@ -168,6 +172,42 @@ export default function TestCasesScreen({
   const [isSubmittingPhase, setIsSubmittingPhase] = useState(false);
   const [deletingPhase, setDeletingPhase] = useState(null);
   const [isDeletingPhase, setIsDeletingPhase] = useState(false);
+
+  useWorkspaceBackOverlay(() => {
+    if (deletingCase) {
+      if (!isDeletingCase) setDeletingCase(null);
+      return true;
+    }
+    if (movingCase) {
+      if (!isMovingCase) setMovingCase(null);
+      return true;
+    }
+    if (isFormModalOpen) {
+      if (!isSubmittingCase) setIsFormModalOpen(false);
+      return true;
+    }
+    if (deletingSuite) {
+      if (!isDeletingSuite) setDeletingSuite(null);
+      return true;
+    }
+    if (isSuiteModalOpen) {
+      if (!isSubmittingSuite) setIsSuiteModalOpen(false);
+      return true;
+    }
+    if (deletingPhase) {
+      if (!isDeletingPhase) setDeletingPhase(null);
+      return true;
+    }
+    if (isPhaseModalOpen) {
+      if (!isSubmittingPhase) setIsPhaseModalOpen(false);
+      return true;
+    }
+    if (isPlanModalOpen) {
+      if (!isSubmittingPlan) setIsPlanModalOpen(false);
+      return true;
+    }
+    return false;
+  });
 
   // Refs for form keyboard UX & auto-scroll
   const caseFormScrollRef = useRef(null);
@@ -1008,6 +1048,7 @@ export default function TestCasesScreen({
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              onTouchStart={notifyBlockedSwipeTouchStart}
               contentContainerStyle={styles.suiteScrollContent}
             >
               <Pressable
@@ -1099,6 +1140,7 @@ export default function TestCasesScreen({
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              onTouchStart={notifyBlockedSwipeTouchStart}
               contentContainerStyle={styles.filterRowContent}
             >
               {['all', ...priorities].map((p) => {

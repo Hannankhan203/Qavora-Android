@@ -10,7 +10,10 @@ import {
 } from 'react-native';
 import VectorIcon from './VectorIcon';
 import { useTheme, monoFontFamily } from '../theme/theme';
-import { useWorkspace } from '../context/WorkspaceContext';
+import {
+  useWorkspace,
+  useWorkspaceBackOverlay,
+} from '../context/WorkspaceContext';
 import {
   DEFECT_SEVERITIES,
   DEFECT_PRIORITIES,
@@ -52,6 +55,7 @@ export default function DefectsScreen() {
     projectDataConflict: workspaceConflict,
     clearProjectDataError: clearWorkspaceError,
     reloadProjectDataFromBackend: reloadCurrentProject,
+    notifyBlockedSwipeTouchStart,
   } = useWorkspace();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -86,6 +90,18 @@ export default function DefectsScreen() {
   // Delete confirmation modal state
   const [defectPendingDelete, setDefectPendingDelete] = useState(null);
   const [isDeletingDefect, setIsDeletingDefect] = useState(false);
+
+  useWorkspaceBackOverlay(() => {
+    if (defectPendingDelete) {
+      if (!isDeletingDefect) setDefectPendingDelete(null);
+      return true;
+    }
+    if (formModalVisible) {
+      if (!isSubmittingDefect) setFormModalVisible(false);
+      return true;
+    }
+    return false;
+  });
 
   // Status update in detail modal
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
@@ -769,6 +785,7 @@ export default function DefectsScreen() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          onTouchStart={notifyBlockedSwipeTouchStart}
           contentContainerStyle={styles.filterRow}
         >
           {['All', ...DEFECT_STATUSES].map((st) => {
@@ -810,6 +827,7 @@ export default function DefectsScreen() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          onTouchStart={notifyBlockedSwipeTouchStart}
           contentContainerStyle={[styles.filterRow, { marginTop: 6 }]}
         >
           {['All', ...DEFECT_SEVERITIES].map((sev) => {

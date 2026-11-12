@@ -6,11 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/qavora-icon-512.png",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/qavora-icon-512.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#181C28"
-    },
     "ios": {
       "supportsTablet": true
     },
@@ -29,7 +24,16 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/qavora-icon-512.png",
+          "backgroundColor": "#181C28",
+          "resizeMode": "contain",
+          "imageWidth": 200
+        }
+      ]
     ],
     "extra": {
       "eas": {

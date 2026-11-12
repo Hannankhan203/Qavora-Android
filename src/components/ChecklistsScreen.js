@@ -13,7 +13,10 @@ import {
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useAuth } from '../context/AuthContext';
 import { useProjects } from '../context/ProjectContext';
-import { useWorkspace } from '../context/WorkspaceContext';
+import {
+  useWorkspace,
+  useWorkspaceBackOverlay,
+} from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
 import styles from './checklists/checklistsStyles';
 import ChecklistEditItemModal from './checklists/ChecklistEditItemModal';
@@ -87,6 +90,7 @@ export default function ChecklistsScreen({
     setChecklistCreateModalOpen: setContextCreateModalOpen,
     checklistCreateTemplateId: contextCreateTemplateId,
     setChecklistCreateTemplateId: setContextCreateTemplateId,
+    notifyBlockedSwipeTouchStart,
   } = useWorkspace();
 
   const currentUserId = useMemo(
@@ -215,6 +219,26 @@ export default function ChecklistsScreen({
   const [promoteProgressText, setPromoteProgressText] = useState('');
   const [promoteError, setPromoteError] = useState(null);
   const [promoteSuccessResult, setPromoteSuccessResult] = useState(null);
+
+  useWorkspaceBackOverlay(() => {
+    if (deleteTargetChecklist) {
+      if (!busyMutation) setDeleteTargetChecklist(null);
+      return true;
+    }
+    if (promoteModalVisible) {
+      if (!isPromoting) setPromoteModalVisible(false);
+      return true;
+    }
+    if (editingItem) {
+      if (!busyMutation) setEditingItem(null);
+      return true;
+    }
+    if (formModalVisible) {
+      if (!busyMutation) setFormModalVisible(false);
+      return true;
+    }
+    return false;
+  });
 
   const loadGenerationRef = useRef(0);
   const mutationLockRef = useRef(false);
@@ -2865,6 +2889,7 @@ export default function ChecklistsScreen({
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
+            onTouchStart={notifyBlockedSwipeTouchStart}
             contentContainerStyle={[
               styles.horizontalPillsRow,
               { marginTop: 10 },
@@ -2913,6 +2938,7 @@ export default function ChecklistsScreen({
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
+            onTouchStart={notifyBlockedSwipeTouchStart}
             contentContainerStyle={[styles.horizontalPillsRow, { marginTop: 8 }]}
           >
             {['All', ...CHECKLIST_CATEGORIES].map((cat) => {

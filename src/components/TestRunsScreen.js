@@ -12,6 +12,7 @@ import VectorIcon from './VectorIcon';
 import { useTheme, monoFontFamily } from '../theme/theme';
 import {
   useWorkspace,
+  useWorkspaceBackOverlay,
   computeRunMetrics,
   toWebExecutionOutcome,
 } from '../context/WorkspaceContext';
@@ -61,6 +62,7 @@ export default function TestRunsScreen({
     projectDataConflict: workspaceConflict,
     clearProjectDataError: clearWorkspaceError,
     reloadProjectDataFromBackend: reloadCurrentProject,
+    notifyBlockedSwipeTouchStart,
   } = useWorkspace();
 
   // Top-level mode: 'runs' | 'history' (Synchronized with centralized navigation state)
@@ -147,6 +149,18 @@ export default function TestRunsScreen({
 
   // Run status mutation state
   const [isTogglingRunStatus, setIsTogglingRunStatus] = useState(false);
+
+  useWorkspaceBackOverlay(() => {
+    if (runPendingDelete) {
+      if (!isDeletingRun) setRunPendingDelete(null);
+      return true;
+    }
+    if (runModalVisible) {
+      if (!isSubmittingRun) setRunModalVisible(false);
+      return true;
+    }
+    return false;
+  });
 
   // Refs for form keyboard UX & auto-scroll
   const execRunnerScrollRef = useRef(null);
@@ -952,6 +966,7 @@ export default function TestRunsScreen({
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              onTouchStart={notifyBlockedSwipeTouchStart}
               contentContainerStyle={styles.runListScroll}
             >
               {testRuns.map((run) => {
@@ -1427,6 +1442,7 @@ export default function TestRunsScreen({
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
+                  onTouchStart={notifyBlockedSwipeTouchStart}
                   contentContainerStyle={styles.filterTabsScroll}
                 >
                   {RUN_RESULT_FILTERS.map((f) => {
@@ -1982,6 +1998,7 @@ export default function TestRunsScreen({
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              onTouchStart={notifyBlockedSwipeTouchStart}
               contentContainerStyle={styles.filterTabsScroll}
             >
               {HISTORY_OUTCOME_FILTERS.map((outcome) => {

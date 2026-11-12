@@ -32,7 +32,10 @@ import {
 import { useTheme, monoFontFamily } from '../theme/theme.js';
 import { useAuth } from '../context/AuthContext.js';
 import { useProjects } from '../context/ProjectContext.js';
-import { useWorkspace } from '../context/WorkspaceContext.js';
+import {
+  useWorkspace,
+  useWorkspaceBackOverlay,
+} from '../context/WorkspaceContext.js';
 import {
   exportProjectAsJSON,
   exportFullBackup,
@@ -127,6 +130,22 @@ export default function DataManagementSection() {
   const [confirmActionModal, setConfirmActionModal] = useState(null);
   const [isExecutingConfirmAction, setIsExecutingConfirmAction] =
     useState(false);
+
+  useWorkspaceBackOverlay(() => {
+    if (confirmActionModal) {
+      if (!isExecutingConfirmAction) setConfirmActionModal(null);
+      return true;
+    }
+    if (importPreview) {
+      if (!isImporting) setImportPreview(null);
+      return true;
+    }
+    if (exportPreview) {
+      setExportPreview(null);
+      return true;
+    }
+    return false;
+  });
 
   // Sync busy indicator
   const [isManualSyncing, setIsManualSyncing] = useState(false);
