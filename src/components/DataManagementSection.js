@@ -995,6 +995,15 @@ export default function DataManagementSection() {
           <Pressable
             onPress={handleManualSyncNow}
             disabled={isOffline || isManualSyncing}
+            accessibilityRole="button"
+            accessibilityState={{
+              disabled: Boolean(isOffline || isManualSyncing),
+            }}
+            accessibilityLabel={
+              isManualSyncing
+                ? 'Synchronizing queue'
+                : `Sync queue now, ${syncStatus.totalQueued} queued`
+            }
             style={[
               styles.primaryBtn,
               {
@@ -1028,6 +1037,12 @@ export default function DataManagementSection() {
 
           <Pressable
             onPress={handleToggleOfflineSimulation}
+            accessibilityRole="button"
+            accessibilityLabel={
+              isOffline
+                ? 'Reconnect and sync online'
+                : 'Simulate offline mode'
+            }
             style={[
               styles.secondaryBtn,
               {
@@ -1058,6 +1073,8 @@ export default function DataManagementSection() {
           {syncStatus.failedCount > 0 ? (
             <Pressable
               onPress={() => retryAllFailedOperations()}
+              accessibilityRole="button"
+              accessibilityLabel={`Retry all ${syncStatus.failedCount} failed sync operations`}
               style={[
                 styles.secondaryBtn,
                 {
@@ -1112,6 +1129,10 @@ export default function DataManagementSection() {
             <View style={styles.conflictActionsRow}>
               <Pressable
                 onPress={() => handleResolveConflict(op.id, 'merge')}
+                accessibilityRole="button"
+                accessibilityLabel={`Merge and save local changes for ${
+                  op.description || op.entityType
+                }`}
                 style={[
                   styles.smallActionBtn,
                   { backgroundColor: colors.primary, borderColor: colors.primary },
@@ -1128,6 +1149,10 @@ export default function DataManagementSection() {
               </Pressable>
               <Pressable
                 onPress={() => handleResolveConflict(op.id, 'keep_server')}
+                accessibilityRole="button"
+                accessibilityLabel={`Accept server version for ${
+                  op.description || op.entityType
+                }`}
                 style={[
                   styles.smallActionBtn,
                   {
@@ -1186,6 +1211,10 @@ export default function DataManagementSection() {
                   {op.status !== 'conflict' ? (
                     <Pressable
                       onPress={() => retrySyncOperation(op.id)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Sync operation ${
+                        op.description || op.entityType
+                      }`}
                       style={[
                         styles.tinyBtn,
                         {
@@ -1203,6 +1232,10 @@ export default function DataManagementSection() {
                   ) : null}
                   <Pressable
                     onPress={() => discardSyncOperation(op.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Discard queued operation ${
+                      op.description || op.entityType
+                    }`}
                     style={[
                       styles.tinyBtn,
                       {
@@ -1248,6 +1281,13 @@ export default function DataManagementSection() {
           <Pressable
             onPress={loadStorageAndSnapshots}
             disabled={loadingStorage}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: Boolean(loadingStorage) }}
+            accessibilityLabel={
+              loadingStorage
+                ? 'Loading storage statistics'
+                : 'Refresh storage statistics'
+            }
             style={[
               styles.tinyBtn,
               {
@@ -1372,6 +1412,9 @@ export default function DataManagementSection() {
           <Pressable
             onPress={handleExportFullBackupJSON}
             disabled={isExporting}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: Boolean(isExporting) }}
+            accessibilityLabel="Export Full Backup as JSON"
             style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
           >
             <VectorIcon name="layers" size={15} color={colors.textOnPrimary} />
@@ -1385,6 +1428,11 @@ export default function DataManagementSection() {
           <Pressable
             onPress={handleExportSingleProjectJSON}
             disabled={isExporting || !selectedProject}
+            accessibilityRole="button"
+            accessibilityState={{
+              disabled: Boolean(isExporting || !selectedProject),
+            }}
+            accessibilityLabel="Export Active Project as JSON"
             style={[
               styles.secondaryBtn,
               {
@@ -1405,6 +1453,9 @@ export default function DataManagementSection() {
           <Pressable
             onPress={() => handleExportCSV('testcases')}
             disabled={isExporting}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: Boolean(isExporting) }}
+            accessibilityLabel="Export Test Cases as CSV"
             style={[
               styles.secondaryBtn,
               {
@@ -1421,6 +1472,9 @@ export default function DataManagementSection() {
           <Pressable
             onPress={() => handleExportCSV('executions')}
             disabled={isExporting}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: Boolean(isExporting) }}
+            accessibilityLabel="Export Executions as CSV"
             style={[
               styles.secondaryBtn,
               {
@@ -1437,6 +1491,9 @@ export default function DataManagementSection() {
           <Pressable
             onPress={() => handleExportCSV('defects')}
             disabled={isExporting}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: Boolean(isExporting) }}
+            accessibilityLabel="Export Defects as CSV"
             style={[
               styles.secondaryBtn,
               {
@@ -1477,6 +1534,8 @@ export default function DataManagementSection() {
           </View>
           <Pressable
             onPress={handleLoadSampleBackupIntoEditor}
+            accessibilityRole="button"
+            accessibilityLabel="Load current backup JSON into editor"
             style={[
               styles.tinyBtn,
               {
@@ -1502,6 +1561,15 @@ export default function DataManagementSection() {
           <Pressable
             onPress={handlePickBackupFile}
             disabled={isPickingFile || isImporting}
+            accessibilityRole="button"
+            accessibilityState={{
+              disabled: Boolean(isPickingFile || isImporting),
+            }}
+            accessibilityLabel={
+              isPickingFile
+                ? 'Reading backup file'
+                : 'Select backup JSON file from device storage'
+            }
             style={[
               styles.primaryBtn,
               {
@@ -1605,6 +1673,9 @@ export default function DataManagementSection() {
           <Pressable
             onPress={handleValidateAndPreviewImport}
             disabled={!importJsonText.trim()}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !importJsonText.trim() }}
+            accessibilityLabel="Validate and preview JSON import"
             style={[
               styles.primaryBtn,
               {
@@ -1629,6 +1700,8 @@ export default function DataManagementSection() {
                 setSelectedBackupFileMeta(null);
                 setImportValidationError(null);
               }}
+              accessibilityRole="button"
+              accessibilityLabel="Clear backup import input"
               style={[
                 styles.secondaryBtn,
                 {
@@ -1713,6 +1786,8 @@ export default function DataManagementSection() {
                       description: `This will restore ${serverSnapshot.projectsCount} project(s) from snapshot "${serverSnapshot.snapshotId}" (${serverSnapshot.createdAt}) and overwrite current cloud workspace changes.`,
                     })
                   }
+                  accessibilityRole="button"
+                  accessibilityLabel="Rollback workspace to server snapshot"
                   style={[
                     styles.smallActionBtn,
                     {
@@ -1732,6 +1807,8 @@ export default function DataManagementSection() {
                 </Pressable>
                 <Pressable
                   onPress={handleDeleteServerSnapshot}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear server recovery snapshot"
                   style={[
                     styles.smallActionBtn,
                     {
@@ -1848,6 +1925,8 @@ export default function DataManagementSection() {
                         description: `Safe Merge will restore ${snap.projectsCount} project(s) from ${snap.createdAt} without deleting your existing projects.`,
                       })
                     }
+                    accessibilityRole="button"
+                    accessibilityLabel={`Merge local snapshot ${snap.label}`}
                     style={[
                       styles.tinyBtn,
                       {
@@ -1872,6 +1951,8 @@ export default function DataManagementSection() {
                         description: `Destructive Replace will overwrite your workspace with the ${snap.projectsCount} project(s) captured on ${snap.createdAt}.`,
                       })
                     }
+                    accessibilityRole="button"
+                    accessibilityLabel={`Replace workspace with local snapshot ${snap.label}`}
                     style={[
                       styles.tinyBtn,
                       {
@@ -1888,6 +1969,8 @@ export default function DataManagementSection() {
                   </Pressable>
                   <Pressable
                     onPress={() => handleDeleteLocalSnapshot(snap.snapshotId)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Delete local snapshot ${snap.label}`}
                     style={[
                       styles.tinyBtn,
                       {
@@ -2010,6 +2093,17 @@ export default function DataManagementSection() {
                 description: `Replace current active project data (${testCases.length} cases, ${testRuns.length} runs, ${defects.length} defects) with the default Qavora sample dataset (${samplePreview?.suitesCount || 4} suites, ${samplePreview?.testCasesCount || 8} cases, ${samplePreview?.testRunsCount || 3} runs, ${samplePreview?.defectsCount || 3} defects).`,
               })
             }
+            accessibilityRole="button"
+            accessibilityState={{
+              disabled: Boolean(
+                isRestoringSampleData || isClearingWorkspaceData
+              ),
+            }}
+            accessibilityLabel={
+              isRestoringSampleData
+                ? 'Restoring sample QA dataset'
+                : 'Restore Sample QA Dataset'
+            }
             style={[
               styles.secondaryBtn,
               {
@@ -2036,6 +2130,17 @@ export default function DataManagementSection() {
                 title: 'Clear Active Project Dataset?',
                 description: `Permanently delete ${suites.length} suites, ${testCases.length} test cases, ${testRuns.length} test runs, ${executions.length} execution records, and ${defects.length} defects in "${selectedProject?.name || profile?.projectName || 'Active Project'}".`,
               })
+            }
+            accessibilityRole="button"
+            accessibilityState={{
+              disabled: Boolean(
+                isRestoringSampleData || isClearingWorkspaceData
+              ),
+            }}
+            accessibilityLabel={
+              isClearingWorkspaceData
+                ? 'Clearing active project dataset'
+                : 'Clear Active Project Dataset'
             }
             style={[
               styles.dangerBtn,
@@ -2096,6 +2201,8 @@ export default function DataManagementSection() {
                   'This will permanently delete all projects, test plans, suites, test cases, executions, and defects for your account on the server.',
               })
             }
+            accessibilityRole="button"
+            accessibilityLabel="Reset all cloud and local workspace data"
             style={[
               styles.dangerBtn,
               {

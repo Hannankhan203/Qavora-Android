@@ -254,6 +254,9 @@ export default function ProjectSelectionScreen({
               <Pressable
                 onPress={logout}
                 disabled={isAuthBusy}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isAuthBusy) }}
+                accessibilityLabel={isAuthBusy ? 'Signing out' : 'Sign out'}
                 style={[
                   styles.signOutMiniBtn,
                   {
@@ -274,6 +277,8 @@ export default function ProjectSelectionScreen({
           <View style={styles.heroActionsRow}>
             <Pressable
               onPress={openCreateProjectModal}
+              accessibilityRole="button"
+              accessibilityLabel="Create new project"
               style={[
                 styles.primaryActionBtn,
                 { backgroundColor: colors.primary },
@@ -293,6 +298,13 @@ export default function ProjectSelectionScreen({
             <Pressable
               onPress={handleRetryLoad}
               disabled={isLoading || isRefreshing}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: Boolean(isLoading || isRefreshing) }}
+              accessibilityLabel={
+                isLoading || isRefreshing
+                  ? 'Refreshing projects list'
+                  : 'Refresh projects list'
+              }
               style={[
                 styles.secondaryActionBtn,
                 {
@@ -312,6 +324,8 @@ export default function ProjectSelectionScreen({
             {typeof openChecklistsView === 'function' ? (
               <Pressable
                 onPress={openChecklistsView}
+                accessibilityRole="button"
+                accessibilityLabel="Open QA Checklists"
                 style={[
                   styles.secondaryActionBtn,
                   {
@@ -332,6 +346,8 @@ export default function ProjectSelectionScreen({
             {typeof openDataManagementView === 'function' ? (
               <Pressable
                 onPress={openDataManagementView}
+                accessibilityRole="button"
+                accessibilityLabel="Open Profile and Backup"
                 style={[
                   styles.secondaryActionBtn,
                   {
@@ -352,6 +368,8 @@ export default function ProjectSelectionScreen({
             {selectedProject && typeof onOpenWorkspace === 'function' ? (
               <Pressable
                 onPress={() => onOpenWorkspace(selectedProject)}
+                accessibilityRole="button"
+                accessibilityLabel="Back to active project workspace"
                 style={[
                   styles.secondaryActionBtn,
                   {
@@ -434,6 +452,8 @@ export default function ProjectSelectionScreen({
               {typeof onOpenWorkspace === 'function' ? (
                 <Pressable
                   onPress={() => onOpenWorkspace(selectedProject)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open workspace for ${selectedProject.name}`}
                   style={[
                     styles.activeBannerPrimaryBtn,
                     { backgroundColor: colors.primary },
@@ -458,6 +478,8 @@ export default function ProjectSelectionScreen({
               {typeof onOpenProjectDetails === 'function' ? (
                 <Pressable
                   onPress={() => onOpenProjectDetails(selectedProject)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View project details for ${selectedProject.name}`}
                   style={[
                     styles.activeBannerSecondaryBtn,
                     {
@@ -580,6 +602,8 @@ export default function ProjectSelectionScreen({
             </Text>
             <Pressable
               onPress={handleRetryLoad}
+              accessibilityRole="button"
+              accessibilityLabel="Retry loading projects"
               style={[styles.retryBtn, { backgroundColor: colors.danger }]}
             >
               <VectorIcon name="refresh" size={15} color="#FFFFFF" />
@@ -635,6 +659,8 @@ export default function ProjectSelectionScreen({
             </Text>
             <Pressable
               onPress={openCreateProjectModal}
+              accessibilityRole="button"
+              accessibilityLabel="Create your first project"
               style={[
                 styles.emptyCreateBtn,
                 { backgroundColor: colors.primary },
@@ -663,6 +689,8 @@ export default function ProjectSelectionScreen({
               {typeof openDataManagementView === 'function' ? (
                 <Pressable
                   onPress={openDataManagementView}
+                  accessibilityRole="button"
+                  accessibilityLabel="Import backup and open Data Management"
                   style={[
                     styles.secondaryActionBtn,
                     {
@@ -686,6 +714,8 @@ export default function ProjectSelectionScreen({
               {typeof openChecklistsView === 'function' ? (
                 <Pressable
                   onPress={openChecklistsView}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open account QA Checklists"
                   style={[
                     styles.secondaryActionBtn,
                     {
@@ -731,6 +761,8 @@ export default function ProjectSelectionScreen({
                 setSearchQuery('');
                 setStatusFilter('All');
               }}
+              accessibilityRole="button"
+              accessibilityLabel="Reset project search and status filters"
               style={[
                 styles.secondaryActionBtn,
                 {
@@ -844,6 +876,9 @@ export default function ProjectSelectionScreen({
               {/* Project Name & Description */}
               <Pressable
                 onPress={() => handleSelectProject(project, false)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isSelected }}
+                accessibilityLabel={`Select project ${project.name}`}
                 style={styles.cardBodyTouch}
               >
                 <Text style={[styles.projectName, { color: colors.text }]}>
@@ -1033,6 +1068,13 @@ export default function ProjectSelectionScreen({
               >
                 <Pressable
                   onPress={() => handleSelectProject(project, false)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isSelected }}
+                  accessibilityLabel={
+                    isSelected
+                      ? `Open active project ${project.name}`
+                      : `Select project ${project.name}`
+                  }
                   style={[
                     styles.selectBtn,
                     {
@@ -1064,6 +1106,8 @@ export default function ProjectSelectionScreen({
 
                 <Pressable
                   onPress={() => handleSelectProject(project, true)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View details for ${project.name}`}
                   style={[
                     styles.detailsBtn,
                     {

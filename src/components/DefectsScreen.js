@@ -677,6 +677,8 @@ export default function DefectsScreen() {
             Select or create a project first to log and track project-scoped defects.
           </Text>
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Select project"
             style={[
               styles.primaryActionBtn,
               { backgroundColor: theme.primary },
@@ -778,6 +780,8 @@ export default function DefectsScreen() {
           <View style={styles.alertBannerActions}>
             {workspaceConflict && (
               <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Reload latest project data"
                 style={[
                   styles.alertBannerBtn,
                   { backgroundColor: theme.danger },
@@ -791,6 +795,8 @@ export default function DefectsScreen() {
               </TouchableOpacity>
             )}
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss error banner"
               style={[
                 styles.alertBannerDismiss,
                 { borderColor: theme.danger },
@@ -907,6 +913,8 @@ export default function DefectsScreen() {
           ].map((item) => (
             <TouchableOpacity
               key={item.label}
+              accessibilityRole="button"
+              accessibilityLabel={`Filter defects by ${item.label}: ${item.val}`}
               style={[styles.kpiChip, { backgroundColor: item.bg }]}
               onPress={item.onPress}
             >
@@ -1112,6 +1120,10 @@ export default function DefectsScreen() {
             >
               <TouchableOpacity
                 activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={`Open defect ${
+                  bug.defectId || bug.id
+                }: ${bug.title}`}
                 onPress={() => {
                   setViewingDefectId(bug.id);
                   setSelectedDefectId(bug.id);
@@ -1351,6 +1363,7 @@ export default function DefectsScreen() {
         onRequestClose={closeDetailModal}
       >
         <View
+          accessibilityViewIsModal={true}
           style={[styles.modalOverlay, { backgroundColor: theme.overlay }]}
         >
           <View
@@ -1761,6 +1774,10 @@ export default function DefectsScreen() {
 
                         {linkedCase || viewingDefect.linkedTestCaseId ? (
                           <TouchableOpacity
+                            accessibilityRole="button"
+                            accessibilityLabel={`Open linked test case ${
+                              linkedCase?.id || viewingDefect.linkedTestCaseId
+                            }`}
                             style={[
                               styles.traceLinkBtn,
                               {
@@ -1823,6 +1840,10 @@ export default function DefectsScreen() {
 
                         {linkedRun || viewingDefect.linkedTestRunId ? (
                           <TouchableOpacity
+                            accessibilityRole="button"
+                            accessibilityLabel={`Open linked test run ${
+                              linkedRun?.id || viewingDefect.linkedTestRunId
+                            }`}
                             style={[
                               styles.traceLinkBtn,
                               {
@@ -1886,6 +1907,10 @@ export default function DefectsScreen() {
                   ]}
                 >
                   <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={`Delete defect ${
+                      viewingDefect.defectId || viewingDefect.id
+                    }`}
                     style={[
                       styles.deleteModalBtn,
                       {
@@ -1907,6 +1932,10 @@ export default function DefectsScreen() {
                   </TouchableOpacity>
 
                   <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit defect ${
+                      viewingDefect.defectId || viewingDefect.id
+                    }`}
                     style={[
                       styles.saveBtn,
                       { backgroundColor: theme.primary },
@@ -1931,6 +1960,7 @@ export default function DefectsScreen() {
         onRequestClose={() => setFormModalVisible(false)}
       >
         <KeyboardAvoidingView
+          accessibilityViewIsModal={true}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={[styles.modalOverlay, { backgroundColor: theme.overlay }]}
         >
@@ -2172,6 +2202,12 @@ export default function DefectsScreen() {
               >
                 <TouchableOpacity
                   onPress={() => setLinkedTestCaseId('')}
+                  accessibilityRole="radio"
+                  accessibilityState={{
+                    selected: !linkedTestCaseId,
+                    checked: !linkedTestCaseId,
+                  }}
+                  accessibilityLabel="Linked test case: None"
                   style={[
                     styles.caseSelectPill,
                     {
@@ -2203,6 +2239,9 @@ export default function DefectsScreen() {
                     <TouchableOpacity
                       key={tc.id}
                       onPress={() => handleSelectLinkedCaseInForm(tc.id)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: active, checked: active }}
+                      accessibilityLabel={`Link test case ${tc.id}`}
                       style={[
                         styles.caseSelectPill,
                         {
@@ -2242,6 +2281,12 @@ export default function DefectsScreen() {
               >
                 <TouchableOpacity
                   onPress={() => setLinkedTestRunId('')}
+                  accessibilityRole="radio"
+                  accessibilityState={{
+                    selected: !linkedTestRunId,
+                    checked: !linkedTestRunId,
+                  }}
+                  accessibilityLabel="Linked test run: None"
                   style={[
                     styles.caseSelectPill,
                     {
@@ -2271,6 +2316,9 @@ export default function DefectsScreen() {
                     <TouchableOpacity
                       key={run.id}
                       onPress={() => setLinkedTestRunId(run.id)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: active, checked: active }}
+                      accessibilityLabel={`Link test run ${run.id}: ${run.name}`}
                       style={[
                         styles.caseSelectPill,
                         {
@@ -2452,6 +2500,9 @@ export default function DefectsScreen() {
               ]}
             >
               <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isSubmittingDefect) }}
+                accessibilityLabel="Cancel defect form"
                 style={[
                   styles.cancelBtn,
                   {
@@ -2472,6 +2523,11 @@ export default function DefectsScreen() {
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isSubmittingDefect) }}
+                accessibilityLabel={
+                  editingDefectId ? 'Save defect changes' : 'Submit defect'
+                }
                 style={[
                   styles.saveBtn,
                   {
@@ -2506,6 +2562,7 @@ export default function DefectsScreen() {
         onRequestClose={() => setDefectPendingDelete(null)}
       >
         <View
+          accessibilityViewIsModal={true}
           style={[
             styles.confirmOverlay,
             { backgroundColor: theme.overlay },
@@ -2547,6 +2604,9 @@ export default function DefectsScreen() {
 
             <View style={styles.confirmBtnRow}>
               <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isDeletingDefect) }}
+                accessibilityLabel="Cancel deleting defect"
                 style={[
                   styles.confirmCancelBtn,
                   {
@@ -2568,6 +2628,13 @@ export default function DefectsScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isDeletingDefect) }}
+                accessibilityLabel={`Confirm delete defect ${
+                  defectPendingDelete?.defectId ||
+                  defectPendingDelete?.id ||
+                  ''
+                }`}
                 style={[
                   styles.confirmDeleteBtn,
                   {

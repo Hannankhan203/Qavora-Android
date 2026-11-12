@@ -794,6 +794,8 @@ export default function TestCasesScreen({
             ) : (
               <Pressable
                 onPress={reloadProjectDataFromBackend}
+                accessibilityRole="button"
+                accessibilityLabel="Sync project test cases"
                 style={({ pressed }) => [
                   styles.syncPill,
                   {
@@ -895,6 +897,8 @@ export default function TestCasesScreen({
             <View style={styles.errorBannerActions}>
               <Pressable
                 onPress={reloadProjectDataFromBackend}
+                accessibilityRole="button"
+                accessibilityLabel="Reload latest test cases from server"
                 style={[
                   styles.errorBannerBtn,
                   { backgroundColor: colors.danger },
@@ -906,6 +910,8 @@ export default function TestCasesScreen({
               </Pressable>
               <Pressable
                 onPress={clearProjectDataError}
+                accessibilityRole="button"
+                accessibilityLabel="Dismiss project data error"
                 style={[
                   styles.errorBannerBtnOutline,
                   { borderColor: colors.danger },
@@ -1136,6 +1142,12 @@ export default function TestCasesScreen({
                   <Pressable
                     key={`status-${st}`}
                     onPress={() => setSelectedStatus(st)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`Filter by status: ${
+                      st === 'all' ? 'All Status' : st
+                    }`}
                     style={[
                       styles.miniFilterChip,
                       {
@@ -1171,6 +1183,12 @@ export default function TestCasesScreen({
                   <Pressable
                     key={`type-${tp}`}
                     onPress={() => setSelectedType(tp)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`Filter by test type: ${
+                      tp === 'all' ? 'All Types' : tp
+                    }`}
                     style={[
                       styles.miniFilterChip,
                       {
@@ -1218,6 +1236,8 @@ export default function TestCasesScreen({
                     setSelectedType('all');
                     setSearchQuery('');
                   }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Reset test case filters"
                 >
                   <Text style={[styles.resetText, { color: colors.primary }]}>
                     Reset Filters
@@ -1258,6 +1278,8 @@ export default function TestCasesScreen({
                 </Text>
                 <Pressable
                   onPress={() => openCreateCaseModal()}
+                  accessibilityRole="button"
+                  accessibilityLabel="Create Test Case"
                   style={[
                     styles.emptyCta,
                     { backgroundColor: colors.primary },
@@ -1274,6 +1296,12 @@ export default function TestCasesScreen({
                   <Pressable
                     key={tc.id}
                     onPress={() => setSelectedTestCaseId(tc.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open test case ${
+                      tc.testCaseId || tc.id
+                    }: ${tc.title}, ${tc.priority} priority, status ${
+                      tc.lastStatus
+                    }`}
                     style={({ pressed }) => [
                       styles.caseCard,
                       {
@@ -1406,6 +1434,10 @@ export default function TestCasesScreen({
                             e.stopPropagation?.();
                             openMoveCaseModal(tc);
                           }}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Move ${
+                            tc.testCaseId || tc.id
+                          } to another suite`}
                           style={[
                             styles.cardMiniBtn,
                             {
@@ -1434,6 +1466,8 @@ export default function TestCasesScreen({
                           e.stopPropagation?.();
                           openEditCaseModal(tc);
                         }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Edit ${tc.testCaseId || tc.id}`}
                         style={[
                           styles.cardMiniBtn,
                           {
@@ -1461,6 +1495,8 @@ export default function TestCasesScreen({
                           e.stopPropagation?.();
                           setDeletingCase(tc);
                         }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Delete ${tc.testCaseId || tc.id}`}
                         style={[
                           styles.cardMiniBtn,
                           {
@@ -1528,6 +1564,8 @@ export default function TestCasesScreen({
             </View>
             <Pressable
               onPress={openCreateSuiteModal}
+              accessibilityRole="button"
+              accessibilityLabel="New Suite"
               style={[
                 styles.primaryActionBtn,
                 { backgroundColor: colors.primary },
@@ -1563,6 +1601,8 @@ export default function TestCasesScreen({
               </Text>
               <Pressable
                 onPress={openCreateSuiteModal}
+                accessibilityRole="button"
+                accessibilityLabel="Create First Suite"
                 style={[styles.emptyCta, { backgroundColor: colors.primary }]}
               >
                 <Text style={styles.emptyCtaText}>+ Create First Suite</Text>
@@ -1739,6 +1779,8 @@ export default function TestCasesScreen({
                         setSelectedSuiteId(suite.id);
                         setSubTab('cases');
                       }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`View ${stats.total} cases in suite ${suite.name}`}
                       style={[
                         styles.cardMiniBtn,
                         {
@@ -1764,6 +1806,8 @@ export default function TestCasesScreen({
 
                     <Pressable
                       onPress={() => openCreateCaseModal(suite.id)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Add case to suite ${suite.name}`}
                       style={[
                         styles.cardMiniBtn,
                         {
@@ -1789,6 +1833,8 @@ export default function TestCasesScreen({
 
                     <Pressable
                       onPress={() => openEditSuiteModal(suite)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Edit suite ${suite.name}`}
                       style={[
                         styles.cardMiniBtn,
                         {
@@ -1814,6 +1860,8 @@ export default function TestCasesScreen({
 
                     <Pressable
                       onPress={() => openDeleteSuiteConfirm(suite)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Delete suite ${suite.name}`}
                       style={[
                         styles.cardMiniBtn,
                         {
@@ -1879,6 +1927,8 @@ export default function TestCasesScreen({
               </View>
               <Pressable
                 onPress={openEditPlanModal}
+                accessibilityRole="button"
+                accessibilityLabel="Edit Plan"
                 style={[
                   styles.primaryActionBtn,
                   { backgroundColor: colors.primary },
@@ -1973,6 +2023,8 @@ export default function TestCasesScreen({
               </View>
               <Pressable
                 onPress={openCreatePhaseModal}
+                accessibilityRole="button"
+                accessibilityLabel="Add Testing Phase"
                 style={[
                   styles.secondaryActionBtn,
                   {
@@ -2164,6 +2216,8 @@ export default function TestCasesScreen({
                 </Text>
                 <Pressable
                   onPress={openEditPlanModal}
+                  accessibilityRole="button"
+                  accessibilityLabel="Author Test Plan Details"
                   style={[
                     styles.emptyCta,
                     { backgroundColor: colors.primary, marginTop: 8 },
@@ -2226,7 +2280,10 @@ export default function TestCasesScreen({
         transparent
         onRequestClose={() => setSelectedTestCaseId(null)}
       >
-        <View style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}>
+        <View
+          accessibilityViewIsModal={true}
+          style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}
+        >
           <View
             style={[
               styles.modalSheet,
@@ -2314,7 +2371,10 @@ export default function TestCasesScreen({
                     >
                       CURRENT EXECUTION STATUS
                     </Text>
-                    <View style={styles.quickStatusRow}>
+                    <View
+                      accessibilityRole="radiogroup"
+                      style={styles.quickStatusRow}
+                    >
                       {executionStatuses.map((st) => {
                         const active = selectedTestCase.lastStatus === st;
                         const stStyle = getStatusBadgeStyle(st);
@@ -2326,6 +2386,12 @@ export default function TestCasesScreen({
                                 lastStatus: st,
                               })
                             }
+                            accessibilityRole="radio"
+                            accessibilityState={{
+                              selected: active,
+                              checked: active,
+                            }}
+                            accessibilityLabel={`Set execution status: ${st}`}
                             style={[
                               styles.quickStatusBtn,
                               {
@@ -2372,7 +2438,10 @@ export default function TestCasesScreen({
                       >
                         ASSIGNED TEST SUITE (TAP TO MOVE)
                       </Text>
-                      <View style={styles.optionChipsWrap}>
+                      <View
+                        accessibilityRole="radiogroup"
+                        style={styles.optionChipsWrap}
+                      >
                         {suites.map((s) => {
                           const isCurrent = s.id === selectedTestCase.suiteId;
                           return (
@@ -2386,6 +2455,12 @@ export default function TestCasesScreen({
                                   );
                                 }
                               }}
+                              accessibilityRole="radio"
+                              accessibilityState={{
+                                selected: isCurrent,
+                                checked: isCurrent,
+                              }}
+                              accessibilityLabel={`Assign test case to suite ${s.name}`}
                               style={[
                                 styles.optionChip,
                                 {
@@ -2685,6 +2760,10 @@ export default function TestCasesScreen({
                       setSelectedTestCaseId(null);
                       setDeletingCase(target);
                     }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Delete test case ${
+                      selectedTestCase.testCaseId || selectedTestCase.id
+                    }`}
                     style={[
                       styles.footerDangerBtn,
                       {
@@ -2705,6 +2784,10 @@ export default function TestCasesScreen({
                       setSelectedTestCaseId(null);
                       openEditCaseModal(tc);
                     }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit test case ${
+                      selectedTestCase.testCaseId || selectedTestCase.id
+                    }`}
                     style={[
                       styles.footerSecondaryBtn,
                       {
@@ -2724,6 +2807,8 @@ export default function TestCasesScreen({
                   </Pressable>
                   <Pressable
                     onPress={() => setSelectedTestCaseId(null)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Done inspecting test case"
                     style={[
                       styles.footerPrimaryBtn,
                       { backgroundColor: colors.primary },
@@ -2748,6 +2833,7 @@ export default function TestCasesScreen({
         onRequestClose={() => !isSubmittingCase && setIsFormModalOpen(false)}
       >
         <KeyboardAvoidingView
+          accessibilityViewIsModal={true}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}
         >
@@ -2861,6 +2947,9 @@ export default function TestCasesScreen({
                       <Pressable
                         key={s.id}
                         onPress={() => setFormSuiteId(s.id)}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: active, checked: active }}
+                        accessibilityLabel={`Test Suite: ${s.name}`}
                         style={[
                           styles.optionChip,
                           {
@@ -2888,13 +2977,19 @@ export default function TestCasesScreen({
               <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
                 Priority
               </Text>
-              <View style={styles.optionChipsWrap}>
+              <View
+                accessibilityRole="radiogroup"
+                style={styles.optionChipsWrap}
+              >
                 {priorities.map((p) => {
                   const active = formPriority === p;
                   return (
                     <Pressable
                       key={p}
                       onPress={() => setFormPriority(p)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: active, checked: active }}
+                      accessibilityLabel={`Priority: ${p}`}
                       style={[
                         styles.optionChip,
                         {
@@ -2921,13 +3016,19 @@ export default function TestCasesScreen({
               <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
                 Category / Test Type
               </Text>
-              <View style={styles.optionChipsWrap}>
+              <View
+                accessibilityRole="radiogroup"
+                style={styles.optionChipsWrap}
+              >
                 {testTypes.map((t) => {
                   const active = formTestType === t;
                   return (
                     <Pressable
                       key={t}
                       onPress={() => setFormTestType(t)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: active, checked: active }}
+                      accessibilityLabel={`Test Type: ${t}`}
                       style={[
                         styles.optionChip,
                         {
@@ -3026,7 +3127,11 @@ export default function TestCasesScreen({
                 >
                   Execution Steps
                 </Text>
-                <Pressable onPress={addStepRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Add execution step"
+                  onPress={addStepRow}
+                >
                   <Text style={[styles.addStepLink, { color: colors.primary }]}>
                     + Add Step
                   </Text>
@@ -3051,7 +3156,11 @@ export default function TestCasesScreen({
                       Step #{index + 1}
                     </Text>
                     {formSteps.length > 1 && (
-                      <Pressable onPress={() => removeStepRow(index)}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove step ${index + 1}`}
+                        onPress={() => removeStepRow(index)}
+                      >
                         <Text
                           style={{
                             color: colors.danger,
@@ -3172,6 +3281,9 @@ export default function TestCasesScreen({
               <Pressable
                 disabled={isSubmittingCase}
                 onPress={() => setIsFormModalOpen(false)}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isSubmittingCase) }}
+                accessibilityLabel="Cancel test case form"
                 style={[
                   styles.footerSecondaryBtn,
                   {
@@ -3193,6 +3305,11 @@ export default function TestCasesScreen({
               <Pressable
                 disabled={isSubmittingCase}
                 onPress={handleSaveTestCase}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isSubmittingCase) }}
+                accessibilityLabel={
+                  editingCase ? 'Save Changes' : 'Create Test Case'
+                }
                 style={[
                   styles.footerPrimaryBtn,
                   {
@@ -3224,6 +3341,7 @@ export default function TestCasesScreen({
         onRequestClose={() => !isMovingCase && setMovingCase(null)}
       >
         <View
+          accessibilityViewIsModal={true}
           style={[
             styles.centeredModalOverlay,
             { backgroundColor: colors.overlay },
@@ -3241,6 +3359,7 @@ export default function TestCasesScreen({
             {movingCase && (
               <>
                 <Text
+                  accessibilityRole="header"
                   style={[
                     styles.smallModalTitle,
                     { color: colors.text },
@@ -3269,6 +3388,9 @@ export default function TestCasesScreen({
                       <Pressable
                         key={s.id}
                         onPress={() => setMoveTargetSuiteId(s.id)}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: active, checked: active }}
+                        accessibilityLabel={`Destination suite: ${s.name}`}
                         style={[
                           styles.suiteSelectItem,
                           {
@@ -3305,6 +3427,9 @@ export default function TestCasesScreen({
                   <Pressable
                     disabled={isMovingCase}
                     onPress={() => setMovingCase(null)}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: Boolean(isMovingCase) }}
+                    accessibilityLabel="Cancel moving test case"
                     style={[
                       styles.footerSecondaryBtn,
                       {
@@ -3325,6 +3450,9 @@ export default function TestCasesScreen({
                   <Pressable
                     disabled={isMovingCase}
                     onPress={handleConfirmMoveCase}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: Boolean(isMovingCase) }}
+                    accessibilityLabel="Move Case"
                     style={[
                       styles.footerPrimaryBtn,
                       { backgroundColor: colors.primary },
@@ -3353,6 +3481,7 @@ export default function TestCasesScreen({
         onRequestClose={() => !isDeletingCase && setDeletingCase(null)}
       >
         <View
+          accessibilityViewIsModal={true}
           style={[
             styles.centeredModalOverlay,
             { backgroundColor: colors.overlay },
@@ -3370,6 +3499,7 @@ export default function TestCasesScreen({
             {deletingCase && (
               <>
                 <Text
+                  accessibilityRole="header"
                   style={[
                     styles.smallModalTitle,
                     { color: colors.text },
@@ -3395,6 +3525,9 @@ export default function TestCasesScreen({
                   <Pressable
                     disabled={isDeletingCase}
                     onPress={() => setDeletingCase(null)}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: Boolean(isDeletingCase) }}
+                    accessibilityLabel="Cancel deleting test case"
                     style={[
                       styles.footerSecondaryBtn,
                       {
@@ -3415,6 +3548,9 @@ export default function TestCasesScreen({
                   <Pressable
                     disabled={isDeletingCase}
                     onPress={handleConfirmDeleteCase}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: Boolean(isDeletingCase) }}
+                    accessibilityLabel="Confirm Delete test case"
                     style={[
                       styles.footerPrimaryBtn,
                       { backgroundColor: colors.danger },
@@ -3445,6 +3581,7 @@ export default function TestCasesScreen({
         onRequestClose={() => !isSubmittingSuite && setIsSuiteModalOpen(false)}
       >
         <KeyboardAvoidingView
+          accessibilityViewIsModal={true}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={[
             styles.centeredModalOverlay,
@@ -3529,6 +3666,9 @@ export default function TestCasesScreen({
                       <Pressable
                         key={cat}
                         onPress={() => setSuiteCategoryInput(cat)}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: active, checked: active }}
+                        accessibilityLabel={`Suite category: ${cat}`}
                         style={[
                           styles.optionChip,
                           {
@@ -3567,6 +3707,12 @@ export default function TestCasesScreen({
                   >
                     <Pressable
                       onPress={() => setSuitePhaseIdInput('')}
+                      accessibilityRole="radio"
+                      accessibilityState={{
+                        selected: !suitePhaseIdInput,
+                        checked: !suitePhaseIdInput,
+                      }}
+                      accessibilityLabel="Testing phase: General (Unassigned)"
                       style={[
                         styles.optionChip,
                         {
@@ -3598,6 +3744,12 @@ export default function TestCasesScreen({
                         <Pressable
                           key={ph.id}
                           onPress={() => setSuitePhaseIdInput(ph.id)}
+                          accessibilityRole="radio"
+                          accessibilityState={{
+                            selected: active,
+                            checked: active,
+                          }}
+                          accessibilityLabel={`Testing phase: ${ph.name}`}
                           style={[
                             styles.optionChip,
                             {
@@ -3675,6 +3827,9 @@ export default function TestCasesScreen({
               <Pressable
                 disabled={isSubmittingSuite}
                 onPress={() => setIsSuiteModalOpen(false)}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isSubmittingSuite) }}
+                accessibilityLabel="Cancel test suite form"
                 style={[
                   styles.footerSecondaryBtn,
                   {
@@ -3695,6 +3850,11 @@ export default function TestCasesScreen({
               <Pressable
                 disabled={isSubmittingSuite}
                 onPress={handleSaveSuite}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isSubmittingSuite) }}
+                accessibilityLabel={
+                  editingSuite ? 'Save Suite' : 'Create Suite'
+                }
                 style={[
                   styles.footerPrimaryBtn,
                   { backgroundColor: colors.primary },
@@ -3723,6 +3883,7 @@ export default function TestCasesScreen({
         onRequestClose={() => !isDeletingSuite && setDeletingSuite(null)}
       >
         <View
+          accessibilityViewIsModal={true}
           style={[
             styles.centeredModalOverlay,
             { backgroundColor: colors.overlay },
@@ -3740,6 +3901,7 @@ export default function TestCasesScreen({
             {deletingSuite && (
               <>
                 <Text
+                  accessibilityRole="header"
                   style={[
                     styles.smallModalTitle,
                     { color: colors.text },
@@ -3791,6 +3953,12 @@ export default function TestCasesScreen({
                       {otherSuites.length > 0 && (
                         <Pressable
                           onPress={() => setSuiteDeleteMode('move')}
+                          accessibilityRole="radio"
+                          accessibilityState={{
+                            selected: suiteDeleteMode === 'move',
+                            checked: suiteDeleteMode === 'move',
+                          }}
+                          accessibilityLabel={`Move ${caseCount} test cases to another suite`}
                           style={[
                             styles.suiteSelectItem,
                             {
@@ -3844,6 +4012,12 @@ export default function TestCasesScreen({
                               <Pressable
                                 key={s.id}
                                 onPress={() => setSuiteDeleteTargetId(s.id)}
+                                accessibilityRole="radio"
+                                accessibilityState={{
+                                  selected: active,
+                                  checked: active,
+                                }}
+                                accessibilityLabel={`Destination suite: ${s.name}`}
                                 style={[
                                   styles.optionChip,
                                   {
@@ -3876,6 +4050,12 @@ export default function TestCasesScreen({
 
                       <Pressable
                         onPress={() => setSuiteDeleteMode('delete')}
+                        accessibilityRole="radio"
+                        accessibilityState={{
+                          selected: suiteDeleteMode === 'delete',
+                          checked: suiteDeleteMode === 'delete',
+                        }}
+                        accessibilityLabel={`Delete suite and its ${caseCount} test cases`}
                         style={[
                           styles.suiteSelectItem,
                           {
@@ -3921,6 +4101,9 @@ export default function TestCasesScreen({
                   <Pressable
                     disabled={isDeletingSuite}
                     onPress={() => setDeletingSuite(null)}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: Boolean(isDeletingSuite) }}
+                    accessibilityLabel="Cancel deleting test suite"
                     style={[
                       styles.footerSecondaryBtn,
                       {
@@ -3941,6 +4124,9 @@ export default function TestCasesScreen({
                   <Pressable
                     disabled={isDeletingSuite}
                     onPress={handleConfirmDeleteSuite}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: Boolean(isDeletingSuite) }}
+                    accessibilityLabel="Delete Suite"
                     style={[
                       styles.footerPrimaryBtn,
                       { backgroundColor: colors.danger },
@@ -3969,6 +4155,7 @@ export default function TestCasesScreen({
         onRequestClose={() => !isSubmittingPlan && setIsPlanModalOpen(false)}
       >
         <KeyboardAvoidingView
+          accessibilityViewIsModal={true}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}
         >
@@ -4163,6 +4350,9 @@ export default function TestCasesScreen({
               <Pressable
                 disabled={isSubmittingPlan}
                 onPress={() => setIsPlanModalOpen(false)}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isSubmittingPlan) }}
+                accessibilityLabel="Cancel editing test plan"
                 style={[
                   styles.footerSecondaryBtn,
                   {
@@ -4183,6 +4373,9 @@ export default function TestCasesScreen({
               <Pressable
                 disabled={isSubmittingPlan}
                 onPress={handleSavePlan}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isSubmittingPlan) }}
+                accessibilityLabel="Save Test Plan"
                 style={[
                   styles.footerPrimaryBtn,
                   { backgroundColor: colors.primary },
@@ -4209,6 +4402,7 @@ export default function TestCasesScreen({
         onRequestClose={() => !isSubmittingPhase && setIsPhaseModalOpen(false)}
       >
         <KeyboardAvoidingView
+          accessibilityViewIsModal={true}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={[
             styles.centeredModalOverlay,
@@ -4296,6 +4490,9 @@ export default function TestCasesScreen({
               <Pressable
                 disabled={isSubmittingPhase}
                 onPress={() => setIsPhaseModalOpen(false)}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isSubmittingPhase) }}
+                accessibilityLabel="Cancel phase form"
                 style={[
                   styles.footerSecondaryBtn,
                   {
@@ -4316,6 +4513,9 @@ export default function TestCasesScreen({
               <Pressable
                 disabled={isSubmittingPhase}
                 onPress={handleSavePhase}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isSubmittingPhase) }}
+                accessibilityLabel={editingPhase ? 'Save Phase' : 'Add Phase'}
                 style={[
                   styles.footerPrimaryBtn,
                   { backgroundColor: colors.primary },
@@ -4344,6 +4544,7 @@ export default function TestCasesScreen({
         onRequestClose={() => !isDeletingPhase && setDeletingPhase(null)}
       >
         <View
+          accessibilityViewIsModal={true}
           style={[
             styles.centeredModalOverlay,
             { backgroundColor: colors.overlay },
@@ -4361,6 +4562,7 @@ export default function TestCasesScreen({
             {deletingPhase && (
               <>
                 <Text
+                  accessibilityRole="header"
                   style={[
                     styles.smallModalTitle,
                     { color: colors.text },
@@ -4383,6 +4585,9 @@ export default function TestCasesScreen({
                   <Pressable
                     disabled={isDeletingPhase}
                     onPress={() => setDeletingPhase(null)}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: Boolean(isDeletingPhase) }}
+                    accessibilityLabel="Cancel deleting phase"
                     style={[
                       styles.footerSecondaryBtn,
                       {
@@ -4403,6 +4608,9 @@ export default function TestCasesScreen({
                   <Pressable
                     disabled={isDeletingPhase}
                     onPress={handleConfirmDeletePhase}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: Boolean(isDeletingPhase) }}
+                    accessibilityLabel="Delete Phase"
                     style={[
                       styles.footerPrimaryBtn,
                       { backgroundColor: colors.danger },

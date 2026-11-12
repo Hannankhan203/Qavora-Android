@@ -484,6 +484,7 @@ export default function AuthScreen() {
 
               {/* Mode Switcher Tabs */}
               <View
+                accessibilityRole="tablist"
                 style={[
                   styles.modeTabsRow,
                   {
@@ -494,6 +495,9 @@ export default function AuthScreen() {
               >
                 <Pressable
                   onPress={() => switchMode('login')}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: mode === 'login' }}
+                  accessibilityLabel="Sign In tab"
                   style={[
                     styles.modeTabBtn,
                     mode === 'login' && {
@@ -518,6 +522,9 @@ export default function AuthScreen() {
 
                 <Pressable
                   onPress={() => switchMode('register')}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: mode === 'register' }}
+                  accessibilityLabel="Create Account tab"
                   style={[
                     styles.modeTabBtn,
                     mode === 'register' && {
@@ -772,6 +779,11 @@ export default function AuthScreen() {
                   <Pressable
                     onPress={handleLoginSubmit}
                     disabled={isLoading}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: Boolean(isLoading) }}
+                    accessibilityLabel={
+                      isLoading ? 'Signing in to Qavora' : 'Sign In to Qavora'
+                    }
                     style={[
                       styles.submitBtn,
                       {
@@ -809,6 +821,8 @@ export default function AuthScreen() {
 
                   <Pressable
                     onPress={() => switchMode('register')}
+                    accessibilityRole="button"
+                    accessibilityLabel="Switch to Create Account form"
                     style={styles.switchLinkWrap}
                   >
                     <Text
@@ -955,13 +969,16 @@ export default function AuthScreen() {
                   >
                     QA Role
                   </Text>
-                  <View style={styles.roleChipsRow}>
+                  <View style={styles.roleChipsRow} accessibilityRole="radiogroup">
                     {ROLE_OPTIONS.map((roleOpt) => {
                       const selected = registerRole === roleOpt;
                       return (
                         <Pressable
                           key={roleOpt}
                           onPress={() => setRegisterRole(roleOpt)}
+                          accessibilityRole="radio"
+                          accessibilityState={{ selected, checked: selected }}
+                          accessibilityLabel={`QA role: ${roleOpt}`}
                           style={[
                             styles.roleChip,
                             {
@@ -1246,6 +1263,13 @@ export default function AuthScreen() {
                   <Pressable
                     onPress={handleRegisterSubmit}
                     disabled={isLoading}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: Boolean(isLoading) }}
+                    accessibilityLabel={
+                      isLoading
+                        ? 'Creating Qavora account'
+                        : 'Create Qavora Account'
+                    }
                     style={[
                       styles.submitBtn,
                       {
@@ -1283,6 +1307,8 @@ export default function AuthScreen() {
 
                   <Pressable
                     onPress={() => switchMode('login')}
+                    accessibilityRole="button"
+                    accessibilityLabel="Switch to Sign In form"
                     style={styles.switchLinkWrap}
                   >
                     <Text

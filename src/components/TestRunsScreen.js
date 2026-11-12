@@ -674,6 +674,8 @@ export default function TestRunsScreen({
               styles.primaryActionBtn,
               { backgroundColor: theme.primary },
             ]}
+            accessibilityRole="button"
+            accessibilityLabel="Select Project"
             onPress={openProjectSelection}
           >
             <VectorIcon name="folder" size={15} color="#FFFFFF" />
@@ -775,6 +777,8 @@ export default function TestRunsScreen({
                   styles.alertBannerBtn,
                   { backgroundColor: theme.danger },
                 ]}
+                accessibilityRole="button"
+                accessibilityLabel="Reload Latest Project Data"
                 onPress={() => reloadCurrentProject()}
               >
                 <VectorIcon name="refresh" size={12} color="#FFFFFF" />
@@ -788,6 +792,8 @@ export default function TestRunsScreen({
                 styles.alertBannerDismiss,
                 { borderColor: theme.danger },
               ]}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss workspace error"
               onPress={clearWorkspaceError}
             >
               <Text
@@ -1184,6 +1190,15 @@ export default function TestRunsScreen({
                             : theme.success,
                       },
                     ]}
+                    accessibilityRole="button"
+                    accessibilityState={{
+                      disabled: Boolean(isTogglingRunStatus),
+                    }}
+                    accessibilityLabel={
+                      activeRun.status === 'Completed'
+                        ? 'Reopen test run'
+                        : 'Complete test run'
+                    }
                     onPress={handleToggleRunCompletion}
                     disabled={isTogglingRunStatus}
                   >
@@ -1223,6 +1238,8 @@ export default function TestRunsScreen({
                         borderColor: theme.border,
                       },
                     ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit test run ${activeRun.name}`}
                     onPress={() => openEditRunModal(activeRun)}
                   >
                     <VectorIcon
@@ -1248,6 +1265,8 @@ export default function TestRunsScreen({
                         borderColor: theme.danger,
                       },
                     ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Delete test run ${activeRun.name}`}
                     onPress={() => setRunPendingDelete(activeRun)}
                   >
                     <VectorIcon name="trash" size={13} color={theme.danger} />
@@ -1483,6 +1502,8 @@ export default function TestRunsScreen({
                   >
                     <TouchableOpacity
                       activeOpacity={0.85}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Execute test case ${tc.id}: ${tc.title}, status ${sMeta.webOutcome}`}
                       onPress={() => openExecutionModal(tc)}
                     >
                       <View style={styles.execCardTop}>
@@ -1610,6 +1631,10 @@ export default function TestRunsScreen({
                               borderColor: theme.danger,
                             },
                           ]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Open linked defect ${
+                            linkedDefect.defectId || linkedDefect.id
+                          }, ${linkedDefect.status}`}
                           onPress={() => {
                             setSelectedDefectId(linkedDefect.id);
                             setActiveTab('defects');
@@ -1652,6 +1677,12 @@ export default function TestRunsScreen({
                                   : theme.successSoft,
                             },
                           ]}
+                          accessibilityRole="button"
+                          accessibilityState={{
+                            selected: status === 'Passed',
+                            disabled: Boolean(isSubmittingExec),
+                          }}
+                          accessibilityLabel={`Mark ${tc.id} passed`}
                           onPress={() => handleQuickOutcome(tc, 'Passed')}
                           disabled={isSubmittingExec}
                         >
@@ -1687,6 +1718,12 @@ export default function TestRunsScreen({
                                   : theme.dangerSoft,
                             },
                           ]}
+                          accessibilityRole="button"
+                          accessibilityState={{
+                            selected: status === 'Failed',
+                            disabled: Boolean(isSubmittingExec),
+                          }}
+                          accessibilityLabel={`Mark ${tc.id} failed`}
                           onPress={() => handleQuickOutcome(tc, 'Failed')}
                           disabled={isSubmittingExec}
                         >
@@ -1722,6 +1759,12 @@ export default function TestRunsScreen({
                                   : theme.warningSoft,
                             },
                           ]}
+                          accessibilityRole="button"
+                          accessibilityState={{
+                            selected: status === 'Blocked',
+                            disabled: Boolean(isSubmittingExec),
+                          }}
+                          accessibilityLabel={`Mark ${tc.id} blocked`}
                           onPress={() => handleQuickOutcome(tc, 'Blocked')}
                           disabled={isSubmittingExec}
                         >
@@ -1779,6 +1822,8 @@ export default function TestRunsScreen({
                               borderColor: theme.danger,
                             },
                           ]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Log defect for ${tc.id}`}
                           onPress={() => {
                             startDefectFromFailedTest({
                               testRun: activeRun,
@@ -1814,6 +1859,8 @@ export default function TestRunsScreen({
                               borderColor: theme.primary,
                             },
                           ]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Execute steps for ${tc.id}`}
                           onPress={() => openExecutionModal(tc)}
                         >
                           <VectorIcon
@@ -1885,6 +1932,8 @@ export default function TestRunsScreen({
                     styles.primaryActionBtn,
                     { backgroundColor: theme.primary, marginTop: 10 },
                   ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Create First Test Run"
                   onPress={openCreateRunModal}
                 >
                   <VectorIcon name="plus" size={15} color="#FFFFFF" />
@@ -1925,7 +1974,12 @@ export default function TestRunsScreen({
                 onChangeText={setHistorySearchQuery}
               />
               {historySearchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setHistorySearchQuery('')}>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear execution history search"
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  onPress={() => setHistorySearchQuery('')}
+                >
                   <VectorIcon
                     name="close"
                     size={14}
@@ -1946,6 +2000,9 @@ export default function TestRunsScreen({
                   <TouchableOpacity
                     key={outcome}
                     onPress={() => setHistoryOutcomeFilter(outcome)}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`Filter execution history: ${outcome}`}
                     style={[
                       styles.filterPill,
                       {
@@ -2032,6 +2089,10 @@ export default function TestRunsScreen({
                             borderColor: theme.border,
                           },
                         ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Open test run ${
+                          runObj ? `${runObj.id} ${runObj.name}` : exec.runId
+                        }`}
                         onPress={() => {
                           setSelectedTestRunId(exec.runId);
                           setActiveViewMode('runs');
@@ -2131,6 +2192,10 @@ export default function TestRunsScreen({
                         borderColor: theme.danger,
                       },
                     ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open linked defect ${
+                      linkedDefect.defectId || linkedDefect.id
+                    }`}
                     onPress={() => {
                       setSelectedDefectId(linkedDefect.id);
                       setActiveTab('defects');
@@ -2178,6 +2243,7 @@ export default function TestRunsScreen({
         onRequestClose={() => setExecutingCaseId(null)}
       >
         <KeyboardAvoidingView
+          accessibilityViewIsModal={true}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={[styles.modalOverlay, { backgroundColor: theme.overlay }]}
         >
@@ -2576,6 +2642,9 @@ export default function TestRunsScreen({
                         styles.outcomeBtn,
                         { backgroundColor: theme.success },
                       ]}
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: Boolean(isSubmittingExec) }}
+                      accessibilityLabel="Record final result: Pass"
                       onPress={() => handleSaveExecution('Passed', false)}
                       disabled={isSubmittingExec}
                     >
@@ -2588,6 +2657,9 @@ export default function TestRunsScreen({
                         styles.outcomeBtn,
                         { backgroundColor: theme.danger },
                       ]}
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: Boolean(isSubmittingExec) }}
+                      accessibilityLabel="Record final result: Fail"
                       onPress={() => handleSaveExecution('Failed', false)}
                       disabled={isSubmittingExec}
                     >
@@ -2600,6 +2672,9 @@ export default function TestRunsScreen({
                         styles.outcomeBtn,
                         { backgroundColor: theme.warning },
                       ]}
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: Boolean(isSubmittingExec) }}
+                      accessibilityLabel="Record final result: Blocked"
                       onPress={() => handleSaveExecution('Blocked', false)}
                       disabled={isSubmittingExec}
                     >
@@ -2616,6 +2691,9 @@ export default function TestRunsScreen({
                           borderColor: theme.border,
                         },
                       ]}
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: Boolean(isSubmittingExec) }}
+                      accessibilityLabel="Record final result: Not Run"
                       onPress={() => handleSaveExecution('Untested', false)}
                       disabled={isSubmittingExec}
                     >
@@ -2643,6 +2721,9 @@ export default function TestRunsScreen({
                         borderColor: theme.danger,
                       },
                     ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: Boolean(isSubmittingExec) }}
+                    accessibilityLabel="Mark Failed and Create Linked Defect"
                     onPress={() => handleSaveExecution('Failed', true)}
                     disabled={isSubmittingExec}
                   >
@@ -2671,6 +2752,7 @@ export default function TestRunsScreen({
         onRequestClose={() => setRunModalVisible(false)}
       >
         <KeyboardAvoidingView
+          accessibilityViewIsModal={true}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={[styles.modalOverlay, { backgroundColor: theme.overlay }]}
         >
@@ -2778,6 +2860,12 @@ export default function TestRunsScreen({
               >
                 <TouchableOpacity
                   onPress={() => handleChangeRunSuiteScope('all')}
+                  accessibilityRole="radio"
+                  accessibilityState={{
+                    selected: runSuiteId === 'all' || runSuiteId === 'ALL',
+                    checked: runSuiteId === 'all' || runSuiteId === 'ALL',
+                  }}
+                  accessibilityLabel={`Target suite scope: All Suites (${testCases.length} cases)`}
                   style={[
                     styles.optionPill,
                     {
@@ -2815,6 +2903,9 @@ export default function TestRunsScreen({
                     <TouchableOpacity
                       key={s.id}
                       onPress={() => handleChangeRunSuiteScope(s.id)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: active, checked: active }}
+                      accessibilityLabel={`Target suite scope: ${s.name} (${count} cases)`}
                       style={[
                         styles.optionPill,
                         {
@@ -2855,6 +2946,8 @@ export default function TestRunsScreen({
                 </Text>
                 <View style={styles.caseSelectionQuickBtns}>
                   <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Select all candidate test cases"
                     onPress={() =>
                       setSelectedCaseIds(
                         candidateCasesForModal.map((tc) => tc.id)
@@ -2868,7 +2961,11 @@ export default function TestRunsScreen({
                     </Text>
                   </TouchableOpacity>
                   <Text style={{ color: theme.textMuted }}>•</Text>
-                  <TouchableOpacity onPress={() => setSelectedCaseIds([])}>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear selected test cases"
+                    onPress={() => setSelectedCaseIds([])}
+                  >
                     <Text
                       style={[
                         styles.selectAllLink,
@@ -2907,6 +3004,9 @@ export default function TestRunsScreen({
                     return (
                       <TouchableOpacity
                         key={tc.id}
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked }}
+                        accessibilityLabel={`Include ${tc.id}: ${tc.title}`}
                         style={[
                           styles.casePickerRow,
                           {
@@ -3092,6 +3192,9 @@ export default function TestRunsScreen({
                     borderColor: theme.border,
                   },
                 ]}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isSubmittingRun) }}
+                accessibilityLabel="Cancel test run form"
                 onPress={() => setRunModalVisible(false)}
                 disabled={isSubmittingRun}
               >
@@ -3112,6 +3215,11 @@ export default function TestRunsScreen({
                     opacity: isSubmittingRun ? 0.7 : 1,
                   },
                 ]}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isSubmittingRun) }}
+                accessibilityLabel={
+                  editingRunId ? 'Save Run Changes' : 'Launch Test Run'
+                }
                 onPress={handleSaveRunModal}
                 disabled={isSubmittingRun}
               >
@@ -3137,6 +3245,7 @@ export default function TestRunsScreen({
         onRequestClose={() => setRunPendingDelete(null)}
       >
         <View
+          accessibilityViewIsModal={true}
           style={[
             styles.confirmOverlay,
             { backgroundColor: theme.overlay },
@@ -3159,7 +3268,10 @@ export default function TestRunsScreen({
             >
               <VectorIcon name="trash" size={22} color={theme.danger} />
             </View>
-            <Text style={[styles.confirmTitle, { color: theme.text }]}>
+            <Text
+              accessibilityRole="header"
+              style={[styles.confirmTitle, { color: theme.text }]}
+            >
               Delete Test Run?
             </Text>
             <Text
@@ -3184,6 +3296,9 @@ export default function TestRunsScreen({
                     borderColor: theme.border,
                   },
                 ]}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isDeletingRun) }}
+                accessibilityLabel="Cancel deleting test run"
                 onPress={() => setRunPendingDelete(null)}
                 disabled={isDeletingRun}
               >
@@ -3205,6 +3320,9 @@ export default function TestRunsScreen({
                     opacity: isDeletingRun ? 0.7 : 1,
                   },
                 ]}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isDeletingRun) }}
+                accessibilityLabel="Delete Run"
                 onPress={handleConfirmDeleteRun}
                 disabled={isDeletingRun}
               >

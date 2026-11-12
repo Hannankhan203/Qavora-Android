@@ -381,6 +381,13 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                 <Pressable
                   onPress={handleRefreshDashboard}
                   disabled={isRefreshingAny}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: Boolean(isRefreshingAny) }}
+                  accessibilityLabel={
+                    isRefreshingAny
+                      ? 'Syncing project dashboard'
+                      : 'Refresh project dashboard'
+                  }
                   style={[
                     styles.projectActionBtn,
                     {
@@ -408,6 +415,8 @@ export default function DashboardScreen({ onNavigateToDestination }) {
 
                 <Pressable
                   onPress={handleOpenChecklists}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open QA Checklists"
                   style={[
                     styles.projectActionBtn,
                     {
@@ -433,6 +442,8 @@ export default function DashboardScreen({ onNavigateToDestination }) {
 
                 <Pressable
                   onPress={() => setDashboardSubTab('reports')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open Reports and Export"
                   style={[
                     styles.projectActionBtn,
                     {
@@ -458,6 +469,8 @@ export default function DashboardScreen({ onNavigateToDestination }) {
 
                 <Pressable
                   onPress={openProjectDetails}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open Project Details"
                   style={[
                     styles.projectActionBtn,
                     {
@@ -476,6 +489,8 @@ export default function DashboardScreen({ onNavigateToDestination }) {
 
                 <Pressable
                   onPress={openProjectSelection}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Switch project, ${projects.length} total`}
                   style={[
                     styles.projectActionBtn,
                     {
@@ -497,6 +512,8 @@ export default function DashboardScreen({ onNavigateToDestination }) {
               <View style={styles.quickActionRow}>
                 <Pressable
                   onPress={() => setActiveTab('testcases')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Go to Test Cases to add a test case"
                   style={[
                     styles.quickActionBtn,
                     {
@@ -514,6 +531,8 @@ export default function DashboardScreen({ onNavigateToDestination }) {
 
                 <Pressable
                   onPress={() => setActiveTab('testruns')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Go to Test Runs to execute a run"
                   style={[
                     styles.quickActionBtn,
                     {
@@ -534,6 +553,8 @@ export default function DashboardScreen({ onNavigateToDestination }) {
 
                 <Pressable
                   onPress={() => setActiveTab('defects')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Go to Defects to log a defect"
                   style={[
                     styles.quickActionBtn,
                     {
@@ -555,6 +576,8 @@ export default function DashboardScreen({ onNavigateToDestination }) {
             <View style={styles.kpiGrid}>
               <Pressable
                 onPress={() => setActiveTab('testcases')}
+                accessibilityRole="button"
+                accessibilityLabel={`Total Test Cases: ${metrics.totalTestCases}, ${metrics.totalSuites} suites, ${metrics.totalPhases} phases. Open Test Cases`}
                 style={[
                   styles.kpiCard,
                   {
@@ -581,6 +604,8 @@ export default function DashboardScreen({ onNavigateToDestination }) {
 
               <Pressable
                 onPress={() => setActiveTab('testruns')}
+                accessibilityRole="button"
+                accessibilityLabel={`Pass Rate: ${metrics.passRate}%, ${metrics.executedCases} of ${metrics.totalTestCases} executed. Open Test Runs`}
                 style={[
                   styles.kpiCard,
                   {
@@ -607,6 +632,8 @@ export default function DashboardScreen({ onNavigateToDestination }) {
 
               <Pressable
                 onPress={() => setActiveTab('testruns')}
+                accessibilityRole="button"
+                accessibilityLabel={`Test Runs: ${metrics.totalRuns}, ${metrics.activeRuns} active, ${metrics.completedRuns} done. Open Test Runs`}
                 style={[
                   styles.kpiCard,
                   {
@@ -634,6 +661,8 @@ export default function DashboardScreen({ onNavigateToDestination }) {
 
               <Pressable
                 onPress={() => setActiveTab('defects')}
+                accessibilityRole="button"
+                accessibilityLabel={`Active Defects: ${metrics.openDefects}, ${metrics.criticalOnlyActiveDefects} Critical, ${metrics.highOnlyActiveDefects} High. Open Defects`}
                 style={[
                   styles.kpiCard,
                   {
@@ -703,6 +732,8 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                   </Text>
                   <Pressable
                     onPress={() => setActiveTab('testcases')}
+                    accessibilityRole="button"
+                    accessibilityLabel="Create first test case"
                     style={[
                       styles.emptyPrimaryBtn,
                       { backgroundColor: colors.primary },
@@ -932,7 +963,11 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>
                   Defect Status & Priority Breakdown
                 </Text>
-                <Pressable onPress={() => setActiveTab('defects')}>
+                <Pressable
+                  onPress={() => setActiveTab('defects')}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View all ${metrics.totalDefects} defects, ${metrics.defectResolutionRate}% resolved`}
+                >
                   <Text style={[styles.linkText, { color: colors.primary }]}>
                     {metrics.totalDefects} Total · {metrics.defectResolutionRate}
                     % Resolved →
@@ -1094,6 +1129,8 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                       setActiveTab('testcases', { testCasesSubTab: 'plan' });
                     }
                   }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open Test Plans"
                   style={styles.sectionTitleCol}
                 >
                   <Text style={[styles.sectionTitle, { color: colors.text }]}>
@@ -1119,6 +1156,8 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                       setActiveTab('testcases', { testCasesSubTab: 'suites' });
                     }
                   }}
+                  accessibilityRole="button"
+                  accessibilityLabel="View Test Suites"
                 >
                   <Text style={[styles.linkText, { color: colors.primary }]}>
                     View Suites →
@@ -1147,6 +1186,8 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                           });
                         }
                       }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Open suite ${sp.name}, ${sp.coveragePct}% covered, ${sp.passRate}% pass rate`}
                       style={[
                         styles.suiteProgressItem,
                         {
@@ -1227,7 +1268,11 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>
                   Recent Test Runs & Execution Activity
                 </Text>
-                <Pressable onPress={() => setActiveTab('testruns')}>
+                <Pressable
+                  onPress={() => setActiveTab('testruns')}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View all ${metrics.totalRuns} test runs`}
+                >
                   <Text style={[styles.linkText, { color: colors.primary }]}>
                     All Runs ({metrics.totalRuns}) →
                   </Text>
@@ -1252,6 +1297,8 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                           setSelectedTestRunId(run.id);
                           setActiveTab('testruns');
                         }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Open test run ${run.id}: ${run.name}`}
                         style={[
                           styles.rowItem,
                           {
@@ -1369,6 +1416,13 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                                 setActiveTab('testcases');
                               }
                             }}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Open execution record for ${
+                              ex.testCaseId ||
+                              ex.caseId ||
+                              ex.testCaseTitle ||
+                              'test execution'
+                            }`}
                             style={[
                               styles.rowItem,
                               {
@@ -1445,7 +1499,11 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>
                   Recent Project Defects
                 </Text>
-                <Pressable onPress={() => setActiveTab('defects')}>
+                <Pressable
+                  onPress={() => setActiveTab('defects')}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View all ${metrics.totalDefects} defects`}
+                >
                   <Text style={[styles.linkText, { color: colors.primary }]}>
                     All Defects ({metrics.totalDefects}) →
                   </Text>
@@ -1470,6 +1528,8 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                           setSelectedDefectId(bug.id);
                           setActiveTab('defects');
                         }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Open defect ${bug.id}: ${bug.title}`}
                         style={[
                           styles.rowItem,
                           {

@@ -252,6 +252,8 @@ export default function ProjectDetailsScreen({
           {typeof onSwitchProject === 'function' ? (
             <Pressable
               onPress={onSwitchProject}
+              accessibilityRole="button"
+              accessibilityLabel="Go to Project Selection"
               style={[
                 styles.primaryBtn,
                 { backgroundColor: colors.primary },
@@ -315,6 +317,8 @@ export default function ProjectDetailsScreen({
           {typeof onBackToWorkspace === 'function' ? (
             <Pressable
               onPress={onBackToWorkspace}
+              accessibilityRole="button"
+              accessibilityLabel="Back to Workspace"
               style={[
                 styles.navBtn,
                 {
@@ -338,6 +342,8 @@ export default function ProjectDetailsScreen({
             {typeof onSwitchProject === 'function' ? (
               <Pressable
                 onPress={onSwitchProject}
+                accessibilityRole="button"
+                accessibilityLabel="Switch to All Projects"
                 style={[
                   styles.navBtn,
                   {
@@ -362,6 +368,13 @@ export default function ProjectDetailsScreen({
             <Pressable
               onPress={handleRefreshProject}
               disabled={isRefreshingDetail || isLoading}
+              accessibilityRole="button"
+              accessibilityState={{
+                disabled: Boolean(isRefreshingDetail || isLoading),
+              }}
+              accessibilityLabel={
+                isRefreshingDetail ? 'Syncing project details' : 'Sync project details'
+              }
               style={[
                 styles.navBtn,
                 {
@@ -588,6 +601,9 @@ export default function ProjectDetailsScreen({
             <Pressable
               onPress={() => setIsEditModalOpen(true)}
               disabled={isMutating}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: Boolean(isMutating) }}
+              accessibilityLabel="Edit project metadata"
               style={[
                 styles.editProjectBtn,
                 { backgroundColor: colors.primary },

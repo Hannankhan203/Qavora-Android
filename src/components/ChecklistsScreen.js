@@ -1500,6 +1500,8 @@ export default function ChecklistsScreen({
           >
             <Pressable
               onPress={() => setActiveChecklistId(null)}
+              accessibilityRole="button"
+              accessibilityLabel="Back to all checklists"
               style={[
                 styles.backBtn,
                 { backgroundColor: colors.background, borderColor: colors.borderStrong },
@@ -1515,6 +1517,9 @@ export default function ChecklistsScreen({
               <Pressable
                 onPress={() => openPromoteModal(activeChecklist)}
                 disabled={isPromoting}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isPromoting) }}
+                accessibilityLabel="Promote checklist to project"
                 style={[
                   styles.smallActionBtn,
                   {
@@ -1540,6 +1545,8 @@ export default function ChecklistsScreen({
 
               <Pressable
                 onPress={() => openEditModal(activeChecklist)}
+                accessibilityRole="button"
+                accessibilityLabel="Edit checklist"
                 style={[
                   styles.smallActionBtn,
                   { backgroundColor: colors.surfaceAccent, borderColor: colors.primary },
@@ -1553,6 +1560,8 @@ export default function ChecklistsScreen({
 
               <Pressable
                 onPress={() => setDeleteTargetChecklist(activeChecklist)}
+                accessibilityRole="button"
+                accessibilityLabel="Delete checklist"
                 style={[
                   styles.smallActionBtn,
                   { backgroundColor: colors.dangerSoft, borderColor: colors.danger },
@@ -1600,6 +1609,11 @@ export default function ChecklistsScreen({
                     handleResolveChecklistConflict(activeSyncInfo.opId, 'merge')
                   }
                   disabled={busyMutation || !activeSyncInfo.opId}
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    disabled: Boolean(busyMutation || !activeSyncInfo.opId),
+                  }}
+                  accessibilityLabel="Merge and sync checklist conflict"
                   style={[
                     styles.secondaryBtn,
                     {
@@ -1626,6 +1640,11 @@ export default function ChecklistsScreen({
                     )
                   }
                   disabled={busyMutation || !activeSyncInfo.opId}
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    disabled: Boolean(busyMutation || !activeSyncInfo.opId),
+                  }}
+                  accessibilityLabel="Keep local checklist version"
                   style={[
                     styles.secondaryBtn,
                     {
@@ -1649,6 +1668,11 @@ export default function ChecklistsScreen({
                     )
                   }
                   disabled={busyMutation || !activeSyncInfo.opId}
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    disabled: Boolean(busyMutation || !activeSyncInfo.opId),
+                  }}
+                  accessibilityLabel="Use server checklist version"
                   style={[
                     styles.secondaryBtn,
                     {
@@ -1693,6 +1717,9 @@ export default function ChecklistsScreen({
               <Pressable
                 onPress={() => handleRetryChecklistOp(activeSyncInfo.opId)}
                 disabled={busyMutation}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(busyMutation) }}
+                accessibilityLabel="Retry checklist sync"
                 style={[
                   styles.retryBtn,
                   {
@@ -1833,6 +1860,15 @@ export default function ChecklistsScreen({
                     busyMutation ||
                     activeChecklist.completedItems === activeChecklist.totalItems
                   }
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    disabled: Boolean(
+                      busyMutation ||
+                        activeChecklist.completedItems ===
+                          activeChecklist.totalItems
+                    ),
+                  }}
+                  accessibilityLabel="Mark all checklist steps complete"
                   style={[
                     styles.secondaryBtn,
                     {
@@ -1855,6 +1891,13 @@ export default function ChecklistsScreen({
                 <Pressable
                   onPress={() => handleBulkMarkItems(false)}
                   disabled={busyMutation || activeChecklist.completedItems === 0}
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    disabled: Boolean(
+                      busyMutation || activeChecklist.completedItems === 0
+                    ),
+                  }}
+                  accessibilityLabel="Reset all checklist steps to pending"
                   style={[
                     styles.secondaryBtn,
                     {
@@ -1922,6 +1965,11 @@ export default function ChecklistsScreen({
               <Pressable
                 onPress={handleAddNewItem}
                 disabled={busyMutation || !newItemTitle.trim()}
+                accessibilityRole="button"
+                accessibilityState={{
+                  disabled: Boolean(busyMutation || !newItemTitle.trim()),
+                }}
+                accessibilityLabel="Add verification step"
                 style={[
                   styles.addItemSubmitBtn,
                   {
@@ -1943,13 +1991,19 @@ export default function ChecklistsScreen({
             </View>
 
             <View style={styles.itemMetaComposerRow}>
-              <View style={styles.priorityPillsRow}>
+              <View
+                style={styles.priorityPillsRow}
+                accessibilityRole="radiogroup"
+              >
                 {CHECKLIST_PRIORITIES.map((prio) => {
                   const active = newItemPriority === prio;
                   return (
                     <Pressable
                       key={prio}
                       onPress={() => setNewItemPriority(prio)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: active, checked: active }}
+                      accessibilityLabel={`New step priority: ${prio}`}
                       style={[
                         styles.miniPill,
                         {
@@ -2139,6 +2193,12 @@ export default function ChecklistsScreen({
 
                       <Pressable
                         onPress={() => handleToggleItem(item)}
+                        disabled={isBusy}
+                        accessibilityRole="button"
+                        accessibilityState={{ disabled: Boolean(isBusy) }}
+                        accessibilityLabel={`Toggle checklist step "${item.title}", currently ${
+                          item.completed ? 'completed' : 'pending'
+                        }`}
                         style={styles.itemTextColumn}
                       >
                         <Text
@@ -2499,6 +2559,12 @@ export default function ChecklistsScreen({
                     >
                       <Pressable
                         onPress={() => handleSelectStarterTemplate('none')}
+                        accessibilityRole="radio"
+                        accessibilityState={{
+                          selected: formTemplateId === 'none',
+                          checked: formTemplateId === 'none',
+                        }}
+                        accessibilityLabel="Starter template: Blank Custom"
                         style={[
                           styles.filterPill,
                           {
@@ -2533,6 +2599,12 @@ export default function ChecklistsScreen({
                           <Pressable
                             key={tpl.id}
                             onPress={() => handleSelectStarterTemplate(tpl.id)}
+                            accessibilityRole="radio"
+                            accessibilityState={{
+                              selected: active,
+                              checked: active,
+                            }}
+                            accessibilityLabel={`Starter template: ${tpl.name} (${tpl.items.length} steps)`}
                             style={[
                               styles.filterPill,
                               {
@@ -2630,6 +2702,9 @@ export default function ChecklistsScreen({
                       <Pressable
                         key={cat}
                         onPress={() => setFormCategory(cat)}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: active, checked: active }}
+                        accessibilityLabel={`Checklist category: ${cat}`}
                         style={[
                           styles.filterPill,
                           {
@@ -2660,13 +2735,19 @@ export default function ChecklistsScreen({
                 <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                   Priority
                 </Text>
-                <View style={[styles.priorityPillsRow, { marginBottom: 12 }]}>
+                <View
+                  accessibilityRole="radiogroup"
+                  style={[styles.priorityPillsRow, { marginBottom: 12 }]}
+                >
                   {CHECKLIST_PRIORITIES.map((prio) => {
                     const active = formPriority === prio;
                     return (
                       <Pressable
                         key={prio}
                         onPress={() => setFormPriority(prio)}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: active, checked: active }}
+                        accessibilityLabel={`Checklist priority: ${prio}`}
                         style={[
                           styles.miniPill,
                           {
@@ -2698,10 +2779,21 @@ export default function ChecklistsScreen({
                 <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                   Project Association
                 </Text>
-                <View style={[styles.priorityPillsRow, { marginBottom: 12 }]}>
+                <View
+                  accessibilityRole="radiogroup"
+                  style={[styles.priorityPillsRow, { marginBottom: 12 }]}
+                >
                   {selectedProjectId ? (
                     <Pressable
                       onPress={() => setFormProjectScope('current')}
+                      accessibilityRole="radio"
+                      accessibilityState={{
+                        selected: formProjectScope === 'current',
+                        checked: formProjectScope === 'current',
+                      }}
+                      accessibilityLabel={`Associate with project ${
+                        selectedProject?.name || selectedProjectId
+                      }`}
                       style={[
                         styles.miniPill,
                         {
@@ -2734,6 +2826,12 @@ export default function ChecklistsScreen({
 
                   <Pressable
                     onPress={() => setFormProjectScope('workspace')}
+                    accessibilityRole="radio"
+                    accessibilityState={{
+                      selected: formProjectScope === 'workspace',
+                      checked: formProjectScope === 'workspace',
+                    }}
+                    accessibilityLabel="Workspace-Wide (Standalone) scope"
                     style={[
                       styles.miniPill,
                       {
@@ -2927,14 +3025,20 @@ export default function ChecklistsScreen({
           animationType="fade"
           onRequestClose={() => setDeleteTargetChecklist(null)}
         >
-          <View style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}>
+          <View
+            accessibilityViewIsModal={true}
+            style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+          >
             <View
               style={[
                 styles.modalCard,
                 { backgroundColor: colors.surface, borderColor: colors.border },
               ]}
             >
-              <Text style={[styles.modalTitle, { color: colors.danger }]}>
+              <Text
+                accessibilityRole="header"
+                style={[styles.modalTitle, { color: colors.danger }]}
+              >
                 Delete QA Checklist?
               </Text>
               <Text
@@ -2955,6 +3059,9 @@ export default function ChecklistsScreen({
                 <Pressable
                   onPress={() => setDeleteTargetChecklist(null)}
                   disabled={busyMutation}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: Boolean(busyMutation) }}
+                  accessibilityLabel="Cancel deleting checklist"
                   style={[
                     styles.modalCancelBtn,
                     {
@@ -2971,6 +3078,9 @@ export default function ChecklistsScreen({
                 <Pressable
                   onPress={handleConfirmDeleteChecklist}
                   disabled={busyMutation}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: Boolean(busyMutation) }}
+                  accessibilityLabel="Delete checklist permanently"
                   style={[
                     styles.modalConfirmBtn,
                     {
@@ -3000,7 +3110,10 @@ export default function ChecklistsScreen({
           animationType="fade"
           onRequestClose={closePromoteModal}
         >
-          <View style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}>
+          <View
+            accessibilityViewIsModal={true}
+            style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+          >
             <View
               style={[
                 styles.modalCard,
@@ -3318,6 +3431,8 @@ export default function ChecklistsScreen({
                     <View style={[styles.modalActionsRow, { marginTop: 14 }]}>
                       <Pressable
                         onPress={closePromoteModal}
+                        accessibilityRole="button"
+                        accessibilityLabel="Done"
                         style={[
                           styles.modalCancelBtn,
                           {
@@ -3335,6 +3450,8 @@ export default function ChecklistsScreen({
 
                       <Pressable
                         onPress={handleOpenPromotedProjectTestCases}
+                        accessibilityRole="button"
+                        accessibilityLabel="Open promoted project test cases"
                         style={[
                           styles.modalConfirmBtn,
                           {
@@ -3397,6 +3514,8 @@ export default function ChecklistsScreen({
                               closePromoteModal();
                               onBackToOverview();
                             }}
+                            accessibilityRole="button"
+                            accessibilityLabel="Go to Projects"
                             style={[
                               styles.secondaryHeaderBtn,
                               {
@@ -3418,7 +3537,10 @@ export default function ChecklistsScreen({
                         ) : null}
                       </View>
                     ) : (
-                      <View style={styles.promoteProjectsList}>
+                      <View
+                        accessibilityRole="radiogroup"
+                        style={styles.promoteProjectsList}
+                      >
                         {availableProjects.map((proj) => {
                           const pId = String(proj.id || proj._id);
                           const isSelected =
@@ -3439,6 +3561,13 @@ export default function ChecklistsScreen({
                               key={pId}
                               onPress={() => handleSelectPromoteProject(pId)}
                               disabled={isPromoting}
+                              accessibilityRole="radio"
+                              accessibilityState={{
+                                selected: isSelected,
+                                checked: isSelected,
+                                disabled: Boolean(isPromoting),
+                              }}
+                              accessibilityLabel={`Select destination project ${proj.name}`}
                               style={[
                                 styles.promoteProjectOption,
                                 {
@@ -3880,6 +4009,11 @@ export default function ChecklistsScreen({
                           <Pressable
                             onPress={handleConfirmPromoteChecklist}
                             disabled={isPromoting}
+                            accessibilityRole="button"
+                            accessibilityState={{
+                              disabled: Boolean(isPromoting),
+                            }}
+                            accessibilityLabel="Retry Promotion"
                             style={[
                               styles.retryBtn,
                               {
@@ -3910,6 +4044,9 @@ export default function ChecklistsScreen({
                   <Pressable
                     onPress={closePromoteModal}
                     disabled={isPromoting}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: Boolean(isPromoting) }}
+                    accessibilityLabel="Cancel promoting checklist"
                     style={[
                       styles.modalCancelBtn,
                       {
@@ -3938,6 +4075,23 @@ export default function ChecklistsScreen({
                         promotionPreview &&
                           promotionPreview.alreadyFullyPromoted
                       )
+                    }
+                    accessibilityRole="button"
+                    accessibilityState={{
+                      disabled: Boolean(
+                        isPromoting ||
+                          availableProjects.length === 0 ||
+                          !promoteTargetProjectId ||
+                          (promotionPreview &&
+                            promotionPreview.alreadyFullyPromoted)
+                      ),
+                    }}
+                    accessibilityLabel={
+                      isPromoting
+                        ? 'Promoting checklist to project'
+                        : promotionPreview?.alreadyFullyPromoted
+                        ? 'Checklist already promoted'
+                        : 'Confirm and Promote checklist'
                     }
                     style={[
                       styles.modalConfirmBtn,
@@ -4027,6 +4181,10 @@ export default function ChecklistsScreen({
               {onBackToOverview ? (
                 <Pressable
                   onPress={onBackToOverview}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    selectedProject ? 'Back to Overview' : 'Back to Projects'
+                  }
                   style={[
                     styles.secondaryHeaderBtn,
                     {
@@ -4045,6 +4203,11 @@ export default function ChecklistsScreen({
               <Pressable
                 onPress={() => loadChecklists({ silent: true })}
                 disabled={isLoading || isRefreshing}
+                accessibilityRole="button"
+                accessibilityState={{
+                  disabled: Boolean(isLoading || isRefreshing),
+                }}
+                accessibilityLabel="Refresh checklists"
                 style={[
                   styles.secondaryHeaderBtn,
                   {
@@ -4061,6 +4224,8 @@ export default function ChecklistsScreen({
 
               <Pressable
                 onPress={() => openCreateModal('none')}
+                accessibilityRole="button"
+                accessibilityLabel="Create New Checklist"
                 style={[
                   styles.primaryHeaderBtn,
                   { backgroundColor: colors.primary },
@@ -4240,6 +4405,9 @@ export default function ChecklistsScreen({
               <Pressable
                 onPress={() => handleRetryChecklistOp(null)}
                 disabled={busyMutation}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(busyMutation) }}
+                accessibilityLabel="Retry Failed Checklist Operations"
                 style={[
                   styles.retryBtn,
                   { backgroundColor: colors.surface, borderColor: colors.danger },
@@ -4253,6 +4421,11 @@ export default function ChecklistsScreen({
               <Pressable
                 onPress={() => syncNow()}
                 disabled={busyMutation || syncStatus?.isSyncing}
+                accessibilityRole="button"
+                accessibilityState={{
+                  disabled: Boolean(busyMutation || syncStatus?.isSyncing),
+                }}
+                accessibilityLabel="Sync Queued Checklists Now"
                 style={[
                   styles.retryBtn,
                   { backgroundColor: colors.primary, borderColor: colors.primary },
@@ -4265,6 +4438,8 @@ export default function ChecklistsScreen({
             ) : (
               <Pressable
                 onPress={() => loadChecklists({ silent: false })}
+                accessibilityRole="button"
+                accessibilityLabel="Retry loading checklists"
                 style={[
                   styles.retryBtn,
                   { backgroundColor: colors.surface, borderColor: colors.borderStrong },
@@ -4551,6 +4726,8 @@ export default function ChecklistsScreen({
                   <Pressable
                     key={tpl.id}
                     onPress={() => openCreateModal(tpl.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Create checklist from template ${tpl.name}`}
                     style={[
                       styles.templateQuickBtn,
                       {
@@ -4573,6 +4750,8 @@ export default function ChecklistsScreen({
                 {scopeFilter === 'project' && checklists.length > 0 ? (
                   <Pressable
                     onPress={() => setScopeFilter('all')}
+                    accessibilityRole="button"
+                    accessibilityLabel={`View all workspace checklists (${checklists.length})`}
                     style={[
                       styles.templateQuickBtn,
                       {
@@ -4599,6 +4778,8 @@ export default function ChecklistsScreen({
                   setStatusFilter('All');
                   setCategoryFilter('All');
                 }}
+                accessibilityRole="button"
+                accessibilityLabel="Reset checklist filters"
                 style={[
                   styles.primaryHeaderBtn,
                   { backgroundColor: colors.primary, marginTop: 12 },
@@ -4635,6 +4816,8 @@ export default function ChecklistsScreen({
                 <Pressable
                   key={chk.id}
                   onPress={() => handleSelectChecklist(chk)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open checklist ${chk.title}, ${chk.status}, ${chk.completedItems} of ${chk.totalItems} completed`}
                   style={[
                     styles.checklistCard,
                     {

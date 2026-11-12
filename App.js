@@ -1011,19 +1011,20 @@ function QavoraQAShell() {
 
           <Pressable
             onPress={() => {
+              if (isDrawerOpen) {
+                closeDrawer();
+              }
               if (selectedProject) {
-                setProjectViewMode(
-                  effectiveViewMode === 'details' ? 'workspace' : 'details'
-                );
+                openDashboardOverview();
               } else {
-                setProjectViewMode('selection');
+                openProjectSelection();
               }
             }}
             hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
             accessibilityRole="button"
             accessibilityLabel={
               selectedProject
-                ? `${selectedProject.name}, ${headerSubtitle}. Tap to toggle project details`
+                ? `${selectedProject.name}, ${headerSubtitle}. Return to QA Overview`
                 : 'Qavora, Select or create a project'
             }
             style={styles.brandLockup}
@@ -1092,39 +1093,6 @@ function QavoraQAShell() {
         collapsable={false}
         {...drawerPanResponder.panHandlers}
       >
-        {/* Non-Blocking Feedback Toast */}
-        {toast ? (
-          <Pressable
-            onPress={dismissToast}
-            pointerEvents={isDrawerOpen ? 'none' : 'auto'}
-            accessibilityRole="button"
-            accessibilityLabel={`Dismiss notification: ${toast.message}`}
-            style={[
-              styles.toastBanner,
-              {
-                backgroundColor: colors.surfaceElevated,
-                borderBottomColor:
-                  toast.tone === 'danger'
-                    ? colors.danger
-                    : toast.tone === 'success'
-                    ? colors.success
-                    : colors.primary,
-              },
-            ]}
-          >
-            <Text
-              numberOfLines={2}
-              style={[
-                styles.toastText,
-                { color: colors.text, fontFamily: monoFontFamily },
-              ]}
-            >
-              {toast.message}
-            </Text>
-            <Text style={[styles.toastClose, { color: colors.textMuted }]}>OK</Text>
-          </Pressable>
-        ) : null}
-
         {/* Active Viewport (Base Layer) */}
         <View
           style={styles.mainViewport}
@@ -1236,6 +1204,51 @@ function QavoraQAShell() {
             </>
           )}
         </View>
+
+        {/* Non-Blocking Feedback Toast Overlay (Out of Layout Flow) */}
+        {toast ? (
+          <View
+            pointerEvents="box-none"
+            accessibilityElementsHidden={isDrawerOpen}
+            importantForAccessibility={
+              isDrawerOpen ? 'no-hide-descendants' : 'auto'
+            }
+            style={styles.toastOverlay}
+          >
+            <Pressable
+              onPress={dismissToast}
+              pointerEvents={isDrawerOpen ? 'none' : 'auto'}
+              accessibilityRole="button"
+              accessibilityLiveRegion="polite"
+              accessibilityLabel={`Dismiss notification: ${toast.message}`}
+              style={[
+                styles.toastBanner,
+                {
+                  backgroundColor: colors.surfaceElevated,
+                  borderBottomColor:
+                    toast.tone === 'danger'
+                      ? colors.danger
+                      : toast.tone === 'success'
+                      ? colors.success
+                      : colors.primary,
+                },
+              ]}
+            >
+              <Text
+                numberOfLines={2}
+                style={[
+                  styles.toastText,
+                  { color: colors.text, fontFamily: monoFontFamily },
+                ]}
+              >
+                {toast.message}
+              </Text>
+              <Text style={[styles.toastClose, { color: colors.textMuted }]}>
+                OK
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         {/* Full-Screen Translucent Drawer Backdrop Tint (Layer Above Active Screen) */}
         <Animated.View
@@ -1775,6 +1788,13 @@ const styles = StyleSheet.create({
     height: 1.8,
     borderRadius: 0.9,
   },
+  toastOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 900,
+  },
   toastBanner: {
     minHeight: 48,
     flexDirection: 'row',
@@ -1785,6 +1805,11 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderBottomWidth: 2,
     gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.14,
+    shadowRadius: 6,
+    elevation: 6,
   },
   toastText: {
     fontSize: 12,

@@ -245,6 +245,7 @@ export default function ProjectFormModal({
     >
       <KeyboardAvoidingView
         style={[styles.overlay, { backgroundColor: colors.overlay }]}
+        accessibilityViewIsModal={true}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 16}
       >
@@ -334,6 +335,8 @@ export default function ProjectFormModal({
                 {conflictState && conflictState.isConflict && isEditMode ? (
                   <Pressable
                     onPress={handleReloadConflictProject}
+                    accessibilityRole="button"
+                    accessibilityLabel="Reload latest server version of project"
                     style={[
                       styles.conflictReloadBtn,
                       {

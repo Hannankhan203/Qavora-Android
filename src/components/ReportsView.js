@@ -817,6 +817,8 @@ export default function ReportsView() {
           {hasActiveFilters ? (
             <Pressable
               onPress={handleResetFilters}
+              accessibilityRole="button"
+              accessibilityLabel="Reset report filters"
               style={[
                 styles.emptyActionBtn,
                 { backgroundColor: colors.primary },
@@ -1162,7 +1164,11 @@ export default function ReportsView() {
               <Text style={[styles.subSectionTitle, { color: colors.text }]}>
                 Recent Execution Log
               </Text>
-              <Pressable onPress={() => setActiveTab('testruns')}>
+              <Pressable
+                onPress={() => setActiveTab('testruns')}
+                accessibilityRole="button"
+                accessibilityLabel="Open Test Runs"
+              >
                 <Text style={[styles.linkText, { color: colors.primary }]}>
                   Open Test Runs →
                 </Text>
@@ -1190,6 +1196,10 @@ export default function ReportsView() {
                           setActiveTab('testcases');
                         }
                       }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Open execution record for ${
+                        ex.testCaseId || ex.testCaseTitle || 'test case'
+                      }`}
                       style={[
                         styles.recordRow,
                         {
@@ -1395,6 +1405,8 @@ export default function ReportsView() {
                     setActiveTab('testcases');
                   }
                 }}
+                accessibilityRole="button"
+                accessibilityLabel="Manage Test Suites"
               >
                 <Text style={[styles.linkText, { color: colors.primary }]}>
                   Manage Suites →
@@ -1499,6 +1511,8 @@ export default function ReportsView() {
                           setSelectedTestCaseId(tc.id);
                           setActiveTab('testcases');
                         }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Open test case ${tc.id}: ${tc.title}`}
                         style={[
                           styles.recordRow,
                           {
@@ -1575,7 +1589,11 @@ export default function ReportsView() {
             <Text style={[styles.sectionTitle, { color: colors.text }]}>
               Test Run Cycles Report
             </Text>
-            <Pressable onPress={() => setActiveTab('testruns')}>
+            <Pressable
+              onPress={() => setActiveTab('testruns')}
+              accessibilityRole="button"
+              accessibilityLabel="Open Test Runs"
+            >
               <Text style={[styles.linkText, { color: colors.primary }]}>
                 Open Test Runs →
               </Text>
@@ -1597,6 +1615,8 @@ export default function ReportsView() {
                       setSelectedTestRunId(run.id);
                       setActiveTab('testruns');
                     }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open test run ${run.id}: ${run.name}`}
                     style={[
                       styles.suiteReportRow,
                       {
@@ -1697,7 +1717,11 @@ export default function ReportsView() {
             <Text style={[styles.sectionTitle, { color: colors.text }]}>
               Defects Breakdown & Triage
             </Text>
-            <Pressable onPress={() => setActiveTab('defects')}>
+            <Pressable
+              onPress={() => setActiveTab('defects')}
+              accessibilityRole="button"
+              accessibilityLabel="Open Defects"
+            >
               <Text style={[styles.linkText, { color: colors.primary }]}>
                 Open Defects →
               </Text>
@@ -1830,6 +1854,8 @@ export default function ReportsView() {
                         setSelectedDefectId(d.id);
                         setActiveTab('defects');
                       }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Open defect ${d.id}: ${d.title}`}
                       style={[
                         styles.recordRow,
                         {
