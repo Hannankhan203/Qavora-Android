@@ -1634,7 +1634,7 @@ function AuthRootGate() {
               { color: colors.textMuted, fontFamily: monoFontFamily },
             ]}
           >
-            Verifying authenticated session via /api/auth/me...
+            Verifying your session…
           </Text>
         </View>
       </SafeAreaView>

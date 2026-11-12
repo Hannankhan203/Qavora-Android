@@ -665,7 +665,7 @@ export default function ProjectDetailsScreen({
             <Text
               style={[styles.sectionSub, { color: colors.textSecondary }]}
             >
-              Calculated directly from synchronized project records on the Qavora backend.
+              Calculated directly from your synchronized project records.
             </Text>
 
             <View style={styles.statsGrid}>
@@ -787,7 +787,7 @@ export default function ProjectDetailsScreen({
               { color: colors.primary, fontFamily: monoFontFamily },
             ]}
           >
-            PATCH /api/projects/:id/status
+            PROJECT LIFECYCLE
           </Text>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>
             Change Project Status
@@ -869,13 +869,13 @@ export default function ProjectDetailsScreen({
               { color: colors.danger, fontFamily: monoFontFamily },
             ]}
           >
-            DANGER ZONE · DELETE /api/projects/:id
+            DANGER ZONE
           </Text>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>
             Delete Project
           </Text>
           <Text style={[styles.sectionSub, { color: colors.textSecondary }]}>
-            Permanently deletes "{selectedProject.name}" and all associated QA artifacts from MongoDB. This action cannot be undone.
+            Permanently deletes "{selectedProject.name}" and all associated QA artifacts from your Qavora workspace. This action cannot be undone.
           </Text>
 
           <Pressable

@@ -962,7 +962,7 @@ export default function ProjectSelectionScreen({
               { color: colors.textMuted, fontFamily: monoFontFamily },
             ]}
           >
-            Fetching from GET /api/projects
+            Loading your projects…
           </Text>
         </View>
       ) : null}

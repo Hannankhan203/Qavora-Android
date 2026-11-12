@@ -286,8 +286,8 @@ export default function ProjectFormModal({
                   ]}
                 >
                   {isEditMode
-                    ? `PATCH /api/projects/${initialProject.id || initialProject._id}`
-                    : 'POST /api/projects'}
+                    ? 'Update project details and settings'
+                    : 'Create a new QA project in your workspace'}
                 </Text>
               </View>
             </View>
