@@ -1477,7 +1477,7 @@ export function WorkspaceProvider({ children }) {
       setTestCasesSubTabState(cleanSub);
       if (typeof caseId === 'string' && caseId.trim()) {
         setSelectedTestCaseIdState(caseId.trim());
-      } else if (cleanSub !== 'cases') {
+      } else {
         setSelectedTestCaseIdState(null);
       }
     },
@@ -1545,6 +1545,8 @@ export function WorkspaceProvider({ children }) {
       setActiveTabState('defects');
       if (typeof defectId === 'string' && defectId.trim()) {
         setSelectedDefectId(defectId.trim());
+      } else {
+        setSelectedDefectId(null);
       }
     },
     [showToast]

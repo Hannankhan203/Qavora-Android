@@ -13,7 +13,6 @@ import { useProjects } from '../context/ProjectContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
 import ReportsView from './ReportsView';
-import ChecklistsScreen from './ChecklistsScreen';
 
 export default function DashboardScreen({ onNavigateToDestination }) {
   const { colors } = useTheme();
@@ -33,12 +32,7 @@ export default function DashboardScreen({ onNavigateToDestination }) {
     activityLog,
     dashboardSubTab,
     setDashboardSubTab,
-    activeChecklistId,
-    setActiveChecklistId,
-    checklistCreateModalOpen,
-    setChecklistCreateModalOpen,
-    checklistCreateTemplateId,
-    setChecklistCreateTemplateId,
+    openChecklistsView,
     reloadProjectDataFromBackend,
     isSyncingProjectData,
     setActiveTab,
@@ -51,6 +45,14 @@ export default function DashboardScreen({ onNavigateToDestination }) {
     setSelectedDefectId,
     showToast,
   } = useWorkspace();
+
+  const handleOpenChecklists = () => {
+    if (typeof openChecklistsView === 'function') {
+      openChecklistsView({ keepRunner: false });
+    } else if (typeof onNavigateToDestination === 'function') {
+      onNavigateToDestination('my_checklists');
+    }
+  };
 
   const isRefreshingAny = isRefreshing || isSyncingProjectData;
 
@@ -191,39 +193,29 @@ export default function DashboardScreen({ onNavigateToDestination }) {
           </Pressable>
 
           <Pressable
-            onPress={() => setDashboardSubTab('checklists')}
+            onPress={handleOpenChecklists}
             hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
             accessibilityRole="tab"
-            accessibilityState={{ selected: dashboardSubTab === 'checklists' }}
+            accessibilityState={{ selected: false }}
             accessibilityLabel="QA Checklists"
             style={[
               styles.modeToggleBtn,
               {
-                backgroundColor:
-                  dashboardSubTab === 'checklists'
-                    ? colors.primary
-                    : 'transparent',
+                backgroundColor: 'transparent',
               },
             ]}
           >
             <VectorIcon
               name="clipboard"
               size={14}
-              color={
-                dashboardSubTab === 'checklists'
-                  ? colors.textOnPrimary
-                  : colors.textSecondary
-              }
+              color={colors.textSecondary}
             />
             <Text
               style={[
                 styles.modeToggleBtnText,
                 {
-                  color:
-                    dashboardSubTab === 'checklists'
-                      ? colors.textOnPrimary
-                      : colors.textSecondary,
-                  fontWeight: dashboardSubTab === 'checklists' ? '700' : '600',
+                  color: colors.textSecondary,
+                  fontWeight: '600',
                 },
               ]}
             >
@@ -275,21 +267,6 @@ export default function DashboardScreen({ onNavigateToDestination }) {
 
         {dashboardSubTab === 'reports' ? (
           <ReportsView />
-        ) : dashboardSubTab === 'checklists' ? (
-          <ChecklistsScreen
-            embedded={true}
-            activeChecklistId={activeChecklistId}
-            onChangeActiveChecklistId={setActiveChecklistId}
-            createModalOpen={checklistCreateModalOpen}
-            onChangeCreateModalOpen={setChecklistCreateModalOpen}
-            initialTemplateId={checklistCreateTemplateId}
-            onResetTemplateId={() => setChecklistCreateTemplateId('none')}
-            onBackToOverview={() => {
-              setChecklistCreateModalOpen(false);
-              setActiveChecklistId(null);
-              setDashboardSubTab('overview');
-            }}
-          />
         ) : (
           <>
             {/* 1. Active Project Overview Card */}
@@ -430,7 +407,7 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                 </Pressable>
 
                 <Pressable
-                  onPress={() => setDashboardSubTab('checklists')}
+                  onPress={handleOpenChecklists}
                   style={[
                     styles.projectActionBtn,
                     {
