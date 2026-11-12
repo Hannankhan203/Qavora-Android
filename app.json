@@ -1,4 +1,3 @@
-
 {
   "expo": {
     "name": "Qavora",
@@ -8,9 +7,9 @@
     "icon": "./assets/qavora-icon-512.png",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/qavora-icon-512.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0B1120"
+      "backgroundColor": "#181C28"
     },
     "ios": {
       "supportsTablet": true
