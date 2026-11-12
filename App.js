@@ -12,6 +12,7 @@ import {
   Keyboard,
   Platform,
   ActivityIndicator,
+  PanResponder,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme, monoFontFamily } from './src/theme/theme';
@@ -156,6 +157,17 @@ function QavoraQAShell() {
   const [isDrawerRendered, setIsDrawerRendered] = useState(false);
   const drawerAnim = useRef(new Animated.Value(0)).current;
   const isKeyboardOpenRef = useRef(false);
+  const isDrawerOpenRef = useRef(false);
+  const drawerWidthRef = useRef(drawerWidth);
+  const gestureStartOpenRef = useRef(false);
+
+  useEffect(() => {
+    isDrawerOpenRef.current = isDrawerOpen;
+  }, [isDrawerOpen]);
+
+  useEffect(() => {
+    drawerWidthRef.current = drawerWidth;
+  }, [drawerWidth]);
 
   useEffect(() => {
     const showEvent =
@@ -179,6 +191,7 @@ function QavoraQAShell() {
   const openDrawer = useCallback(() => {
     Keyboard.dismiss();
     isKeyboardOpenRef.current = false;
+    isDrawerOpenRef.current = true;
     setIsDrawerRendered(true);
     setIsDrawerOpen(true);
     Animated.timing(drawerAnim, {
@@ -189,17 +202,122 @@ function QavoraQAShell() {
   }, [drawerAnim]);
 
   const closeDrawer = useCallback(() => {
+    isDrawerOpenRef.current = false;
     setIsDrawerOpen(false);
     Animated.timing(drawerAnim, {
       toValue: 0,
       duration: 180,
       useNativeDriver: true,
     }).start(({ finished }) => {
-      if (finished) {
+      if (finished && !isDrawerOpenRef.current) {
         setIsDrawerRendered(false);
       }
     });
   }, [drawerAnim]);
+
+  const openDrawerRef = useRef(openDrawer);
+  const closeDrawerRef = useRef(closeDrawer);
+  useEffect(() => {
+    openDrawerRef.current = openDrawer;
+    closeDrawerRef.current = closeDrawer;
+  }, [openDrawer, closeDrawer]);
+
+  // Edge activation zone (~28dp) and horizontal thresholds for drawer swipe gestures
+  const DRAWER_EDGE_ZONE_DP = 28;
+  const DRAWER_SWIPE_CAPTURE_DX = 14;
+  const DRAWER_SWIPE_COMMIT_DX = 56;
+  const DRAWER_SWIPE_COMMIT_VX = 0.35;
+
+  const shouldCaptureDrawerSwipe = useCallback((evt, gestureState) => {
+    if (!gestureState) return false;
+    const { dx, dy } = gestureState;
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    // Require clear horizontal dominance so vertical scrolling is never interrupted
+    if (absDx < DRAWER_SWIPE_CAPTURE_DX || absDx <= absDy * 1.5) {
+      return false;
+    }
+
+    if (!isDrawerOpenRef.current) {
+      // Closed -> only activate when swiping right from the left 28dp screen edge
+      const startX =
+        typeof gestureState.x0 === 'number' && gestureState.x0 > 0
+          ? gestureState.x0
+          : evt &&
+            evt.nativeEvent &&
+            typeof evt.nativeEvent.pageX === 'number'
+          ? evt.nativeEvent.pageX - dx
+          : 999;
+      return startX >= 0 && startX <= DRAWER_EDGE_ZONE_DP && dx >= DRAWER_SWIPE_CAPTURE_DX && absDy < 28;
+    }
+
+    // Open -> activate when swiping left to close the drawer
+    return dx <= -DRAWER_SWIPE_CAPTURE_DX;
+  }, []);
+
+  const drawerPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onStartShouldSetPanResponderCapture: () => false,
+        onMoveShouldSetPanResponder: shouldCaptureDrawerSwipe,
+        onMoveShouldSetPanResponderCapture: shouldCaptureDrawerSwipe,
+        onPanResponderGrant: () => {
+          gestureStartOpenRef.current = isDrawerOpenRef.current;
+          if (!gestureStartOpenRef.current) {
+            Keyboard.dismiss();
+            isKeyboardOpenRef.current = false;
+            setIsDrawerRendered(true);
+          }
+        },
+        onPanResponderMove: (_evt, gestureState) => {
+          const width = Math.max(drawerWidthRef.current || 280, 1);
+          if (!gestureStartOpenRef.current) {
+            const progress = Math.min(1, Math.max(0, gestureState.dx / width));
+            drawerAnim.setValue(progress);
+          } else {
+            const progress = Math.min(
+              1,
+              Math.max(0, 1 + gestureState.dx / width)
+            );
+            drawerAnim.setValue(progress);
+          }
+        },
+        onPanResponderRelease: (_evt, gestureState) => {
+          const { dx, vx } = gestureState;
+          if (!gestureStartOpenRef.current) {
+            if (
+              dx >= DRAWER_SWIPE_COMMIT_DX ||
+              (dx >= 28 && vx >= DRAWER_SWIPE_COMMIT_VX)
+            ) {
+              openDrawerRef.current();
+            } else {
+              closeDrawerRef.current();
+            }
+          } else {
+            if (
+              dx <= -DRAWER_SWIPE_COMMIT_DX ||
+              (dx <= -28 && vx <= -DRAWER_SWIPE_COMMIT_VX)
+            ) {
+              closeDrawerRef.current();
+            } else {
+              openDrawerRef.current();
+            }
+          }
+        },
+        onPanResponderTerminate: () => {
+          if (gestureStartOpenRef.current) {
+            openDrawerRef.current();
+          } else {
+            closeDrawerRef.current();
+          }
+        },
+        onPanResponderTerminationRequest: () => false,
+        onShouldBlockNativeResponder: () => true,
+      }),
+    [drawerAnim, shouldCaptureDrawerSwipe]
+  );
 
   const toggleDrawer = useCallback(() => {
     if (isDrawerOpen) {
@@ -697,6 +815,7 @@ function QavoraQAShell() {
     <SafeAreaView
       edges={['top', 'bottom', 'left', 'right']}
       style={[styles.safeRoot, { backgroundColor: colors.background }]}
+      {...drawerPanResponder.panHandlers}
     >
       <StatusBar style={colors.statusBar} />
 
