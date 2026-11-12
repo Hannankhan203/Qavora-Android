@@ -3,6 +3,7 @@ import {
   View,
   Text,
   ScrollView,
+  FlatList,
   TouchableOpacity,
   TextInput,
   ActivityIndicator,
@@ -25,6 +26,550 @@ import styles from './testRuns/testRunsStyles';
 import TestRunExecutionModal from './testRuns/TestRunExecutionModal';
 import TestRunFormModal from './testRuns/TestRunFormModal';
 import TestRunDeleteModal from './testRuns/TestRunDeleteModal';
+
+const RunSelectorTabCard = React.memo(function RunSelectorTabCard({
+  run,
+  isSelected,
+  theme,
+  onSelectRun,
+}) {
+  const metrics = computeRunMetrics(run.results);
+  const completionPct =
+    metrics.totalCases > 0
+      ? Math.round((metrics.executedCount / metrics.totalCases) * 100)
+      : 0;
+
+  return (
+    <TouchableOpacity
+      onPress={() => onSelectRun(run.id)}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: isSelected }}
+      accessibilityLabel={`Select test run ${run.id} ${run.name}, status ${run.status}`}
+      style={[
+        styles.runTabCard,
+        {
+          backgroundColor: isSelected
+            ? theme.primarySoft
+            : theme.surfaceElevated,
+          borderColor: isSelected ? theme.primary : theme.border,
+        },
+      ]}
+    >
+      <View style={styles.runTabTop}>
+        <Text
+          style={[
+            styles.runTabId,
+            {
+              color: isSelected ? theme.primary : theme.textMuted,
+              fontFamily: monoFontFamily,
+            },
+          ]}
+        >
+          {run.id}
+        </Text>
+        <View
+          style={[
+            styles.runStatusPill,
+            {
+              backgroundColor:
+                run.status === 'Completed'
+                  ? theme.successSoft
+                  : theme.warningSoft,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.runStatusText,
+              {
+                color:
+                  run.status === 'Completed' ? theme.success : theme.warning,
+              },
+            ]}
+          >
+            {run.status}
+          </Text>
+        </View>
+      </View>
+      <Text
+        style={[styles.runTabName, { color: theme.text }]}
+        numberOfLines={1}
+      >
+        {run.name}
+      </Text>
+      <View style={styles.runMiniProgress}>
+        <View
+          style={[styles.runMiniTrack, { backgroundColor: theme.border }]}
+        >
+          <View
+            style={[
+              styles.runMiniFill,
+              {
+                width: `${completionPct}%`,
+                backgroundColor:
+                  metrics.failedCases > 0 ? theme.danger : theme.success,
+              },
+            ]}
+          />
+        </View>
+        <Text style={[styles.runMiniPct, { color: theme.textSecondary }]}>
+          {metrics.passedCases}P • {metrics.failedCases}F • {completionPct}%
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+const ExecutionCaseRowCard = React.memo(function ExecutionCaseRowCard({
+  tc,
+  activeRun,
+  sMeta,
+  linkedDefect,
+  isSubmittingExec,
+  theme,
+  onOpenExecution,
+  onOpenDefect,
+  onQuickOutcome,
+  onStartDefect,
+}) {
+  const status = tc.runResult?.status || 'Untested';
+
+  return (
+    <View
+      style={[
+        styles.execCaseCard,
+        {
+          backgroundColor: theme.surface,
+          borderColor: theme.border,
+        },
+      ]}
+    >
+      <TouchableOpacity
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={`Execute test case ${tc.id}: ${tc.title}, status ${sMeta.webOutcome}`}
+        onPress={() => onOpenExecution(tc)}
+      >
+        <View style={styles.execCardTop}>
+          <View style={styles.execIdWrap}>
+            <Text
+              style={[
+                styles.execId,
+                {
+                  color: theme.primary,
+                  fontFamily: monoFontFamily,
+                },
+              ]}
+            >
+              {tc.id}
+            </Text>
+            <View style={[styles.execBadge, { backgroundColor: sMeta.bg }]}>
+              <VectorIcon name={sMeta.icon} size={11} color={sMeta.color} />
+              <Text style={[styles.execBadgeText, { color: sMeta.color }]}>
+                {sMeta.webOutcome} ({sMeta.label})
+              </Text>
+            </View>
+          </View>
+          <Text style={[styles.execStepsCount, { color: theme.textMuted }]}>
+            {tc.steps?.length || 0} steps
+          </Text>
+        </View>
+
+        <Text style={[styles.execTitle, { color: theme.text }]}>
+          {tc.title}
+        </Text>
+
+        {tc.runResult?.actualResult ? (
+          <View
+            style={[
+              styles.execNotesBox,
+              {
+                backgroundColor: theme.surfaceMuted,
+                borderColor: theme.border,
+              },
+            ]}
+          >
+            <VectorIcon name="check" size={12} color={theme.primary} />
+            <Text
+              style={[styles.execNotesText, { color: theme.textSecondary }]}
+            >
+              Actual: {tc.runResult.actualResult}
+            </Text>
+          </View>
+        ) : null}
+
+        {tc.runResult?.notes ? (
+          <View
+            style={[
+              styles.execNotesBox,
+              {
+                backgroundColor: theme.surfaceMuted,
+                borderColor: theme.border,
+              },
+            ]}
+          >
+            <VectorIcon name="info" size={12} color={theme.textSecondary} />
+            <Text
+              style={[styles.execNotesText, { color: theme.textSecondary }]}
+            >
+              Notes: {tc.runResult.notes}
+            </Text>
+          </View>
+        ) : null}
+
+        {tc.runResult?.executedAt ? (
+          <Text style={[styles.execTimestampText, { color: theme.textMuted }]}>
+            Executed {formatShortTimestamp(tc.runResult.executedAt)} by{' '}
+            {tc.runResult.tester || 'QA Engineer'} •{' '}
+            {tc.runResult.environment || activeRun.environment || 'Staging'}
+          </Text>
+        ) : null}
+
+        {linkedDefect && (
+          <TouchableOpacity
+            style={[
+              styles.linkedBugChip,
+              {
+                backgroundColor: theme.dangerSoft,
+                borderColor: theme.danger,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={`Open linked defect ${
+              linkedDefect.defectId || linkedDefect.id
+            }, ${linkedDefect.status}`}
+            onPress={() => onOpenDefect(linkedDefect.id)}
+          >
+            <VectorIcon name="alert" size={12} color={theme.danger} />
+            <Text style={[styles.linkedBugText, { color: theme.danger }]}>
+              Linked Defect: {linkedDefect.defectId || linkedDefect.id} (
+              {linkedDefect.status})
+            </Text>
+          </TouchableOpacity>
+        )}
+      </TouchableOpacity>
+
+      {/* Quick Outcome Controls + Step Runner */}
+      <View
+        style={[styles.quickActionRow, { borderTopColor: theme.border }]}
+      >
+        <View style={styles.quickStatusGroup}>
+          <TouchableOpacity
+            style={[
+              styles.quickBtn,
+              {
+                backgroundColor:
+                  status === 'Passed' ? theme.success : theme.successSoft,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityState={{
+              selected: status === 'Passed',
+              disabled: Boolean(isSubmittingExec),
+            }}
+            accessibilityLabel={`Mark ${tc.id} passed`}
+            onPress={() => onQuickOutcome(tc, 'Passed')}
+            disabled={isSubmittingExec}
+          >
+            <VectorIcon
+              name="check"
+              size={12}
+              color={status === 'Passed' ? '#FFFFFF' : theme.success}
+            />
+            <Text
+              style={[
+                styles.quickBtnText,
+                {
+                  color: status === 'Passed' ? '#FFFFFF' : theme.success,
+                },
+              ]}
+            >
+              Pass
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.quickBtn,
+              {
+                backgroundColor:
+                  status === 'Failed' ? theme.danger : theme.dangerSoft,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityState={{
+              selected: status === 'Failed',
+              disabled: Boolean(isSubmittingExec),
+            }}
+            accessibilityLabel={`Mark ${tc.id} failed`}
+            onPress={() => onQuickOutcome(tc, 'Failed')}
+            disabled={isSubmittingExec}
+          >
+            <VectorIcon
+              name="close"
+              size={12}
+              color={status === 'Failed' ? '#FFFFFF' : theme.danger}
+            />
+            <Text
+              style={[
+                styles.quickBtnText,
+                {
+                  color: status === 'Failed' ? '#FFFFFF' : theme.danger,
+                },
+              ]}
+            >
+              Fail
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.quickBtn,
+              {
+                backgroundColor:
+                  status === 'Blocked' ? theme.warning : theme.warningSoft,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityState={{
+              selected: status === 'Blocked',
+              disabled: Boolean(isSubmittingExec),
+            }}
+            accessibilityLabel={`Mark ${tc.id} blocked`}
+            onPress={() => onQuickOutcome(tc, 'Blocked')}
+            disabled={isSubmittingExec}
+          >
+            <VectorIcon
+              name="alert"
+              size={12}
+              color={status === 'Blocked' ? '#FFFFFF' : theme.warning}
+            />
+            <Text
+              style={[
+                styles.quickBtnText,
+                {
+                  color: status === 'Blocked' ? '#FFFFFF' : theme.warning,
+                },
+              ]}
+            >
+              Block
+            </Text>
+          </TouchableOpacity>
+
+          {status !== 'Untested' && (
+            <TouchableOpacity
+              style={[
+                styles.quickBtn,
+                {
+                  backgroundColor: theme.surfaceMuted,
+                },
+              ]}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel={`Reset ${tc.id} to untested`}
+              onPress={() => onQuickOutcome(tc, 'Untested')}
+              disabled={isSubmittingExec}
+            >
+              <VectorIcon
+                name="refresh"
+                size={12}
+                color={theme.textSecondary}
+              />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <View style={styles.quickRightGroup}>
+          <TouchableOpacity
+            style={[
+              styles.logBugInlineBtn,
+              {
+                backgroundColor: theme.dangerSoft,
+                borderColor: theme.danger,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={`Log defect for ${tc.id}`}
+            onPress={() =>
+              onStartDefect({
+                testRun: activeRun,
+                testCase: tc,
+                actualResult:
+                  tc.runResult?.actualResult ||
+                  tc.runResult?.notes ||
+                  'Test failed during run execution.',
+                notes: tc.runResult?.notes || '',
+              })
+            }
+          >
+            <VectorIcon name="alert" size={12} color={theme.danger} />
+            <Text style={[styles.logBugInlineText, { color: theme.danger }]}>
+              Defect
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.stepRunnerBtn,
+              {
+                backgroundColor: theme.primarySoft,
+                borderColor: theme.primary,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={`Execute steps for ${tc.id}`}
+            onPress={() => onOpenExecution(tc)}
+          >
+            <VectorIcon
+              name="chevron-right"
+              size={12}
+              color={theme.primary}
+            />
+            <Text style={[styles.stepRunnerBtnText, { color: theme.primary }]}>
+              Execute
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  );
+});
+
+const ExecutionHistoryRowCard = React.memo(function ExecutionHistoryRowCard({
+  exec,
+  sMeta,
+  runObj,
+  linkedDefect,
+  theme,
+  onSelectRunFromHistory,
+  onOpenDefect,
+}) {
+  return (
+    <View
+      style={[
+        styles.execCaseCard,
+        {
+          backgroundColor: theme.surface,
+          borderColor: theme.border,
+        },
+      ]}
+    >
+      <View style={styles.execCardTop}>
+        <View style={styles.execIdWrap}>
+          <Text
+            style={[
+              styles.execId,
+              { color: theme.primary, fontFamily: monoFontFamily },
+            ]}
+          >
+            {exec.caseId || exec.testCaseId}
+          </Text>
+          <View style={[styles.execBadge, { backgroundColor: sMeta.bg }]}>
+            <VectorIcon name={sMeta.icon} size={11} color={sMeta.color} />
+            <Text style={[styles.execBadgeText, { color: sMeta.color }]}>
+              {sMeta.webOutcome}
+            </Text>
+          </View>
+          {exec.runId ? (
+            <TouchableOpacity
+              style={[
+                styles.historyRunBadge,
+                {
+                  backgroundColor: theme.surfaceMuted,
+                  borderColor: theme.border,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={`Open test run ${
+                runObj ? `${runObj.id} ${runObj.name}` : exec.runId
+              }`}
+              onPress={() => onSelectRunFromHistory(exec.runId)}
+            >
+              <Text
+                style={[
+                  styles.historyRunBadgeText,
+                  { color: theme.textSecondary },
+                ]}
+              >
+                {runObj ? `${runObj.id} • ${runObj.name}` : exec.runId}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        <Text style={[styles.execStepsCount, { color: theme.textMuted }]}>
+          {formatShortTimestamp(exec.executedAt)}
+        </Text>
+      </View>
+
+      <Text style={[styles.execTitle, { color: theme.text }]}>
+        {exec.caseTitle || exec.caseId || exec.testCaseId}
+      </Text>
+
+      {exec.actualResult ? (
+        <View
+          style={[
+            styles.execNotesBox,
+            {
+              backgroundColor: theme.surfaceMuted,
+              borderColor: theme.border,
+            },
+          ]}
+        >
+          <VectorIcon name="check" size={12} color={theme.primary} />
+          <Text style={[styles.execNotesText, { color: theme.textSecondary }]}>
+            Actual: {exec.actualResult}
+          </Text>
+        </View>
+      ) : null}
+
+      {exec.notes ? (
+        <View
+          style={[
+            styles.execNotesBox,
+            {
+              backgroundColor: theme.surfaceMuted,
+              borderColor: theme.border,
+            },
+          ]}
+        >
+          <VectorIcon name="info" size={12} color={theme.textSecondary} />
+          <Text style={[styles.execNotesText, { color: theme.textSecondary }]}>
+            Notes: {exec.notes}
+          </Text>
+        </View>
+      ) : null}
+
+      <Text style={[styles.execTimestampText, { color: theme.textMuted }]}>
+        Tester: {exec.tester || 'QA Engineer'} • Env:{' '}
+        {exec.environment || 'Staging'}
+        {exec.device ? ` • ${exec.device}` : ''}
+        {exec.buildVersion ? ` • Build ${exec.buildVersion}` : ''}
+      </Text>
+
+      {linkedDefect && (
+        <TouchableOpacity
+          style={[
+            styles.linkedBugChip,
+            {
+              backgroundColor: theme.dangerSoft,
+              borderColor: theme.danger,
+            },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={`Open linked defect ${
+            linkedDefect.defectId || linkedDefect.id
+          }`}
+          onPress={() => onOpenDefect(linkedDefect.id)}
+        >
+          <VectorIcon name="alert" size={12} color={theme.danger} />
+          <Text style={[styles.linkedBugText, { color: theme.danger }]}>
+            Linked Defect: {linkedDefect.defectId || linkedDefect.id}
+          </Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+});
 
 export default function TestRunsScreen({
   viewMode: controlledViewMode,
@@ -76,16 +621,19 @@ export default function TestRunsScreen({
       ? contextViewMode
       : localViewMode;
 
-  const setActiveViewMode = (nextMode) => {
-    const cleanMode = nextMode === 'history' ? 'history' : 'runs';
-    setLocalViewMode(cleanMode);
-    if (typeof onChangeViewMode === 'function') {
-      onChangeViewMode(cleanMode);
-    }
-    if (typeof setContextViewMode === 'function') {
-      setContextViewMode(cleanMode);
-    }
-  };
+  const setActiveViewMode = useCallback(
+    (nextMode) => {
+      const cleanMode = nextMode === 'history' ? 'history' : 'runs';
+      setLocalViewMode(cleanMode);
+      if (typeof onChangeViewMode === 'function') {
+        onChangeViewMode(cleanMode);
+      }
+      if (typeof setContextViewMode === 'function') {
+        setContextViewMode(cleanMode);
+      }
+    },
+    [onChangeViewMode, setContextViewMode]
+  );
 
   // Filters for active run cases
   const [resultFilter, setResultFilter] = useState('All');
@@ -111,15 +659,18 @@ export default function TestRunsScreen({
       ? contextExecutingCaseId
       : localExecutingCaseId;
 
-  const setExecutingCaseId = (nextCaseId) => {
-    setLocalExecutingCaseId(nextCaseId);
-    if (typeof onChangeExecutingCaseId === 'function') {
-      onChangeExecutingCaseId(nextCaseId);
-    }
-    if (typeof setContextExecutingCaseId === 'function') {
-      setContextExecutingCaseId(nextCaseId);
-    }
-  };
+  const setExecutingCaseId = useCallback(
+    (nextCaseId) => {
+      setLocalExecutingCaseId(nextCaseId);
+      if (typeof onChangeExecutingCaseId === 'function') {
+        onChangeExecutingCaseId(nextCaseId);
+      }
+      if (typeof setContextExecutingCaseId === 'function') {
+        setContextExecutingCaseId(nextCaseId);
+      }
+    },
+    [onChangeExecutingCaseId, setContextExecutingCaseId]
+  );
   const [execNotes, setExecNotes] = useState('');
   const [execActualResult, setExecActualResult] = useState('');
   const [execTester, setExecTester] = useState('');
@@ -305,42 +856,45 @@ export default function TestRunsScreen({
     return runCasesWithResults.find((c) => c.id === executingCaseId) || null;
   }, [executingCaseId, runCasesWithResults]);
 
-  const openExecutionModal = (caseItem) => {
-    setExecutingCaseId(caseItem.id);
-    setExecNotes(caseItem.runResult?.notes || '');
-    setExecActualResult(caseItem.runResult?.actualResult || '');
-    setExecTester(
-      caseItem.runResult?.tester ||
-        activeRun?.tester ||
-        profile?.testerName ||
-        'QA Engineer'
-    );
-    setExecEnvironment(
-      caseItem.runResult?.environment ||
-        activeRun?.environment ||
-        currentProject?.environment ||
-        'Android 14 / Staging'
-    );
-    setExecDevice(
-      caseItem.runResult?.device ||
-        activeRun?.deviceInfo ||
-        profile?.defaultDevice ||
-        'Pixel 8 Pro • Android 14'
-    );
-    setExecBuildVersion(
-      caseItem.runResult?.buildVersion ||
-        activeRun?.buildVersion ||
-        currentProject?.version ||
-        profile?.defaultBuild ||
-        '2.4.0-rc3'
-    );
-    const existingSteps = caseItem.runResult?.stepStatuses || {};
-    const initialSteps = {};
-    (caseItem.steps || []).forEach((_, idx) => {
-      initialSteps[idx] = existingSteps[idx] || 'Untested';
-    });
-    setStepStatuses(initialSteps);
-  };
+  const openExecutionModal = useCallback(
+    (caseItem) => {
+      setExecutingCaseId(caseItem.id);
+      setExecNotes(caseItem.runResult?.notes || '');
+      setExecActualResult(caseItem.runResult?.actualResult || '');
+      setExecTester(
+        caseItem.runResult?.tester ||
+          activeRun?.tester ||
+          profile?.testerName ||
+          'QA Engineer'
+      );
+      setExecEnvironment(
+        caseItem.runResult?.environment ||
+          activeRun?.environment ||
+          currentProject?.environment ||
+          'Android 14 / Staging'
+      );
+      setExecDevice(
+        caseItem.runResult?.device ||
+          activeRun?.deviceInfo ||
+          profile?.defaultDevice ||
+          'Pixel 8 Pro • Android 14'
+      );
+      setExecBuildVersion(
+        caseItem.runResult?.buildVersion ||
+          activeRun?.buildVersion ||
+          currentProject?.version ||
+          profile?.defaultBuild ||
+          '2.4.0-rc3'
+      );
+      const existingSteps = caseItem.runResult?.stepStatuses || {};
+      const initialSteps = {};
+      (caseItem.steps || []).forEach((_, idx) => {
+        initialSteps[idx] = existingSteps[idx] || 'Untested';
+      });
+      setStepStatuses(initialSteps);
+    },
+    [activeRun, currentProject, profile, setExecutingCaseId]
+  );
 
   const toggleStepStatus = (idx, nextStatus) => {
     setStepStatuses((prev) => ({
@@ -414,49 +968,52 @@ export default function TestRunsScreen({
     }
   };
 
-  const handleQuickOutcome = async (caseItem, status) => {
-    if (!activeRun || isSubmittingExec) return;
-    setIsSubmittingExec(true);
-    try {
-      const res = await recordTestExecution({
-        testRunId: activeRun.id,
-        testCaseId: caseItem.id,
-        status,
-        notes: caseItem.runResult?.notes || '',
-        actualResult:
-          caseItem.runResult?.actualResult ||
-          (status === 'Passed'
-            ? caseItem.expectedResult || 'Verified expected behavior.'
-            : ''),
-        tester:
-          caseItem.runResult?.tester ||
-          activeRun.tester ||
-          profile?.testerName ||
-          'QA Engineer',
-        environment:
-          caseItem.runResult?.environment ||
-          activeRun.environment ||
-          'Android 14 / Staging',
-        device: caseItem.runResult?.device || activeRun.deviceInfo || '',
-        buildVersion:
-          caseItem.runResult?.buildVersion || activeRun.buildVersion || '',
-        stepStatuses: caseItem.runResult?.stepStatuses || {},
-      });
-      if (!res?.ok) {
-        showFeedback(
-          'error',
-          res?.error || 'Failed to update execution result.'
-        );
-      } else {
-        showFeedback(
-          'success',
-          `${caseItem.id} marked as ${toWebExecutionOutcome(status)}.`
-        );
+  const handleQuickOutcome = useCallback(
+    async (caseItem, status) => {
+      if (!activeRun || isSubmittingExec) return;
+      setIsSubmittingExec(true);
+      try {
+        const res = await recordTestExecution({
+          testRunId: activeRun.id,
+          testCaseId: caseItem.id,
+          status,
+          notes: caseItem.runResult?.notes || '',
+          actualResult:
+            caseItem.runResult?.actualResult ||
+            (status === 'Passed'
+              ? caseItem.expectedResult || 'Verified expected behavior.'
+              : ''),
+          tester:
+            caseItem.runResult?.tester ||
+            activeRun.tester ||
+            profile?.testerName ||
+            'QA Engineer',
+          environment:
+            caseItem.runResult?.environment ||
+            activeRun.environment ||
+            'Android 14 / Staging',
+          device: caseItem.runResult?.device || activeRun.deviceInfo || '',
+          buildVersion:
+            caseItem.runResult?.buildVersion || activeRun.buildVersion || '',
+          stepStatuses: caseItem.runResult?.stepStatuses || {},
+        });
+        if (!res?.ok) {
+          showFeedback(
+            'error',
+            res?.error || 'Failed to update execution result.'
+          );
+        } else {
+          showFeedback(
+            'success',
+            `${caseItem.id} marked as ${toWebExecutionOutcome(status)}.`
+          );
+        }
+      } finally {
+        setIsSubmittingExec(false);
       }
-    } finally {
-      setIsSubmittingExec(false);
-    }
-  };
+    },
+    [activeRun, isSubmittingExec, recordTestExecution, profile]
+  );
 
   const openCreateRunModal = () => {
     setEditingRunId(null);
@@ -605,47 +1162,194 @@ export default function TestRunsScreen({
     }
   };
 
-  const getStatusMeta = (status) => {
-    if (status === 'Passed' || status === 'Pass') {
+  const getStatusMeta = useCallback(
+    (status) => {
+      if (status === 'Passed' || status === 'Pass') {
+        return {
+          color: theme.success,
+          bg: theme.successSoft,
+          icon: 'check',
+          label: status === 'Pass' ? 'Pass' : 'Passed',
+          webOutcome: 'Pass',
+        };
+      }
+      if (status === 'Failed' || status === 'Fail') {
+        return {
+          color: theme.danger,
+          bg: theme.dangerSoft,
+          icon: 'close',
+          label: status === 'Fail' ? 'Fail' : 'Failed',
+          webOutcome: 'Fail',
+        };
+      }
+      if (status === 'Blocked') {
+        return {
+          color: theme.warning,
+          bg: theme.warningSoft,
+          icon: 'alert',
+          label: 'Blocked',
+          webOutcome: 'Blocked',
+        };
+      }
       return {
-        color: theme.success,
-        bg: theme.successSoft,
-        icon: 'check',
-        label: status === 'Pass' ? 'Pass' : 'Passed',
-        webOutcome: 'Pass',
+        color: theme.textMuted,
+        bg: theme.surfaceMuted,
+        icon: 'info',
+        label: status === 'Not Run' ? 'Not Run' : 'Untested',
+        webOutcome: 'Not Run',
       };
-    }
-    if (status === 'Failed' || status === 'Fail') {
-      return {
-        color: theme.danger,
-        bg: theme.dangerSoft,
-        icon: 'close',
-        label: status === 'Fail' ? 'Fail' : 'Failed',
-        webOutcome: 'Fail',
-      };
-    }
-    if (status === 'Blocked') {
-      return {
-        color: theme.warning,
-        bg: theme.warningSoft,
-        icon: 'alert',
-        label: 'Blocked',
-        webOutcome: 'Blocked',
-      };
-    }
-    return {
-      color: theme.textMuted,
-      bg: theme.surfaceMuted,
-      icon: 'info',
-      label: status === 'Not Run' ? 'Not Run' : 'Untested',
-      webOutcome: 'Not Run',
-    };
-  };
+    },
+    [theme]
+  );
 
   const getSuiteName = (suiteId) => {
     if (!suiteId || suiteId === 'all' || suiteId === 'ALL') return 'All Suites';
     return suites.find((s) => s.id === suiteId)?.name || suiteId;
   };
+
+  const defectLookup = useMemo(() => {
+    const byId = new Map();
+    const byCaseRun = new Map();
+    const byExecutionId = new Map();
+    const list = Array.isArray(defects) ? defects : [];
+    for (let i = 0; i < list.length; i += 1) {
+      const d = list[i];
+      if (!d) continue;
+      if (d.id && !byId.has(d.id)) byId.set(d.id, d);
+      if (d.defectId && !byId.has(d.defectId)) byId.set(d.defectId, d);
+      if (d.linkedTestCaseId && d.linkedTestRunId) {
+        const key = `${d.linkedTestRunId}::${d.linkedTestCaseId}`;
+        if (!byCaseRun.has(key)) byCaseRun.set(key, d);
+      }
+      if (d.linkedExecutionId && !byExecutionId.has(d.linkedExecutionId)) {
+        byExecutionId.set(d.linkedExecutionId, d);
+      }
+    }
+    return { byId, byCaseRun, byExecutionId };
+  }, [defects]);
+
+  const runById = useMemo(() => {
+    const map = new Map();
+    for (let i = 0; i < testRuns.length; i += 1) {
+      const r = testRuns[i];
+      if (r?.id) map.set(r.id, r);
+    }
+    return map;
+  }, [testRuns]);
+
+  const handleOpenLinkedDefect = useCallback(
+    (defectId) => {
+      setSelectedDefectId(defectId);
+      setActiveTab('defects');
+    },
+    [setSelectedDefectId, setActiveTab]
+  );
+
+  const handleSelectRunFromHistory = useCallback(
+    (runId) => {
+      setSelectedTestRunId(runId);
+      setActiveViewMode('runs');
+    },
+    [setSelectedTestRunId, setActiveViewMode]
+  );
+
+  const runSelectorKeyExtractor = useCallback(
+    (item, index) => String(item?.id || `run_tab_${index}`),
+    []
+  );
+
+  const renderRunSelectorTab = useCallback(
+    ({ item: run }) => (
+      <RunSelectorTabCard
+        run={run}
+        isSelected={activeRun?.id === run.id}
+        theme={theme}
+        onSelectRun={setSelectedTestRunId}
+      />
+    ),
+    [activeRun?.id, theme, setSelectedTestRunId]
+  );
+
+  const runCaseKeyExtractor = useCallback(
+    (item, index) => String(item?.id || `run_case_${index}`),
+    []
+  );
+
+  const renderExecutionCaseItem = useCallback(
+    ({ item: tc }) => {
+      const status = tc.runResult?.status || 'Untested';
+      const sMeta = getStatusMeta(status);
+      const linkedDefect =
+        (tc.runResult?.linkedDefectId &&
+          defectLookup.byId.get(tc.runResult.linkedDefectId)) ||
+        (activeRun?.id
+          ? defectLookup.byCaseRun.get(`${activeRun.id}::${tc.id}`)
+          : null) ||
+        null;
+
+      return (
+        <ExecutionCaseRowCard
+          tc={tc}
+          activeRun={activeRun}
+          sMeta={sMeta}
+          linkedDefect={linkedDefect}
+          isSubmittingExec={isSubmittingExec}
+          theme={theme}
+          onOpenExecution={openExecutionModal}
+          onOpenDefect={handleOpenLinkedDefect}
+          onQuickOutcome={handleQuickOutcome}
+          onStartDefect={startDefectFromFailedTest}
+        />
+      );
+    },
+    [
+      activeRun,
+      getStatusMeta,
+      defectLookup,
+      isSubmittingExec,
+      theme,
+      openExecutionModal,
+      handleOpenLinkedDefect,
+      handleQuickOutcome,
+      startDefectFromFailedTest,
+    ]
+  );
+
+  const executionKeyExtractor = useCallback(
+    (item, index) => String(item?.id || `exec_${index}`),
+    []
+  );
+
+  const renderExecutionHistoryItem = useCallback(
+    ({ item: exec }) => {
+      const sMeta = getStatusMeta(exec.status);
+      const runObj = exec.runId ? runById.get(exec.runId) || null : null;
+      const linkedDefect =
+        (exec.linkedDefectId && defectLookup.byId.get(exec.linkedDefectId)) ||
+        (exec.id && defectLookup.byExecutionId.get(exec.id)) ||
+        null;
+
+      return (
+        <ExecutionHistoryRowCard
+          exec={exec}
+          sMeta={sMeta}
+          runObj={runObj}
+          linkedDefect={linkedDefect}
+          theme={theme}
+          onSelectRunFromHistory={handleSelectRunFromHistory}
+          onOpenDefect={handleOpenLinkedDefect}
+        />
+      );
+    },
+    [
+      getStatusMeta,
+      runById,
+      defectLookup,
+      theme,
+      handleSelectRunFromHistory,
+      handleOpenLinkedDefect,
+    ]
+  );
 
   if (!currentProject) {
     return (
@@ -963,933 +1667,453 @@ export default function TestRunsScreen({
               },
             ]}
           >
-            <ScrollView
+            <FlatList
               horizontal
+              data={testRuns}
+              keyExtractor={runSelectorKeyExtractor}
+              renderItem={renderRunSelectorTab}
               showsHorizontalScrollIndicator={false}
               onTouchStart={notifyBlockedSwipeTouchStart}
               contentContainerStyle={styles.runListScroll}
-            >
-              {testRuns.map((run) => {
-                const isSelected = activeRun?.id === run.id;
-                const metrics = computeRunMetrics(run.results);
-                const completionPct =
-                  metrics.totalCases > 0
-                    ? Math.round(
-                        (metrics.executedCount / metrics.totalCases) * 100
-                      )
-                    : 0;
-
-                return (
-                  <TouchableOpacity
-                    key={run.id}
-                    onPress={() => setSelectedTestRunId(run.id)}
-                    accessibilityRole="tab"
-                    accessibilityState={{ selected: isSelected }}
-                    accessibilityLabel={`Select test run ${run.id} ${run.name}, status ${run.status}`}
-                    style={[
-                      styles.runTabCard,
-                      {
-                        backgroundColor: isSelected
-                          ? theme.primarySoft
-                          : theme.surfaceElevated,
-                        borderColor: isSelected ? theme.primary : theme.border,
-                      },
-                    ]}
-                  >
-                    <View style={styles.runTabTop}>
-                      <Text
-                        style={[
-                          styles.runTabId,
-                          {
-                            color: isSelected
-                              ? theme.primary
-                              : theme.textMuted,
-                            fontFamily: monoFontFamily,
-                          },
-                        ]}
-                      >
-                        {run.id}
-                      </Text>
-                      <View
-                        style={[
-                          styles.runStatusPill,
-                          {
-                            backgroundColor:
-                              run.status === 'Completed'
-                                ? theme.successSoft
-                                : theme.warningSoft,
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.runStatusText,
-                            {
-                              color:
-                                run.status === 'Completed'
-                                  ? theme.success
-                                  : theme.warning,
-                            },
-                          ]}
-                        >
-                          {run.status}
-                        </Text>
-                      </View>
-                    </View>
-                    <Text
-                      style={[styles.runTabName, { color: theme.text }]}
-                      numberOfLines={1}
-                    >
-                      {run.name}
-                    </Text>
-                    <View style={styles.runMiniProgress}>
-                      <View
-                        style={[
-                          styles.runMiniTrack,
-                          { backgroundColor: theme.border },
-                        ]}
-                      >
-                        <View
-                          style={[
-                            styles.runMiniFill,
-                            {
-                              width: `${completionPct}%`,
-                              backgroundColor:
-                                metrics.failedCases > 0
-                                  ? theme.danger
-                                  : theme.success,
-                            },
-                          ]}
-                        />
-                      </View>
-                      <Text
-                        style={[
-                          styles.runMiniPct,
-                          { color: theme.textSecondary },
-                        ]}
-                      >
-                        {metrics.passedCases}P • {metrics.failedCases}F •{' '}
-                        {completionPct}%
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+              initialNumToRender={6}
+              maxToRenderPerBatch={6}
+            />
           </View>
 
           {activeRun ? (
-            <ScrollView
+            <FlatList
               style={styles.container}
               contentContainerStyle={styles.contentContainer}
+              data={filteredRunCases}
+              keyExtractor={runCaseKeyExtractor}
+              renderItem={renderExecutionCaseItem}
               showsVerticalScrollIndicator={false}
-            >
-              {/* Active Run Summary & Metadata Card */}
-              <View
-                style={[
-                  styles.summaryCard,
-                  {
-                    backgroundColor: theme.surface,
-                    borderColor: theme.border,
-                  },
-                ]}
-              >
-                <View style={styles.summaryTopRow}>
-                  <View style={{ flex: 1 }}>
-                    <View style={styles.summaryTitleRow}>
-                      <Text
-                        style={[
-                          styles.summaryRunId,
-                          {
-                            color: theme.primary,
-                            fontFamily: monoFontFamily,
-                          },
-                        ]}
-                      >
-                        {activeRun.id}
-                      </Text>
-                      <View
-                        style={[
-                          styles.runStatusPill,
-                          {
-                            backgroundColor:
-                              activeRun.status === 'Completed'
-                                ? theme.successSoft
-                                : theme.warningSoft,
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.runStatusText,
-                            {
-                              color:
-                                activeRun.status === 'Completed'
-                                  ? theme.success
-                                  : theme.warning,
-                            },
-                          ]}
-                        >
-                          {activeRun.status}
-                        </Text>
-                      </View>
-                    </View>
-                    <Text
-                      style={[styles.summaryRunTitle, { color: theme.text }]}
-                    >
-                      {activeRun.name}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.summaryMeta,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
-                      Scope: {getSuiteName(activeRun.suiteId)} •{' '}
-                      {activeRun.deviceInfo || 'Android Device'} • Build:{' '}
-                      {activeRun.buildVersion || 'N/A'}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.summarySubMeta,
-                        { color: theme.textMuted },
-                      ]}
-                    >
-                      Env: {activeRun.environment || 'Android 14 / Staging'} •
-                      Tester: {activeRun.tester || 'QA Engineer'} • Started{' '}
-                      {formatShortTimestamp(
-                        activeRun.startedAt || activeRun.createdAt
-                      )}
-                      {activeRun.completedAt
-                        ? ` • Completed ${formatShortTimestamp(
-                            activeRun.completedAt
-                          )}`
-                        : ''}
-                    </Text>
-                    {activeRun.notes ? (
-                      <Text
-                        style={[
-                          styles.summaryRunNotes,
-                          { color: theme.textSecondary },
-                        ]}
-                      >
-                        Note: {activeRun.notes}
-                      </Text>
-                    ) : null}
-                  </View>
-                </View>
-
-                {/* Run Action Controls */}
-                <View style={styles.runManagementRow}>
-                  <TouchableOpacity
-                    style={[
-                      styles.completeRunBtn,
-                      {
-                        backgroundColor:
-                          activeRun.status === 'Completed'
-                            ? theme.surfaceElevated
-                            : theme.successSoft,
-                        borderColor:
-                          activeRun.status === 'Completed'
-                            ? theme.border
-                            : theme.success,
-                      },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityState={{
-                      disabled: Boolean(isTogglingRunStatus),
-                    }}
-                    accessibilityLabel={
-                      activeRun.status === 'Completed'
-                        ? 'Reopen test run'
-                        : 'Complete test run'
-                    }
-                    onPress={handleToggleRunCompletion}
-                    disabled={isTogglingRunStatus}
-                  >
-                    <VectorIcon
-                      name={
-                        activeRun.status === 'Completed' ? 'refresh' : 'check'
-                      }
-                      size={14}
-                      color={
-                        activeRun.status === 'Completed'
-                          ? theme.textSecondary
-                          : theme.success
-                      }
-                    />
-                    <Text
-                      style={[
-                        styles.completeRunBtnText,
-                        {
-                          color:
-                            activeRun.status === 'Completed'
-                              ? theme.textSecondary
-                              : theme.success,
-                        },
-                      ]}
-                    >
-                      {activeRun.status === 'Completed'
-                        ? 'Reopen Run'
-                        : 'Complete Run'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.secondaryRunBtn,
-                      {
-                        backgroundColor: theme.surfaceElevated,
-                        borderColor: theme.border,
-                      },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Edit test run ${activeRun.name}`}
-                    onPress={() => openEditRunModal(activeRun)}
-                  >
-                    <VectorIcon
-                      name="edit"
-                      size={13}
-                      color={theme.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.secondaryRunBtnText,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
-                      Edit Run
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.secondaryRunBtn,
-                      {
-                        backgroundColor: theme.dangerSoft,
-                        borderColor: theme.danger,
-                      },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Delete test run ${activeRun.name}`}
-                    onPress={() => setRunPendingDelete(activeRun)}
-                  >
-                    <VectorIcon name="trash" size={13} color={theme.danger} />
-                    <Text
-                      style={[
-                        styles.secondaryRunBtnText,
-                        { color: theme.danger },
-                      ]}
-                    >
-                      Delete
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Run Progress Bar & Metrics */}
-                <View style={styles.progressSection}>
-                  <View style={styles.progressHeader}>
-                    <Text
-                      style={[
-                        styles.progressLabel,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
-                      Execution Progress ({activeRunMetrics.executedCount} of{' '}
-                      {activeRunMetrics.totalCases} executed)
-                    </Text>
-                    <Text
-                      style={[styles.progressPct, { color: theme.primary }]}
-                    >
-                      Pass Rate: {activeRunMetrics.passRate}%
-                    </Text>
-                  </View>
+              keyboardShouldPersistTaps="handled"
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
+              windowSize={7}
+              removeClippedSubviews
+              ListHeaderComponent={
+                <>
+                  {/* Active Run Summary & Metadata Card */}
                   <View
                     style={[
-                      styles.progressTrack,
-                      { backgroundColor: theme.surfaceMuted },
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.progressFill,
-                        {
-                          width: `${
-                            activeRunMetrics.totalCases > 0
-                              ? Math.round(
-                                  (activeRunMetrics.executedCount /
-                                    activeRunMetrics.totalCases) *
-                                    100
-                                )
-                              : 0
-                          }%`,
-                          backgroundColor: theme.primary,
-                        },
-                      ]}
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.counterRow}>
-                  {[
-                    {
-                      label: 'Pass',
-                      filterKey: 'Passed',
-                      val: activeRunMetrics.passedCases,
-                      color: theme.success,
-                      bg: theme.successSoft,
-                    },
-                    {
-                      label: 'Fail',
-                      filterKey: 'Failed',
-                      val: activeRunMetrics.failedCases,
-                      color: theme.danger,
-                      bg: theme.dangerSoft,
-                    },
-                    {
-                      label: 'Blocked',
-                      filterKey: 'Blocked',
-                      val: activeRunMetrics.blockedCases,
-                      color: theme.warning,
-                      bg: theme.warningSoft,
-                    },
-                    {
-                      label: 'Not Run',
-                      filterKey: 'Untested',
-                      val: activeRunMetrics.notRunCases,
-                      color: theme.textSecondary,
-                      bg: theme.surfaceMuted,
-                    },
-                  ].map((item) => (
-                    <TouchableOpacity
-                      key={item.label}
-                      accessibilityRole="tab"
-                      accessibilityState={{
-                        selected: resultFilter === item.filterKey,
-                      }}
-                      accessibilityLabel={`Filter run by ${item.label}: ${item.val} cases`}
-                      style={[
-                        styles.counterChip,
-                        {
-                          backgroundColor: item.bg,
-                          borderColor:
-                            resultFilter === item.filterKey
-                              ? item.color
-                              : 'transparent',
-                        },
-                      ]}
-                      onPress={() =>
-                        setResultFilter(
-                          resultFilter === item.filterKey
-                            ? 'All'
-                            : item.filterKey
-                        )
-                      }
-                    >
-                      <Text
-                        style={[styles.counterVal, { color: item.color }]}
-                      >
-                        {item.val}
-                      </Text>
-                      <Text
-                        style={[styles.counterLabel, { color: item.color }]}
-                      >
-                        {item.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-
-              {/* Search & Filter Row */}
-              <View style={styles.filterControls}>
-                <View
-                  style={[
-                    styles.searchBox,
-                    {
-                      backgroundColor: theme.surface,
-                      borderColor: theme.border,
-                    },
-                  ]}
-                >
-                  <VectorIcon name="search" size={16} color={theme.textMuted} />
-                  <TextInput
-                    style={[styles.searchInput, { color: theme.text }]}
-                    placeholder="Filter run test cases by ID, title, or notes..."
-                    placeholderTextColor={theme.textMuted}
-                    accessibilityLabel="Filter run test cases by ID, title, or notes"
-                    returnKeyType="search"
-                    onSubmitEditing={() => Keyboard.dismiss()}
-                    value={searchQuery}
-                    onChangeText={setSearchQuery}
-                  />
-                  {searchQuery.length > 0 && (
-                    <TouchableOpacity
-                      onPress={() => setSearchQuery('')}
-                      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                      accessibilityRole="button"
-                      accessibilityLabel="Clear test run search"
-                    >
-                      <VectorIcon
-                        name="close"
-                        size={14}
-                        color={theme.textMuted}
-                      />
-                    </TouchableOpacity>
-                  )}
-                </View>
-
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  onTouchStart={notifyBlockedSwipeTouchStart}
-                  contentContainerStyle={styles.filterTabsScroll}
-                >
-                  {RUN_RESULT_FILTERS.map((f) => {
-                    const active = resultFilter === f;
-                    return (
-                      <TouchableOpacity
-                        key={f}
-                        onPress={() => setResultFilter(f)}
-                        hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                        accessibilityRole="tab"
-                        accessibilityState={{ selected: active }}
-                        accessibilityLabel={`Filter run results: ${
-                          f === 'Untested' ? 'Not Run or Untested' : f
-                        }`}
-                        style={[
-                          styles.filterPill,
-                          {
-                            backgroundColor: active
-                              ? theme.primary
-                              : theme.surface,
-                            borderColor: active ? theme.primary : theme.border,
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.filterPillText,
-                            {
-                              color: active ? '#FFFFFF' : theme.textSecondary,
-                            },
-                          ]}
-                        >
-                          {f === 'Untested' ? 'Not Run / Untested' : f}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              </View>
-
-              {/* Test Case Execution List */}
-              {filteredRunCases.map((tc) => {
-                const status = tc.runResult?.status || 'Untested';
-                const sMeta = getStatusMeta(status);
-                const linkedDefect = defects.find(
-                  (d) =>
-                    d.id === tc.runResult?.linkedDefectId ||
-                    d.defectId === tc.runResult?.linkedDefectId ||
-                    (d.linkedTestCaseId === tc.id &&
-                      d.linkedTestRunId === activeRun.id)
-                );
-
-                return (
-                  <View
-                    key={tc.id}
-                    style={[
-                      styles.execCaseCard,
+                      styles.summaryCard,
                       {
                         backgroundColor: theme.surface,
                         borderColor: theme.border,
                       },
                     ]}
                   >
-                    <TouchableOpacity
-                      activeOpacity={0.85}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Execute test case ${tc.id}: ${tc.title}, status ${sMeta.webOutcome}`}
-                      onPress={() => openExecutionModal(tc)}
-                    >
-                      <View style={styles.execCardTop}>
-                        <View style={styles.execIdWrap}>
+                    <View style={styles.summaryTopRow}>
+                      <View style={{ flex: 1 }}>
+                        <View style={styles.summaryTitleRow}>
                           <Text
                             style={[
-                              styles.execId,
+                              styles.summaryRunId,
                               {
                                 color: theme.primary,
                                 fontFamily: monoFontFamily,
                               },
                             ]}
                           >
-                            {tc.id}
+                            {activeRun.id}
                           </Text>
                           <View
                             style={[
-                              styles.execBadge,
-                              { backgroundColor: sMeta.bg },
+                              styles.runStatusPill,
+                              {
+                                backgroundColor:
+                                  activeRun.status === 'Completed'
+                                    ? theme.successSoft
+                                    : theme.warningSoft,
+                              },
                             ]}
                           >
-                            <VectorIcon
-                              name={sMeta.icon}
-                              size={11}
-                              color={sMeta.color}
-                            />
                             <Text
                               style={[
-                                styles.execBadgeText,
-                                { color: sMeta.color },
+                                styles.runStatusText,
+                                {
+                                  color:
+                                    activeRun.status === 'Completed'
+                                      ? theme.success
+                                      : theme.warning,
+                                },
                               ]}
                             >
-                              {sMeta.webOutcome} ({sMeta.label})
+                              {activeRun.status}
                             </Text>
                           </View>
                         </View>
                         <Text
                           style={[
-                            styles.execStepsCount,
-                            { color: theme.textMuted },
+                            styles.summaryRunTitle,
+                            { color: theme.text },
                           ]}
                         >
-                          {tc.steps?.length || 0} steps
+                          {activeRun.name}
                         </Text>
-                      </View>
-
-                      <Text style={[styles.execTitle, { color: theme.text }]}>
-                        {tc.title}
-                      </Text>
-
-                      {tc.runResult?.actualResult ? (
-                        <View
-                          style={[
-                            styles.execNotesBox,
-                            {
-                              backgroundColor: theme.surfaceMuted,
-                              borderColor: theme.border,
-                            },
-                          ]}
-                        >
-                          <VectorIcon
-                            name="check"
-                            size={12}
-                            color={theme.primary}
-                          />
-                          <Text
-                            style={[
-                              styles.execNotesText,
-                              { color: theme.textSecondary },
-                            ]}
-                          >
-                            Actual: {tc.runResult.actualResult}
-                          </Text>
-                        </View>
-                      ) : null}
-
-                      {tc.runResult?.notes ? (
-                        <View
-                          style={[
-                            styles.execNotesBox,
-                            {
-                              backgroundColor: theme.surfaceMuted,
-                              borderColor: theme.border,
-                            },
-                          ]}
-                        >
-                          <VectorIcon
-                            name="info"
-                            size={12}
-                            color={theme.textSecondary}
-                          />
-                          <Text
-                            style={[
-                              styles.execNotesText,
-                              { color: theme.textSecondary },
-                            ]}
-                          >
-                            Notes: {tc.runResult.notes}
-                          </Text>
-                        </View>
-                      ) : null}
-
-                      {tc.runResult?.executedAt ? (
                         <Text
                           style={[
-                            styles.execTimestampText,
+                            styles.summaryMeta,
+                            { color: theme.textSecondary },
+                          ]}
+                        >
+                          Scope: {getSuiteName(activeRun.suiteId)} •{' '}
+                          {activeRun.deviceInfo || 'Android Device'} • Build:{' '}
+                          {activeRun.buildVersion || 'N/A'}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.summarySubMeta,
                             { color: theme.textMuted },
                           ]}
                         >
-                          Executed{' '}
-                          {formatShortTimestamp(tc.runResult.executedAt)} by{' '}
-                          {tc.runResult.tester || 'QA Engineer'} •{' '}
-                          {tc.runResult.environment ||
-                            activeRun.environment ||
-                            'Staging'}
+                          Env: {activeRun.environment || 'Android 14 / Staging'}{' '}
+                          • Tester: {activeRun.tester || 'QA Engineer'} •
+                          Started{' '}
+                          {formatShortTimestamp(
+                            activeRun.startedAt || activeRun.createdAt
+                          )}
+                          {activeRun.completedAt
+                            ? ` • Completed ${formatShortTimestamp(
+                                activeRun.completedAt
+                              )}`
+                            : ''}
                         </Text>
-                      ) : null}
-
-                      {linkedDefect && (
-                        <TouchableOpacity
-                          style={[
-                            styles.linkedBugChip,
-                            {
-                              backgroundColor: theme.dangerSoft,
-                              borderColor: theme.danger,
-                            },
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Open linked defect ${
-                            linkedDefect.defectId || linkedDefect.id
-                          }, ${linkedDefect.status}`}
-                          onPress={() => {
-                            setSelectedDefectId(linkedDefect.id);
-                            setActiveTab('defects');
-                          }}
-                        >
-                          <VectorIcon
-                            name="alert"
-                            size={12}
-                            color={theme.danger}
-                          />
+                        {activeRun.notes ? (
                           <Text
                             style={[
-                              styles.linkedBugText,
-                              { color: theme.danger },
+                              styles.summaryRunNotes,
+                              { color: theme.textSecondary },
                             ]}
                           >
-                            Linked Defect:{' '}
-                            {linkedDefect.defectId || linkedDefect.id} (
-                            {linkedDefect.status})
+                            Note: {activeRun.notes}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </View>
+
+                    {/* Run Action Controls */}
+                    <View style={styles.runManagementRow}>
+                      <TouchableOpacity
+                        style={[
+                          styles.completeRunBtn,
+                          {
+                            backgroundColor:
+                              activeRun.status === 'Completed'
+                                ? theme.surfaceElevated
+                                : theme.successSoft,
+                            borderColor:
+                              activeRun.status === 'Completed'
+                                ? theme.border
+                                : theme.success,
+                          },
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityState={{
+                          disabled: Boolean(isTogglingRunStatus),
+                        }}
+                        accessibilityLabel={
+                          activeRun.status === 'Completed'
+                            ? 'Reopen test run'
+                            : 'Complete test run'
+                        }
+                        onPress={handleToggleRunCompletion}
+                        disabled={isTogglingRunStatus}
+                      >
+                        <VectorIcon
+                          name={
+                            activeRun.status === 'Completed'
+                              ? 'refresh'
+                              : 'check'
+                          }
+                          size={14}
+                          color={
+                            activeRun.status === 'Completed'
+                              ? theme.textSecondary
+                              : theme.success
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.completeRunBtnText,
+                            {
+                              color:
+                                activeRun.status === 'Completed'
+                                  ? theme.textSecondary
+                                  : theme.success,
+                            },
+                          ]}
+                        >
+                          {activeRun.status === 'Completed'
+                            ? 'Reopen Run'
+                            : 'Complete Run'}
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.secondaryRunBtn,
+                          {
+                            backgroundColor: theme.surfaceElevated,
+                            borderColor: theme.border,
+                          },
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Edit test run ${activeRun.name}`}
+                        onPress={() => openEditRunModal(activeRun)}
+                      >
+                        <VectorIcon
+                          name="edit"
+                          size={13}
+                          color={theme.textSecondary}
+                        />
+                        <Text
+                          style={[
+                            styles.secondaryRunBtnText,
+                            { color: theme.textSecondary },
+                          ]}
+                        >
+                          Edit Run
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.secondaryRunBtn,
+                          {
+                            backgroundColor: theme.dangerSoft,
+                            borderColor: theme.danger,
+                          },
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Delete test run ${activeRun.name}`}
+                        onPress={() => setRunPendingDelete(activeRun)}
+                      >
+                        <VectorIcon
+                          name="trash"
+                          size={13}
+                          color={theme.danger}
+                        />
+                        <Text
+                          style={[
+                            styles.secondaryRunBtnText,
+                            { color: theme.danger },
+                          ]}
+                        >
+                          Delete
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Run Progress Bar & Metrics */}
+                    <View style={styles.progressSection}>
+                      <View style={styles.progressHeader}>
+                        <Text
+                          style={[
+                            styles.progressLabel,
+                            { color: theme.textSecondary },
+                          ]}
+                        >
+                          Execution Progress ({activeRunMetrics.executedCount} of{' '}
+                          {activeRunMetrics.totalCases} executed)
+                        </Text>
+                        <Text
+                          style={[styles.progressPct, { color: theme.primary }]}
+                        >
+                          Pass Rate: {activeRunMetrics.passRate}%
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.progressTrack,
+                          { backgroundColor: theme.surfaceMuted },
+                        ]}
+                      >
+                        <View
+                          style={[
+                            styles.progressFill,
+                            {
+                              width: `${
+                                activeRunMetrics.totalCases > 0
+                                  ? Math.round(
+                                      (activeRunMetrics.executedCount /
+                                        activeRunMetrics.totalCases) *
+                                        100
+                                    )
+                                  : 0
+                              }%`,
+                              backgroundColor: theme.primary,
+                            },
+                          ]}
+                        />
+                      </View>
+                    </View>
+
+                    <View style={styles.counterRow}>
+                      {[
+                        {
+                          label: 'Pass',
+                          filterKey: 'Passed',
+                          val: activeRunMetrics.passedCases,
+                          color: theme.success,
+                          bg: theme.successSoft,
+                        },
+                        {
+                          label: 'Fail',
+                          filterKey: 'Failed',
+                          val: activeRunMetrics.failedCases,
+                          color: theme.danger,
+                          bg: theme.dangerSoft,
+                        },
+                        {
+                          label: 'Blocked',
+                          filterKey: 'Blocked',
+                          val: activeRunMetrics.blockedCases,
+                          color: theme.warning,
+                          bg: theme.warningSoft,
+                        },
+                        {
+                          label: 'Not Run',
+                          filterKey: 'Untested',
+                          val: activeRunMetrics.notRunCases,
+                          color: theme.textSecondary,
+                          bg: theme.surfaceMuted,
+                        },
+                      ].map((item) => (
+                        <TouchableOpacity
+                          key={item.label}
+                          accessibilityRole="tab"
+                          accessibilityState={{
+                            selected: resultFilter === item.filterKey,
+                          }}
+                          accessibilityLabel={`Filter run by ${item.label}: ${item.val} cases`}
+                          style={[
+                            styles.counterChip,
+                            {
+                              backgroundColor: item.bg,
+                              borderColor:
+                                resultFilter === item.filterKey
+                                  ? item.color
+                                  : 'transparent',
+                            },
+                          ]}
+                          onPress={() =>
+                            setResultFilter(
+                              resultFilter === item.filterKey
+                                ? 'All'
+                                : item.filterKey
+                            )
+                          }
+                        >
+                          <Text
+                            style={[styles.counterVal, { color: item.color }]}
+                          >
+                            {item.val}
+                          </Text>
+                          <Text
+                            style={[styles.counterLabel, { color: item.color }]}
+                          >
+                            {item.label}
                           </Text>
                         </TouchableOpacity>
-                      )}
-                    </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
 
-                    {/* Quick Outcome Controls + Step Runner */}
+                  {/* Search & Filter Row */}
+                  <View style={styles.filterControls}>
                     <View
                       style={[
-                        styles.quickActionRow,
-                        { borderTopColor: theme.border },
+                        styles.searchBox,
+                        {
+                          backgroundColor: theme.surface,
+                          borderColor: theme.border,
+                        },
                       ]}
                     >
-                      <View style={styles.quickStatusGroup}>
+                      <VectorIcon
+                        name="search"
+                        size={16}
+                        color={theme.textMuted}
+                      />
+                      <TextInput
+                        style={[styles.searchInput, { color: theme.text }]}
+                        placeholder="Filter run test cases by ID, title, or notes..."
+                        placeholderTextColor={theme.textMuted}
+                        accessibilityLabel="Filter run test cases by ID, title, or notes"
+                        returnKeyType="search"
+                        onSubmitEditing={() => Keyboard.dismiss()}
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                      />
+                      {searchQuery.length > 0 && (
                         <TouchableOpacity
-                          style={[
-                            styles.quickBtn,
-                            {
-                              backgroundColor:
-                                status === 'Passed'
-                                  ? theme.success
-                                  : theme.successSoft,
-                            },
-                          ]}
+                          onPress={() => setSearchQuery('')}
+                          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                           accessibilityRole="button"
-                          accessibilityState={{
-                            selected: status === 'Passed',
-                            disabled: Boolean(isSubmittingExec),
-                          }}
-                          accessibilityLabel={`Mark ${tc.id} passed`}
-                          onPress={() => handleQuickOutcome(tc, 'Passed')}
-                          disabled={isSubmittingExec}
-                        >
-                          <VectorIcon
-                            name="check"
-                            size={12}
-                            color={
-                              status === 'Passed' ? '#FFFFFF' : theme.success
-                            }
-                          />
-                          <Text
-                            style={[
-                              styles.quickBtnText,
-                              {
-                                color:
-                                  status === 'Passed'
-                                    ? '#FFFFFF'
-                                    : theme.success,
-                              },
-                            ]}
-                          >
-                            Pass
-                          </Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          style={[
-                            styles.quickBtn,
-                            {
-                              backgroundColor:
-                                status === 'Failed'
-                                  ? theme.danger
-                                  : theme.dangerSoft,
-                            },
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityState={{
-                            selected: status === 'Failed',
-                            disabled: Boolean(isSubmittingExec),
-                          }}
-                          accessibilityLabel={`Mark ${tc.id} failed`}
-                          onPress={() => handleQuickOutcome(tc, 'Failed')}
-                          disabled={isSubmittingExec}
+                          accessibilityLabel="Clear test run search"
                         >
                           <VectorIcon
                             name="close"
-                            size={12}
-                            color={
-                              status === 'Failed' ? '#FFFFFF' : theme.danger
-                            }
+                            size={14}
+                            color={theme.textMuted}
                           />
-                          <Text
-                            style={[
-                              styles.quickBtnText,
-                              {
-                                color:
-                                  status === 'Failed'
-                                    ? '#FFFFFF'
-                                    : theme.danger,
-                              },
-                            ]}
-                          >
-                            Fail
-                          </Text>
                         </TouchableOpacity>
-
-                        <TouchableOpacity
-                          style={[
-                            styles.quickBtn,
-                            {
-                              backgroundColor:
-                                status === 'Blocked'
-                                  ? theme.warning
-                                  : theme.warningSoft,
-                            },
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityState={{
-                            selected: status === 'Blocked',
-                            disabled: Boolean(isSubmittingExec),
-                          }}
-                          accessibilityLabel={`Mark ${tc.id} blocked`}
-                          onPress={() => handleQuickOutcome(tc, 'Blocked')}
-                          disabled={isSubmittingExec}
-                        >
-                          <VectorIcon
-                            name="alert"
-                            size={12}
-                            color={
-                              status === 'Blocked' ? '#FFFFFF' : theme.warning
-                            }
-                          />
-                          <Text
-                            style={[
-                              styles.quickBtnText,
-                              {
-                                color:
-                                  status === 'Blocked'
-                                    ? '#FFFFFF'
-                                    : theme.warning,
-                              },
-                            ]}
-                          >
-                            Block
-                          </Text>
-                        </TouchableOpacity>
-
-                        {status !== 'Untested' && (
-                          <TouchableOpacity
-                            style={[
-                              styles.quickBtn,
-                              {
-                                backgroundColor: theme.surfaceMuted,
-                              },
-                            ]}
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                            accessibilityRole="button"
-                            accessibilityLabel={`Reset ${tc.id} to untested`}
-                            onPress={() => handleQuickOutcome(tc, 'Untested')}
-                            disabled={isSubmittingExec}
-                          >
-                            <VectorIcon
-                              name="refresh"
-                              size={12}
-                              color={theme.textSecondary}
-                            />
-                          </TouchableOpacity>
-                        )}
-                      </View>
-
-                      <View style={styles.quickRightGroup}>
-                        <TouchableOpacity
-                          style={[
-                            styles.logBugInlineBtn,
-                            {
-                              backgroundColor: theme.dangerSoft,
-                              borderColor: theme.danger,
-                            },
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Log defect for ${tc.id}`}
-                          onPress={() => {
-                            startDefectFromFailedTest({
-                              testRun: activeRun,
-                              testCase: tc,
-                              actualResult:
-                                tc.runResult?.actualResult ||
-                                tc.runResult?.notes ||
-                                'Test failed during run execution.',
-                              notes: tc.runResult?.notes || '',
-                            });
-                          }}
-                        >
-                          <VectorIcon
-                            name="alert"
-                            size={12}
-                            color={theme.danger}
-                          />
-                          <Text
-                            style={[
-                              styles.logBugInlineText,
-                              { color: theme.danger },
-                            ]}
-                          >
-                            Defect
-                          </Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          style={[
-                            styles.stepRunnerBtn,
-                            {
-                              backgroundColor: theme.primarySoft,
-                              borderColor: theme.primary,
-                            },
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Execute steps for ${tc.id}`}
-                          onPress={() => openExecutionModal(tc)}
-                        >
-                          <VectorIcon
-                            name="chevron-right"
-                            size={12}
-                            color={theme.primary}
-                          />
-                          <Text
-                            style={[
-                              styles.stepRunnerBtnText,
-                              { color: theme.primary },
-                            ]}
-                          >
-                            Execute
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
+                      )}
                     </View>
-                  </View>
-                );
-              })}
 
-              {filteredRunCases.length === 0 && (
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      onTouchStart={notifyBlockedSwipeTouchStart}
+                      contentContainerStyle={styles.filterTabsScroll}
+                    >
+                      {RUN_RESULT_FILTERS.map((f) => {
+                        const active = resultFilter === f;
+                        return (
+                          <TouchableOpacity
+                            key={f}
+                            onPress={() => setResultFilter(f)}
+                            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                            accessibilityRole="tab"
+                            accessibilityState={{ selected: active }}
+                            accessibilityLabel={`Filter run results: ${
+                              f === 'Untested' ? 'Not Run or Untested' : f
+                            }`}
+                            style={[
+                              styles.filterPill,
+                              {
+                                backgroundColor: active
+                                  ? theme.primary
+                                  : theme.surface,
+                                borderColor: active
+                                  ? theme.primary
+                                  : theme.border,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.filterPillText,
+                                {
+                                  color: active
+                                    ? '#FFFFFF'
+                                    : theme.textSecondary,
+                                },
+                              ]}
+                            >
+                              {f === 'Untested' ? 'Not Run / Untested' : f}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                </>
+              }
+              ListEmptyComponent={
                 <View
                   style={[
                     styles.emptyBox,
@@ -1909,10 +2133,9 @@ export default function TestRunsScreen({
                     Adjust your outcome filter or edit this run to include additional test cases.
                   </Text>
                 </View>
-              )}
-
-              <View style={{ height: 32 }} />
-            </ScrollView>
+              }
+              ListFooterComponent={<View style={{ height: 32 }} />}
+            />
           ) : (
             <View style={styles.emptyRunFallback}>
               <View
@@ -1953,274 +2176,98 @@ export default function TestRunsScreen({
         </>
       ) : (
         /* Chronological Execution History View */
-        <ScrollView
+        <FlatList
           style={styles.container}
           contentContainerStyle={styles.contentContainer}
+          data={filteredExecutions}
+          keyExtractor={executionKeyExtractor}
+          renderItem={renderExecutionHistoryItem}
           showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.filterControls}>
-            <View
-              style={[
-                styles.searchBox,
-                {
-                  backgroundColor: theme.surface,
-                  borderColor: theme.border,
-                },
-              ]}
-            >
-              <VectorIcon name="search" size={16} color={theme.textMuted} />
-              <TextInput
-                style={[styles.searchInput, { color: theme.text }]}
-                placeholder="Search execution history by case, run, tester, or notes..."
-                placeholderTextColor={theme.textMuted}
-                accessibilityLabel="Search execution history by case, run, tester, or notes"
-                returnKeyType="search"
-                onSubmitEditing={() => Keyboard.dismiss()}
-                value={historySearchQuery}
-                onChangeText={setHistorySearchQuery}
-              />
-              {historySearchQuery.length > 0 && (
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  accessibilityLabel="Clear execution history search"
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  onPress={() => setHistorySearchQuery('')}
-                >
-                  <VectorIcon
-                    name="close"
-                    size={14}
-                    color={theme.textMuted}
-                  />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              onTouchStart={notifyBlockedSwipeTouchStart}
-              contentContainerStyle={styles.filterTabsScroll}
-            >
-              {HISTORY_OUTCOME_FILTERS.map((outcome) => {
-                const active = historyOutcomeFilter === outcome;
-                return (
-                  <TouchableOpacity
-                    key={outcome}
-                    onPress={() => setHistoryOutcomeFilter(outcome)}
-                    accessibilityRole="tab"
-                    accessibilityState={{ selected: active }}
-                    accessibilityLabel={`Filter execution history: ${outcome}`}
-                    style={[
-                      styles.filterPill,
-                      {
-                        backgroundColor: active
-                          ? theme.primary
-                          : theme.surface,
-                        borderColor: active ? theme.primary : theme.border,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.filterPillText,
-                        {
-                          color: active ? '#FFFFFF' : theme.textSecondary,
-                        },
-                      ]}
-                    >
-                      {outcome}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-
-          {filteredExecutions.map((exec) => {
-            const sMeta = getStatusMeta(exec.status);
-            const runObj = testRuns.find((r) => r.id === exec.runId);
-            const linkedDefect = defects.find(
-              (d) =>
-                d.id === exec.linkedDefectId ||
-                d.defectId === exec.linkedDefectId ||
-                d.linkedExecutionId === exec.id
-            );
-
-            return (
+          keyboardShouldPersistTaps="handled"
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={7}
+          removeClippedSubviews
+          ListHeaderComponent={
+            <View style={styles.filterControls}>
               <View
-                key={exec.id}
                 style={[
-                  styles.execCaseCard,
+                  styles.searchBox,
                   {
                     backgroundColor: theme.surface,
                     borderColor: theme.border,
                   },
                 ]}
               >
-                <View style={styles.execCardTop}>
-                  <View style={styles.execIdWrap}>
-                    <Text
-                      style={[
-                        styles.execId,
-                        { color: theme.primary, fontFamily: monoFontFamily },
-                      ]}
-                    >
-                      {exec.caseId || exec.testCaseId}
-                    </Text>
-                    <View
-                      style={[
-                        styles.execBadge,
-                        { backgroundColor: sMeta.bg },
-                      ]}
-                    >
-                      <VectorIcon
-                        name={sMeta.icon}
-                        size={11}
-                        color={sMeta.color}
-                      />
-                      <Text
-                        style={[
-                          styles.execBadgeText,
-                          { color: sMeta.color },
-                        ]}
-                      >
-                        {sMeta.webOutcome}
-                      </Text>
-                    </View>
-                    {exec.runId ? (
-                      <TouchableOpacity
-                        style={[
-                          styles.historyRunBadge,
-                          {
-                            backgroundColor: theme.surfaceMuted,
-                            borderColor: theme.border,
-                          },
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Open test run ${
-                          runObj ? `${runObj.id} ${runObj.name}` : exec.runId
-                        }`}
-                        onPress={() => {
-                          setSelectedTestRunId(exec.runId);
-                          setActiveViewMode('runs');
-                        }}
-                      >
-                        <Text
-                          style={[
-                            styles.historyRunBadgeText,
-                            { color: theme.textSecondary },
-                          ]}
-                        >
-                          {runObj ? `${runObj.id} • ${runObj.name}` : exec.runId}
-                        </Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-                  <Text
-                    style={[
-                      styles.execStepsCount,
-                      { color: theme.textMuted },
-                    ]}
-                  >
-                    {formatShortTimestamp(exec.executedAt)}
-                  </Text>
-                </View>
-
-                <Text style={[styles.execTitle, { color: theme.text }]}>
-                  {exec.caseTitle || exec.caseId || exec.testCaseId}
-                </Text>
-
-                {exec.actualResult ? (
-                  <View
-                    style={[
-                      styles.execNotesBox,
-                      {
-                        backgroundColor: theme.surfaceMuted,
-                        borderColor: theme.border,
-                      },
-                    ]}
-                  >
-                    <VectorIcon name="check" size={12} color={theme.primary} />
-                    <Text
-                      style={[
-                        styles.execNotesText,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
-                      Actual: {exec.actualResult}
-                    </Text>
-                  </View>
-                ) : null}
-
-                {exec.notes ? (
-                  <View
-                    style={[
-                      styles.execNotesBox,
-                      {
-                        backgroundColor: theme.surfaceMuted,
-                        borderColor: theme.border,
-                      },
-                    ]}
+                <VectorIcon name="search" size={16} color={theme.textMuted} />
+                <TextInput
+                  style={[styles.searchInput, { color: theme.text }]}
+                  placeholder="Search execution history by case, run, tester, or notes..."
+                  placeholderTextColor={theme.textMuted}
+                  accessibilityLabel="Search execution history by case, run, tester, or notes"
+                  returnKeyType="search"
+                  onSubmitEditing={() => Keyboard.dismiss()}
+                  value={historySearchQuery}
+                  onChangeText={setHistorySearchQuery}
+                />
+                {historySearchQuery.length > 0 && (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear execution history search"
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    onPress={() => setHistorySearchQuery('')}
                   >
                     <VectorIcon
-                      name="info"
-                      size={12}
-                      color={theme.textSecondary}
+                      name="close"
+                      size={14}
+                      color={theme.textMuted}
                     />
-                    <Text
-                      style={[
-                        styles.execNotesText,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
-                      Notes: {exec.notes}
-                    </Text>
-                  </View>
-                ) : null}
-
-                <Text
-                  style={[
-                    styles.execTimestampText,
-                    { color: theme.textMuted },
-                  ]}
-                >
-                  Tester: {exec.tester || 'QA Engineer'} • Env:{' '}
-                  {exec.environment || 'Staging'}
-                  {exec.device ? ` • ${exec.device}` : ''}
-                  {exec.buildVersion ? ` • Build ${exec.buildVersion}` : ''}
-                </Text>
-
-                {linkedDefect && (
-                  <TouchableOpacity
-                    style={[
-                      styles.linkedBugChip,
-                      {
-                        backgroundColor: theme.dangerSoft,
-                        borderColor: theme.danger,
-                      },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Open linked defect ${
-                      linkedDefect.defectId || linkedDefect.id
-                    }`}
-                    onPress={() => {
-                      setSelectedDefectId(linkedDefect.id);
-                      setActiveTab('defects');
-                    }}
-                  >
-                    <VectorIcon name="alert" size={12} color={theme.danger} />
-                    <Text
-                      style={[styles.linkedBugText, { color: theme.danger }]}
-                    >
-                      Linked Defect: {linkedDefect.defectId || linkedDefect.id}
-                    </Text>
                   </TouchableOpacity>
                 )}
               </View>
-            );
-          })}
 
-          {filteredExecutions.length === 0 && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                onTouchStart={notifyBlockedSwipeTouchStart}
+                contentContainerStyle={styles.filterTabsScroll}
+              >
+                {HISTORY_OUTCOME_FILTERS.map((outcome) => {
+                  const active = historyOutcomeFilter === outcome;
+                  return (
+                    <TouchableOpacity
+                      key={outcome}
+                      onPress={() => setHistoryOutcomeFilter(outcome)}
+                      accessibilityRole="tab"
+                      accessibilityState={{ selected: active }}
+                      accessibilityLabel={`Filter execution history: ${outcome}`}
+                      style={[
+                        styles.filterPill,
+                        {
+                          backgroundColor: active
+                            ? theme.primary
+                            : theme.surface,
+                          borderColor: active ? theme.primary : theme.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.filterPillText,
+                          {
+                            color: active ? '#FFFFFF' : theme.textSecondary,
+                          },
+                        ]}
+                      >
+                        {outcome}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          }
+          ListEmptyComponent={
             <View
               style={[
                 styles.emptyBox,
@@ -2238,8 +2285,9 @@ export default function TestRunsScreen({
                 Execute test cases inside a Test Run to populate the project execution log.
               </Text>
             </View>
-          )}
-        </ScrollView>
+          }
+          ListFooterComponent={<View style={{ height: 32 }} />}
+        />
       )}
 
       <TestRunExecutionModal

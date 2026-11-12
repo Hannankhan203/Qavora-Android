@@ -566,6 +566,8 @@ export default function DefectFormModal({
                   color: theme.text,
                 },
               ]}
+              placeholder="e.g. Device · OS · Build (optional)"
+              placeholderTextColor={theme.textMuted}
               accessibilityLabel="Device and Build Environment"
               returnKeyType="next"
               blurOnSubmit={false}

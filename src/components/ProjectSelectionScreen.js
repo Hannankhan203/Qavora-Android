@@ -18,7 +18,7 @@ import {
   Text,
   TextInput,
   Pressable,
-  ScrollView,
+  FlatList,
   RefreshControl,
   ActivityIndicator,
   Keyboard,
@@ -72,6 +72,331 @@ export function computeProjectCardStats(project) {
   };
 }
 
+function getStatusBadgeStyle(status, colors) {
+  if (status === 'Completed') {
+    return {
+      bg: colors.infoSoft,
+      border: colors.info,
+      text: colors.info,
+    };
+  }
+  if (status === 'Archived') {
+    return {
+      bg: colors.untestedSoft,
+      border: colors.borderStrong,
+      text: colors.textMuted,
+    };
+  }
+  return {
+    bg: colors.successSoft,
+    border: colors.success,
+    text: colors.success,
+  };
+}
+
+const ProjectCardRow = React.memo(function ProjectCardRow({
+  project,
+  isSelected,
+  colors,
+  onSelectProject,
+  onEditProject,
+}) {
+  const statusStyle = getStatusBadgeStyle(project.status, colors);
+  const updatedLabel = formatReadableDate(
+    project.updatedAt || project.createdAt
+  );
+  const stats = computeProjectCardStats(project);
+
+  return (
+    <View
+      style={[
+        styles.projectCard,
+        {
+          backgroundColor: colors.surface,
+          borderColor: isSelected ? colors.primary : colors.border,
+          borderWidth: isSelected ? 2 : 1,
+        },
+      ]}
+    >
+      {/* Card Top Metadata Row */}
+      <View style={styles.cardTopRow}>
+        <View style={styles.cardBadgesWrap}>
+          <View
+            style={[
+              styles.statusBadge,
+              {
+                backgroundColor: statusStyle.bg,
+                borderColor: statusStyle.border,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.statusBadgeText,
+                { color: statusStyle.text, fontFamily: monoFontFamily },
+              ]}
+            >
+              {project.status || 'Active'}
+            </Text>
+          </View>
+
+          {isSelected ? (
+            <View
+              style={[
+                styles.selectedBadge,
+                { backgroundColor: colors.primary },
+              ]}
+            >
+              <VectorIcon
+                name="check"
+                size={11}
+                color={colors.textOnPrimary}
+              />
+              <Text
+                style={[
+                  styles.selectedBadgeText,
+                  {
+                    color: colors.textOnPrimary,
+                    fontFamily: monoFontFamily,
+                  },
+                ]}
+              >
+                SELECTED
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        <Pressable
+          onPress={() => onEditProject(project)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel={`Edit project ${project.name}`}
+          style={[
+            styles.iconActionBtn,
+            {
+              backgroundColor: colors.background,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <VectorIcon name="edit" size={15} color={colors.textSecondary} />
+        </Pressable>
+      </View>
+
+      {/* Project Name & Description */}
+      <Pressable
+        onPress={() => onSelectProject(project, false)}
+        accessibilityRole="button"
+        accessibilityState={{ selected: isSelected }}
+        accessibilityLabel={`Select project ${project.name}`}
+        style={styles.cardBodyTouch}
+      >
+        <Text style={[styles.projectName, { color: colors.text }]}>
+          {project.name}
+        </Text>
+
+        {project.description ? (
+          <Text
+            numberOfLines={2}
+            style={[styles.projectDesc, { color: colors.textSecondary }]}
+          >
+            {project.description}
+          </Text>
+        ) : (
+          <Text style={[styles.projectDescEmpty, { color: colors.textMuted }]}>
+            No description provided.
+          </Text>
+        )}
+
+        {/* Metadata Chips */}
+        <View style={styles.metaRow}>
+          {project.type ? (
+            <View
+              style={[
+                styles.metaPill,
+                {
+                  backgroundColor: colors.background,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <VectorIcon name="layers" size={12} color={colors.primary} />
+              <Text
+                style={[styles.metaPillText, { color: colors.textSecondary }]}
+              >
+                {project.type}
+              </Text>
+            </View>
+          ) : null}
+
+          {project.version ? (
+            <View
+              style={[
+                styles.metaPill,
+                {
+                  backgroundColor: colors.background,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.metaPillText,
+                  {
+                    color: colors.textSecondary,
+                    fontFamily: monoFontFamily,
+                  },
+                ]}
+              >
+                {project.version}
+              </Text>
+            </View>
+          ) : null}
+
+          {project.environment ? (
+            <View
+              style={[
+                styles.metaPill,
+                {
+                  backgroundColor: colors.background,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <VectorIcon name="globe" size={12} color={colors.textMuted} />
+              <Text
+                style={[styles.metaPillText, { color: colors.textSecondary }]}
+              >
+                {project.environment}
+              </Text>
+            </View>
+          ) : null}
+
+          {updatedLabel ? (
+            <View
+              style={[
+                styles.metaPill,
+                {
+                  backgroundColor: colors.background,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <VectorIcon name="calendar" size={12} color={colors.textMuted} />
+              <Text style={[styles.metaPillText, { color: colors.textMuted }]}>
+                Updated {updatedLabel}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        {/* Tags */}
+        {Array.isArray(project.tags) && project.tags.length > 0 ? (
+          <View style={styles.tagsRow}>
+            {project.tags.slice(0, 5).map((tag) => (
+              <View
+                key={tag}
+                style={[
+                  styles.tagBadge,
+                  { backgroundColor: colors.primarySoft },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.tagText,
+                    {
+                      color: colors.primary,
+                      fontFamily: monoFontFamily,
+                    },
+                  ]}
+                >
+                  #{tag}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {/* Project-level statistics when supported by actual data */}
+        {stats ? (
+          <View
+            style={[styles.statsStrip, { borderTopColor: colors.border }]}
+          >
+            <Text
+              style={[
+                styles.statsItemText,
+                {
+                  color: colors.textSecondary,
+                  fontFamily: monoFontFamily,
+                },
+              ]}
+            >
+              {stats.suiteCount} Suites · {stats.testCaseCount} Cases ·{' '}
+              {stats.defectCount} Defects
+            </Text>
+          </View>
+        ) : null}
+      </Pressable>
+
+      {/* Card Bottom Actions */}
+      <View style={[styles.cardFooterRow, { borderTopColor: colors.border }]}>
+        <Pressable
+          onPress={() => onSelectProject(project, false)}
+          accessibilityRole="button"
+          accessibilityState={{ selected: isSelected }}
+          accessibilityLabel={
+            isSelected
+              ? `Open active project ${project.name}`
+              : `Select project ${project.name}`
+          }
+          style={[
+            styles.selectBtn,
+            {
+              backgroundColor: isSelected ? colors.primary : colors.primarySoft,
+              borderColor: colors.primary,
+            },
+          ]}
+        >
+          <VectorIcon
+            name={isSelected ? 'check' : 'chevron-right'}
+            size={15}
+            color={isSelected ? colors.textOnPrimary : colors.primary}
+          />
+          <Text
+            style={[
+              styles.selectBtnText,
+              {
+                color: isSelected ? colors.textOnPrimary : colors.primary,
+              },
+            ]}
+          >
+            {isSelected ? 'Active Project — Open' : 'Select Project'}
+          </Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => onSelectProject(project, true)}
+          accessibilityRole="button"
+          accessibilityLabel={`View details for ${project.name}`}
+          style={[
+            styles.detailsBtn,
+            {
+              backgroundColor: colors.background,
+              borderColor: colors.borderStrong,
+            },
+          ]}
+        >
+          <VectorIcon name="info" size={15} color={colors.text} />
+          <Text style={[styles.detailsBtnText, { color: colors.text }]}>
+            Details
+          </Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+});
+
 export default function ProjectSelectionScreen({
   onOpenWorkspace,
   onOpenProjectDetails,
@@ -114,28 +439,31 @@ export default function ProjectSelectionScreen({
     await refreshProjects();
   }, [refreshProjects]);
 
-  const handleSelectProject = async (project, openDetails = false) => {
-    const id = project.id || project._id;
-    await selectProject(id);
-    if (showToast) {
-      showToast(`Switched active project to "${project.name}"`, 'success');
-    }
-    if (openDetails && typeof onOpenProjectDetails === 'function') {
-      onOpenProjectDetails(project);
-    } else if (typeof onOpenWorkspace === 'function') {
-      onOpenWorkspace(project);
-    }
-  };
+  const handleSelectProject = useCallback(
+    async (project, openDetails = false) => {
+      const id = project.id || project._id;
+      await selectProject(id);
+      if (showToast) {
+        showToast(`Switched active project to "${project.name}"`, 'success');
+      }
+      if (openDetails && typeof onOpenProjectDetails === 'function') {
+        onOpenProjectDetails(project);
+      } else if (typeof onOpenWorkspace === 'function') {
+        onOpenWorkspace(project);
+      }
+    },
+    [selectProject, showToast, onOpenProjectDetails, onOpenWorkspace]
+  );
 
-  const openCreateProjectModal = () => {
+  const openCreateProjectModal = useCallback(() => {
     setEditingProject(null);
     setIsFormModalOpen(true);
-  };
+  }, []);
 
-  const openEditProjectModal = (project) => {
+  const openEditProjectModal = useCallback((project) => {
     setEditingProject(project);
     setIsFormModalOpen(true);
-  };
+  }, []);
 
   const handleFormSuccess = (savedProject, mode) => {
     if (showToast && savedProject) {
@@ -170,44 +498,33 @@ export default function ProjectSelectionScreen({
     });
   }, [projects, statusFilter, searchQuery]);
 
-  const getStatusBadgeStyle = (status) => {
-    if (status === 'Completed') {
-      return {
-        bg: colors.infoSoft,
-        border: colors.info,
-        text: colors.info,
-      };
-    }
-    if (status === 'Archived') {
-      return {
-        bg: colors.untestedSoft,
-        border: colors.borderStrong,
-        text: colors.textMuted,
-      };
-    }
-    return {
-      bg: colors.successSoft,
-      border: colors.success,
-      text: colors.success,
-    };
-  };
+  const projectKeyExtractor = useCallback(
+    (item, index) => String(item?.id || item?._id || `project_${index}`),
+    []
+  );
 
-  return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={handlePullToRefresh}
-            tintColor={colors.primary}
-            colors={[colors.primary]}
-          />
-        }
-      >
-        {/* Top Hero / Header Card */}
+  const renderProjectItem = useCallback(
+    ({ item: project }) => {
+      const isSelected =
+        Boolean(selectedProjectId) &&
+        (project.id === selectedProjectId ||
+          project._id === selectedProjectId);
+      return (
+        <ProjectCardRow
+          project={project}
+          isSelected={isSelected}
+          colors={colors}
+          onSelectProject={handleSelectProject}
+          onEditProject={openEditProjectModal}
+        />
+      );
+    },
+    [selectedProjectId, colors, handleSelectProject, openEditProjectModal]
+  );
+
+  const headerElement = (
+    <View style={styles.headerStack}>
+      {/* Top Hero / Header Card */}
         <View
           style={[
             styles.heroCard,
@@ -621,522 +938,201 @@ export default function ProjectSelectionScreen({
               <Text style={styles.retryBtnText}>Retry Request</Text>
             </Pressable>
           </View>
-        ) : null}
+      ) : null}
+    </View>
+  );
 
-        {/* Loading State */}
-        {isLoading && !hasLoadedInitialProjects ? (
-          <View
+  const emptyElement = (
+    <View style={styles.emptyWrap}>
+      {/* Loading State */}
+      {isLoading && !hasLoadedInitialProjects ? (
+        <View
+          style={[
+            styles.stateCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text style={[styles.stateTitle, { color: colors.text }]}>
+            Loading Your Qavora Projects...
+          </Text>
+          <Text
             style={[
-              styles.stateCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
+              styles.stateSub,
+              { color: colors.textMuted, fontFamily: monoFontFamily },
             ]}
           >
-            <ActivityIndicator size="small" color={colors.primary} />
-            <Text style={[styles.stateTitle, { color: colors.text }]}>
-              Loading Your Qavora Projects...
-            </Text>
+            Fetching from GET /api/projects
+          </Text>
+        </View>
+      ) : null}
+
+      {/* Empty State (No Projects Owned by User) */}
+      {!isLoading && hasLoadedInitialProjects && projects.length === 0 ? (
+        <View
+          style={[
+            styles.stateCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <View
+            style={[
+              styles.emptyIconCircle,
+              { backgroundColor: colors.primarySoft },
+            ]}
+          >
+            <VectorIcon name="folder" size={26} color={colors.primary} />
+          </View>
+          <Text style={[styles.stateTitle, { color: colors.text }]}>
+            No Projects Found
+          </Text>
+          <Text style={[styles.stateDesc, { color: colors.textSecondary }]}>
+            You do not have any QA projects in your Qavora workspace yet. Create your first project, import a JSON backup, or manage account-wide QA checklists.
+          </Text>
+          <Pressable
+            onPress={openCreateProjectModal}
+            accessibilityRole="button"
+            accessibilityLabel="Create your first project"
+            style={[
+              styles.emptyCreateBtn,
+              { backgroundColor: colors.primary },
+            ]}
+          >
+            <VectorIcon name="plus" size={16} color={colors.textOnPrimary} />
             <Text
               style={[
-                styles.stateSub,
-                { color: colors.textMuted, fontFamily: monoFontFamily },
+                styles.emptyCreateBtnText,
+                { color: colors.textOnPrimary },
               ]}
             >
-              Fetching from GET /api/projects
+              Create Your First Project
             </Text>
-          </View>
-        ) : null}
+          </Pressable>
 
-        {/* Empty State (No Projects Owned by User) */}
-        {!isLoading && hasLoadedInitialProjects && projects.length === 0 ? (
           <View
-            style={[
-              styles.stateCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
+            style={{
+              flexDirection: 'row',
+              flexWrap: 'wrap',
+              justifyContent: 'center',
+              gap: 8,
+              marginTop: 6,
+            }}
           >
-            <View
-              style={[
-                styles.emptyIconCircle,
-                { backgroundColor: colors.primarySoft },
-              ]}
-            >
-              <VectorIcon name="folder" size={26} color={colors.primary} />
-            </View>
-            <Text style={[styles.stateTitle, { color: colors.text }]}>
-              No Projects Found
-            </Text>
-            <Text style={[styles.stateDesc, { color: colors.textSecondary }]}>
-              You do not have any QA projects in your Qavora workspace yet. Create your first project, import a JSON backup, or manage account-wide QA checklists.
-            </Text>
-            <Pressable
-              onPress={openCreateProjectModal}
-              accessibilityRole="button"
-              accessibilityLabel="Create your first project"
-              style={[
-                styles.emptyCreateBtn,
-                { backgroundColor: colors.primary },
-              ]}
-            >
-              <VectorIcon name="plus" size={16} color={colors.textOnPrimary} />
-              <Text
-                style={[
-                  styles.emptyCreateBtnText,
-                  { color: colors.textOnPrimary },
-                ]}
-              >
-                Create Your First Project
-              </Text>
-            </Pressable>
-
-            <View
-              style={{
-                flexDirection: 'row',
-                flexWrap: 'wrap',
-                justifyContent: 'center',
-                gap: 8,
-                marginTop: 6,
-              }}
-            >
-              {typeof openDataManagementView === 'function' ? (
-                <Pressable
-                  onPress={openDataManagementView}
-                  accessibilityRole="button"
-                  accessibilityLabel="Import backup and open Data Management"
-                  style={[
-                    styles.secondaryActionBtn,
-                    {
-                      backgroundColor: colors.surfaceAccent,
-                      borderColor: colors.primary,
-                    },
-                  ]}
-                >
-                  <VectorIcon name="layers" size={15} color={colors.primary} />
-                  <Text
-                    style={[
-                      styles.secondaryActionText,
-                      { color: colors.primary },
-                    ]}
-                  >
-                    Import Backup & Data Management
-                  </Text>
-                </Pressable>
-              ) : null}
-
-              {typeof openChecklistsView === 'function' ? (
-                <Pressable
-                  onPress={openChecklistsView}
-                  accessibilityRole="button"
-                  accessibilityLabel="Open account QA Checklists"
-                  style={[
-                    styles.secondaryActionBtn,
-                    {
-                      backgroundColor: colors.background,
-                      borderColor: colors.borderStrong,
-                    },
-                  ]}
-                >
-                  <VectorIcon
-                    name="clipboard"
-                    size={15}
-                    color={colors.primary}
-                  />
-                  <Text
-                    style={[styles.secondaryActionText, { color: colors.text }]}
-                  >
-                    Account QA Checklists
-                  </Text>
-                </Pressable>
-              ) : null}
-            </View>
-          </View>
-        ) : null}
-
-        {/* Empty Filter Result */}
-        {!isLoading &&
-        projects.length > 0 &&
-        filteredProjects.length === 0 ? (
-          <View
-            style={[
-              styles.stateCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <Text style={[styles.stateTitle, { color: colors.text }]}>
-              No Matching Projects
-            </Text>
-            <Text style={[styles.stateDesc, { color: colors.textSecondary }]}>
-              No projects matched your current search or status filter.
-            </Text>
-            <Pressable
-              onPress={() => {
-                setSearchQuery('');
-                setStatusFilter('All');
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Reset project search and status filters"
-              style={[
-                styles.secondaryActionBtn,
-                {
-                  backgroundColor: colors.background,
-                  borderColor: colors.borderStrong,
-                },
-              ]}
-            >
-              <Text style={[styles.secondaryActionText, { color: colors.text }]}>
-                Reset Filters
-              </Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        {/* Project Cards List */}
-        {filteredProjects.map((project) => {
-          const projectId = project.id || project._id;
-          const isSelected =
-            Boolean(selectedProjectId) &&
-            (project.id === selectedProjectId ||
-              project._id === selectedProjectId);
-          const statusStyle = getStatusBadgeStyle(project.status);
-          const updatedLabel = formatReadableDate(
-            project.updatedAt || project.createdAt
-          );
-          const stats = computeProjectCardStats(project);
-
-          return (
-            <View
-              key={projectId}
-              style={[
-                styles.projectCard,
-                {
-                  backgroundColor: colors.surface,
-                  borderColor: isSelected ? colors.primary : colors.border,
-                  borderWidth: isSelected ? 2 : 1,
-                },
-              ]}
-            >
-              {/* Card Top Metadata Row */}
-              <View style={styles.cardTopRow}>
-                <View style={styles.cardBadgesWrap}>
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      {
-                        backgroundColor: statusStyle.bg,
-                        borderColor: statusStyle.border,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.statusBadgeText,
-                        { color: statusStyle.text, fontFamily: monoFontFamily },
-                      ]}
-                    >
-                      {project.status || 'Active'}
-                    </Text>
-                  </View>
-
-                  {isSelected ? (
-                    <View
-                      style={[
-                        styles.selectedBadge,
-                        { backgroundColor: colors.primary },
-                      ]}
-                    >
-                      <VectorIcon
-                        name="check"
-                        size={11}
-                        color={colors.textOnPrimary}
-                      />
-                      <Text
-                        style={[
-                          styles.selectedBadgeText,
-                          {
-                            color: colors.textOnPrimary,
-                            fontFamily: monoFontFamily,
-                          },
-                        ]}
-                      >
-                        SELECTED
-                      </Text>
-                    </View>
-                  ) : null}
-                </View>
-
-                <Pressable
-                  onPress={() => openEditProjectModal(project)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Edit project ${project.name}`}
-                  style={[
-                    styles.iconActionBtn,
-                    {
-                      backgroundColor: colors.background,
-                      borderColor: colors.border,
-                    },
-                  ]}
-                >
-                  <VectorIcon
-                    name="edit"
-                    size={15}
-                    color={colors.textSecondary}
-                  />
-                </Pressable>
-              </View>
-
-              {/* Project Name & Description */}
+            {typeof openDataManagementView === 'function' ? (
               <Pressable
-                onPress={() => handleSelectProject(project, false)}
+                onPress={openDataManagementView}
                 accessibilityRole="button"
-                accessibilityState={{ selected: isSelected }}
-                accessibilityLabel={`Select project ${project.name}`}
-                style={styles.cardBodyTouch}
-              >
-                <Text style={[styles.projectName, { color: colors.text }]}>
-                  {project.name}
-                </Text>
-
-                {project.description ? (
-                  <Text
-                    numberOfLines={2}
-                    style={[
-                      styles.projectDesc,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    {project.description}
-                  </Text>
-                ) : (
-                  <Text
-                    style={[styles.projectDescEmpty, { color: colors.textMuted }]}
-                  >
-                    No description provided.
-                  </Text>
-                )}
-
-                {/* Metadata Chips */}
-                <View style={styles.metaRow}>
-                  {project.type ? (
-                    <View
-                      style={[
-                        styles.metaPill,
-                        {
-                          backgroundColor: colors.background,
-                          borderColor: colors.border,
-                        },
-                      ]}
-                    >
-                      <VectorIcon
-                        name="layers"
-                        size={12}
-                        color={colors.primary}
-                      />
-                      <Text
-                        style={[
-                          styles.metaPillText,
-                          { color: colors.textSecondary },
-                        ]}
-                      >
-                        {project.type}
-                      </Text>
-                    </View>
-                  ) : null}
-
-                  {project.version ? (
-                    <View
-                      style={[
-                        styles.metaPill,
-                        {
-                          backgroundColor: colors.background,
-                          borderColor: colors.border,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.metaPillText,
-                          {
-                            color: colors.textSecondary,
-                            fontFamily: monoFontFamily,
-                          },
-                        ]}
-                      >
-                        {project.version}
-                      </Text>
-                    </View>
-                  ) : null}
-
-                  {project.environment ? (
-                    <View
-                      style={[
-                        styles.metaPill,
-                        {
-                          backgroundColor: colors.background,
-                          borderColor: colors.border,
-                        },
-                      ]}
-                    >
-                      <VectorIcon
-                        name="globe"
-                        size={12}
-                        color={colors.textMuted}
-                      />
-                      <Text
-                        style={[
-                          styles.metaPillText,
-                          { color: colors.textSecondary },
-                        ]}
-                      >
-                        {project.environment}
-                      </Text>
-                    </View>
-                  ) : null}
-
-                  {updatedLabel ? (
-                    <View
-                      style={[
-                        styles.metaPill,
-                        {
-                          backgroundColor: colors.background,
-                          borderColor: colors.border,
-                        },
-                      ]}
-                    >
-                      <VectorIcon
-                        name="calendar"
-                        size={12}
-                        color={colors.textMuted}
-                      />
-                      <Text
-                        style={[
-                          styles.metaPillText,
-                          { color: colors.textMuted },
-                        ]}
-                      >
-                        Updated {updatedLabel}
-                      </Text>
-                    </View>
-                  ) : null}
-                </View>
-
-                {/* Tags */}
-                {Array.isArray(project.tags) && project.tags.length > 0 ? (
-                  <View style={styles.tagsRow}>
-                    {project.tags.slice(0, 5).map((tag) => (
-                      <View
-                        key={tag}
-                        style={[
-                          styles.tagBadge,
-                          { backgroundColor: colors.primarySoft },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.tagText,
-                            {
-                              color: colors.primary,
-                              fontFamily: monoFontFamily,
-                            },
-                          ]}
-                        >
-                          #{tag}
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-                ) : null}
-
-                {/* Project-level statistics when supported by actual data */}
-                {stats ? (
-                  <View
-                    style={[
-                      styles.statsStrip,
-                      { borderTopColor: colors.border },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.statsItemText,
-                        {
-                          color: colors.textSecondary,
-                          fontFamily: monoFontFamily,
-                        },
-                      ]}
-                    >
-                      {stats.suiteCount} Suites · {stats.testCaseCount} Cases ·{' '}
-                      {stats.defectCount} Defects
-                    </Text>
-                  </View>
-                ) : null}
-              </Pressable>
-
-              {/* Card Bottom Actions */}
-              <View
+                accessibilityLabel="Import backup and open Data Management"
                 style={[
-                  styles.cardFooterRow,
-                  { borderTopColor: colors.border },
+                  styles.secondaryActionBtn,
+                  {
+                    backgroundColor: colors.surfaceAccent,
+                    borderColor: colors.primary,
+                  },
                 ]}
               >
-                <Pressable
-                  onPress={() => handleSelectProject(project, false)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: isSelected }}
-                  accessibilityLabel={
-                    isSelected
-                      ? `Open active project ${project.name}`
-                      : `Select project ${project.name}`
-                  }
+                <VectorIcon name="layers" size={15} color={colors.primary} />
+                <Text
                   style={[
-                    styles.selectBtn,
-                    {
-                      backgroundColor: isSelected
-                        ? colors.primary
-                        : colors.primarySoft,
-                      borderColor: colors.primary,
-                    },
+                    styles.secondaryActionText,
+                    { color: colors.primary },
                   ]}
                 >
-                  <VectorIcon
-                    name={isSelected ? 'check' : 'chevron-right'}
-                    size={15}
-                    color={isSelected ? colors.textOnPrimary : colors.primary}
-                  />
-                  <Text
-                    style={[
-                      styles.selectBtnText,
-                      {
-                        color: isSelected
-                          ? colors.textOnPrimary
-                          : colors.primary,
-                      },
-                    ]}
-                  >
-                    {isSelected ? 'Active Project — Open' : 'Select Project'}
-                  </Text>
-                </Pressable>
+                  Import Backup & Data Management
+                </Text>
+              </Pressable>
+            ) : null}
 
-                <Pressable
-                  onPress={() => handleSelectProject(project, true)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`View details for ${project.name}`}
-                  style={[
-                    styles.detailsBtn,
-                    {
-                      backgroundColor: colors.background,
-                      borderColor: colors.borderStrong,
-                    },
-                  ]}
+            {typeof openChecklistsView === 'function' ? (
+              <Pressable
+                onPress={openChecklistsView}
+                accessibilityRole="button"
+                accessibilityLabel="Open account QA Checklists"
+                style={[
+                  styles.secondaryActionBtn,
+                  {
+                    backgroundColor: colors.background,
+                    borderColor: colors.borderStrong,
+                  },
+                ]}
+              >
+                <VectorIcon name="clipboard" size={15} color={colors.primary} />
+                <Text
+                  style={[styles.secondaryActionText, { color: colors.text }]}
                 >
-                  <VectorIcon name="info" size={15} color={colors.text} />
-                  <Text style={[styles.detailsBtnText, { color: colors.text }]}>
-                    Details
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-          );
-        })}
-      </ScrollView>
+                  Account QA Checklists
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+
+      {/* Empty Filter Result */}
+      {!isLoading &&
+      projects.length > 0 &&
+      filteredProjects.length === 0 ? (
+        <View
+          style={[
+            styles.stateCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.stateTitle, { color: colors.text }]}>
+            No Matching Projects
+          </Text>
+          <Text style={[styles.stateDesc, { color: colors.textSecondary }]}>
+            No projects matched your current search or status filter.
+          </Text>
+          <Pressable
+            onPress={() => {
+              setSearchQuery('');
+              setStatusFilter('All');
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Reset project search and status filters"
+            style={[
+              styles.secondaryActionBtn,
+              {
+                backgroundColor: colors.background,
+                borderColor: colors.borderStrong,
+              },
+            ]}
+          >
+            <Text style={[styles.secondaryActionText, { color: colors.text }]}>
+              Reset Filters
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
+  );
+
+  return (
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
+      <FlatList
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        data={filteredProjects}
+        keyExtractor={projectKeyExtractor}
+        renderItem={renderProjectItem}
+        ListHeaderComponent={headerElement}
+        ListEmptyComponent={emptyElement}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        removeClippedSubviews
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handlePullToRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+      />
 
       {/* Create / Edit Project Modal */}
       <ProjectFormModal
@@ -1163,6 +1159,12 @@ const styles = StyleSheet.create({
     maxWidth: 920,
     width: '100%',
     alignSelf: 'center',
+  },
+  headerStack: {
+    gap: 14,
+    marginBottom: 14,
+  },
+  emptyWrap: {
     gap: 14,
   },
   heroCard: {
@@ -1470,6 +1472,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     gap: 12,
+    marginBottom: 14,
   },
   cardTopRow: {
     flexDirection: 'row',

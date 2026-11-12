@@ -2890,9 +2890,23 @@ export function WorkspaceProvider({ children }) {
           typeof expectedResult === 'string' ? expectedResult.trim() : '',
         actualResult: actualText,
         environment:
-          (typeof environment === 'string' && environment.trim()) ||
-          (selectedProject && selectedProject.environment) ||
-          `${profile.defaultDevice} · Build ${profile.defaultBuild}`,
+          typeof environment === 'string'
+            ? environment.trim()
+            : [
+                typeof profile?.defaultDevice === 'string'
+                  ? profile.defaultDevice.trim()
+                  : '',
+                typeof profile?.defaultBuild === 'string' &&
+                profile.defaultBuild.trim()
+                  ? `Build ${profile.defaultBuild.trim()}`
+                  : '',
+                typeof selectedProject?.environment === 'string'
+                  ? selectedProject.environment.trim()
+                  : '',
+              ]
+                .filter(Boolean)
+                .filter((part, idx, arr) => arr.indexOf(part) === idx)
+                .join(' · '),
         externalUrl:
           typeof externalUrl === 'string' ? externalUrl.trim() : '',
         linkedTestCaseId: linkedTestCaseId || null,
@@ -3291,8 +3305,28 @@ export function WorkspaceProvider({ children }) {
         expectedResult: testCase.expectedResult || '',
         actualResult: actualResult || 'Test execution failed.',
         environment: testRun
-          ? `${testRun.deviceInfo} · Build ${testRun.buildVersion}`
-          : `${profile.defaultDevice} · Build ${profile.defaultBuild}`,
+          ? [
+              typeof testRun.deviceInfo === 'string'
+                ? testRun.deviceInfo.trim()
+                : '',
+              typeof testRun.buildVersion === 'string' &&
+              testRun.buildVersion.trim()
+                ? `Build ${testRun.buildVersion.trim()}`
+                : '',
+            ]
+              .filter(Boolean)
+              .join(' · ')
+          : [
+              typeof profile?.defaultDevice === 'string'
+                ? profile.defaultDevice.trim()
+                : '',
+              typeof profile?.defaultBuild === 'string' &&
+              profile.defaultBuild.trim()
+                ? `Build ${profile.defaultBuild.trim()}`
+                : '',
+            ]
+              .filter(Boolean)
+              .join(' · '),
         linkedTestCaseId: testCase.id,
         linkedCaseTitle: testCase.title,
         linkedTestRunId: testRun ? testRun.id : null,

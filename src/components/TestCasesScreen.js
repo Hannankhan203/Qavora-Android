@@ -3,6 +3,7 @@ import {
   Text,
   View,
   ScrollView,
+  FlatList,
   Pressable,
   TextInput,
   ActivityIndicator,
@@ -24,6 +25,464 @@ import TestSuiteDeleteModal from './testCases/TestSuiteDeleteModal';
 import TestPlanFormModal from './testCases/TestPlanFormModal';
 import TestPhaseFormModal from './testCases/TestPhaseFormModal';
 import TestPhaseDeleteModal from './testCases/TestPhaseDeleteModal';
+
+const SuiteChipItem = React.memo(function SuiteChipItem({
+  suite,
+  count,
+  active,
+  colors,
+  onSelectSuite,
+}) {
+  return (
+    <Pressable
+      onPress={() => onSelectSuite(suite.id)}
+      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={`Filter by suite: ${suite.name} (${count} cases)`}
+      style={[
+        styles.suiteChip,
+        {
+          backgroundColor: active ? colors.primary : colors.surfaceMuted,
+          borderColor: active ? colors.primary : colors.border,
+        },
+      ]}
+    >
+      <Text
+        style={[
+          styles.suiteChipText,
+          { color: active ? '#ffffff' : colors.textSecondary },
+        ]}
+      >
+        {suite.name} ({count})
+      </Text>
+    </Pressable>
+  );
+});
+
+const TestCaseRowCard = React.memo(function TestCaseRowCard({
+  tc,
+  prioStyle,
+  statusStyle,
+  colors,
+  canMoveSuite,
+  onOpenCase,
+  onMoveCase,
+  onEditCase,
+  onDeleteCase,
+}) {
+  const displayId = tc.testCaseId || tc.id;
+
+  return (
+    <Pressable
+      onPress={() => onOpenCase(tc.id)}
+      accessibilityRole="button"
+      accessibilityLabel={`Open test case ${displayId}: ${tc.title}, ${tc.priority} priority, status ${tc.lastStatus}`}
+      style={({ pressed }) => [
+        styles.caseCard,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          opacity: pressed ? 0.92 : 1,
+        },
+      ]}
+    >
+      <View style={styles.caseTopRow}>
+        <View style={styles.caseIdBadgeRow}>
+          <Text
+            style={[
+              styles.caseId,
+              {
+                color: colors.primary,
+                fontFamily: monoFontFamily,
+              },
+            ]}
+          >
+            {displayId}
+          </Text>
+          <View
+            style={[
+              styles.prioBadge,
+              {
+                backgroundColor: prioStyle.bg,
+                borderColor: prioStyle.border,
+              },
+            ]}
+          >
+            <Text style={[styles.prioBadgeText, { color: prioStyle.text }]}>
+              {tc.priority}
+            </Text>
+          </View>
+        </View>
+        <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
+          <Text style={[styles.statusBadgeText, { color: statusStyle.text }]}>
+            {tc.lastStatus}
+          </Text>
+        </View>
+      </View>
+
+      <Text style={[styles.caseTitle, { color: colors.text }]}>{tc.title}</Text>
+
+      {!!tc.description && (
+        <Text
+          style={[styles.caseDesc, { color: colors.textSecondary }]}
+          numberOfLines={2}
+        >
+          {tc.description}
+        </Text>
+      )}
+
+      <View style={styles.caseFooterRow}>
+        <View style={styles.caseMetaRow}>
+          <View
+            style={[styles.metaPill, { backgroundColor: colors.surfaceMuted }]}
+          >
+            <Text
+              style={[styles.metaPillText, { color: colors.textSecondary }]}
+            >
+              {tc.suiteName}
+            </Text>
+          </View>
+          <View
+            style={[styles.metaPill, { backgroundColor: colors.surfaceMuted }]}
+          >
+            <Text style={[styles.metaPillText, { color: colors.textMuted }]}>
+              {tc.testType || tc.category}
+            </Text>
+          </View>
+        </View>
+        <Text style={[styles.stepsCountText, { color: colors.textMuted }]}>
+          {(tc.steps || []).length} steps
+        </Text>
+      </View>
+
+      {/* Quick Card Actions: Move Suite | Edit | Delete */}
+      <View style={[styles.cardActionsBar, { borderTopColor: colors.border }]}>
+        {canMoveSuite && (
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation?.();
+              onMoveCase(tc);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={`Move ${displayId} to another suite`}
+            style={[
+              styles.cardMiniBtn,
+              {
+                backgroundColor: colors.surfaceMuted,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <VectorIcon name="switch" size={12} color={colors.textSecondary} />
+            <Text
+              style={[styles.cardMiniBtnText, { color: colors.textSecondary }]}
+            >
+              Move Suite
+            </Text>
+          </Pressable>
+        )}
+        <Pressable
+          onPress={(e) => {
+            e.stopPropagation?.();
+            onEditCase(tc);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={`Edit ${displayId}`}
+          style={[
+            styles.cardMiniBtn,
+            {
+              backgroundColor: colors.surfaceMuted,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <VectorIcon name="edit" size={12} color={colors.primary} />
+          <Text style={[styles.cardMiniBtnText, { color: colors.primary }]}>
+            Edit
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={(e) => {
+            e.stopPropagation?.();
+            onDeleteCase(tc);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={`Delete ${displayId}`}
+          style={[
+            styles.cardMiniBtn,
+            {
+              backgroundColor: colors.dangerSoft,
+              borderColor: colors.danger,
+            },
+          ]}
+        >
+          <VectorIcon name="trash" size={12} color={colors.danger} />
+          <Text style={[styles.cardMiniBtnText, { color: colors.danger }]}>
+            Delete
+          </Text>
+        </Pressable>
+      </View>
+    </Pressable>
+  );
+});
+
+const TestSuiteRowCard = React.memo(function TestSuiteRowCard({
+  suite,
+  stats,
+  linkedPhase,
+  colors,
+  onViewSuiteCases,
+  onAddCaseToSuite,
+  onEditSuite,
+  onDeleteSuite,
+}) {
+  return (
+    <View
+      style={[
+        styles.suiteDetailCard,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+        },
+      ]}
+    >
+      <View style={styles.suiteDetailTop}>
+        <View style={{ flex: 1, gap: 4 }}>
+          <View style={styles.suiteBadgeRow}>
+            <View
+              style={[styles.metaPill, { backgroundColor: colors.primarySoft }]}
+            >
+              <Text style={[styles.metaPillText, { color: colors.primary }]}>
+                {suite.category || 'Functional'}
+              </Text>
+            </View>
+            {linkedPhase && (
+              <View
+                style={[
+                  styles.metaPill,
+                  { backgroundColor: colors.surfaceMuted },
+                ]}
+              >
+                <Text
+                  style={[styles.metaPillText, { color: colors.textSecondary }]}
+                >
+                  Phase: {linkedPhase.name}
+                </Text>
+              </View>
+            )}
+          </View>
+          <Text style={[styles.suiteDetailName, { color: colors.text }]}>
+            {suite.name}
+          </Text>
+        </View>
+        <View
+          style={[
+            styles.caseCountBadge,
+            {
+              backgroundColor: colors.surfaceMuted,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <Text style={[styles.caseCountNumber, { color: colors.primary }]}>
+            {stats.total}
+          </Text>
+          <Text style={[styles.caseCountLabel, { color: colors.textMuted }]}>
+            {stats.total === 1 ? 'Case' : 'Cases'}
+          </Text>
+        </View>
+      </View>
+
+      <Text style={[styles.suiteDetailDesc, { color: colors.textSecondary }]}>
+        {suite.description || 'No suite description provided.'}
+      </Text>
+
+      {Array.isArray(suite.tags) && suite.tags.length > 0 && (
+        <View style={styles.suiteTagsRow}>
+          {suite.tags.map((tag, idx) => (
+            <View
+              key={`${suite.id}-tag-${idx}`}
+              style={[styles.metaPill, { backgroundColor: colors.surfaceMuted }]}
+            >
+              <Text style={[styles.metaPillText, { color: colors.textMuted }]}>
+                #{tag}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* Suite Status Breakdown */}
+      <View
+        style={[styles.suiteStatsRow, { backgroundColor: colors.surfaceMuted }]}
+      >
+        <Text style={[styles.suiteStatItem, { color: colors.success }]}>
+          Passed: {stats.passed}
+        </Text>
+        <Text style={[styles.suiteStatItem, { color: colors.danger }]}>
+          Failed: {stats.failed}
+        </Text>
+        <Text style={[styles.suiteStatItem, { color: colors.warning }]}>
+          Blocked: {stats.blocked}
+        </Text>
+        <Text style={[styles.suiteStatItem, { color: colors.textMuted }]}>
+          Untested: {stats.untested}
+        </Text>
+      </View>
+
+      <View style={[styles.cardActionsBar, { borderTopColor: colors.border }]}>
+        <Pressable
+          onPress={() => onViewSuiteCases(suite.id)}
+          accessibilityRole="button"
+          accessibilityLabel={`View ${stats.total} cases in suite ${suite.name}`}
+          style={[
+            styles.cardMiniBtn,
+            {
+              backgroundColor: colors.primarySoft,
+              borderColor: colors.primary,
+            },
+          ]}
+        >
+          <VectorIcon name="layers" size={12} color={colors.primary} />
+          <Text style={[styles.cardMiniBtnText, { color: colors.primary }]}>
+            View Cases ({stats.total})
+          </Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => onAddCaseToSuite(suite.id)}
+          accessibilityRole="button"
+          accessibilityLabel={`Add case to suite ${suite.name}`}
+          style={[
+            styles.cardMiniBtn,
+            {
+              backgroundColor: colors.surfaceMuted,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <VectorIcon name="plus" size={12} color={colors.text} />
+          <Text style={[styles.cardMiniBtnText, { color: colors.text }]}>
+            Add Case
+          </Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => onEditSuite(suite)}
+          accessibilityRole="button"
+          accessibilityLabel={`Edit suite ${suite.name}`}
+          style={[
+            styles.cardMiniBtn,
+            {
+              backgroundColor: colors.surfaceMuted,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <VectorIcon name="edit" size={12} color={colors.textSecondary} />
+          <Text
+            style={[styles.cardMiniBtnText, { color: colors.textSecondary }]}
+          >
+            Edit
+          </Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => onDeleteSuite(suite)}
+          accessibilityRole="button"
+          accessibilityLabel={`Delete suite ${suite.name}`}
+          style={[
+            styles.cardMiniBtn,
+            {
+              backgroundColor: colors.dangerSoft,
+              borderColor: colors.danger,
+            },
+          ]}
+        >
+          <VectorIcon name="trash" size={12} color={colors.danger} />
+          <Text style={[styles.cardMiniBtnText, { color: colors.danger }]}>
+            Delete
+          </Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+});
+
+const TestPhaseRowCard = React.memo(function TestPhaseRowCard({
+  phase,
+  orderNumber,
+  suiteCount,
+  caseCount,
+  colors,
+  onEditPhase,
+  onDeletePhase,
+}) {
+  return (
+    <View
+      style={[
+        styles.phaseRowCard,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+        },
+      ]}
+    >
+      <View
+        style={[
+          styles.phaseOrderCircle,
+          { backgroundColor: colors.primary },
+        ]}
+      >
+        <Text style={styles.phaseOrderText}>{orderNumber}</Text>
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={[styles.phaseRowName, { color: colors.text }]}>
+          {phase.name}
+        </Text>
+        <Text style={[styles.phaseRowDesc, { color: colors.textSecondary }]}>
+          {phase.description || 'No phase description'}
+        </Text>
+        <Text style={[styles.phaseRowStats, { color: colors.textMuted }]}>
+          {suiteCount} suites · {caseCount} cases
+        </Text>
+      </View>
+      <View style={styles.phaseRowActions}>
+        <Pressable
+          onPress={() => onEditPhase(phase)}
+          hitSlop={{ top: 9, bottom: 9, left: 9, right: 9 }}
+          accessibilityRole="button"
+          accessibilityLabel={`Edit testing phase ${phase.name}`}
+          style={[
+            styles.iconSquareBtn,
+            {
+              backgroundColor: colors.surfaceMuted,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <VectorIcon name="edit" size={13} color={colors.primary} />
+        </Pressable>
+        <Pressable
+          onPress={() => onDeletePhase(phase)}
+          hitSlop={{ top: 9, bottom: 9, left: 9, right: 9 }}
+          accessibilityRole="button"
+          accessibilityLabel={`Delete testing phase ${phase.name}`}
+          style={[
+            styles.iconSquareBtn,
+            {
+              backgroundColor: colors.dangerSoft,
+              borderColor: colors.danger,
+            },
+          ]}
+        >
+          <VectorIcon name="trash" size={13} color={colors.danger} />
+        </Pressable>
+      </View>
+    </View>
+  );
+});
 
 export default function TestCasesScreen({
   subTab: controlledSubTab,
@@ -74,17 +533,20 @@ export default function TestCasesScreen({
       ? contextSubTab
       : localSubTab;
 
-  const setSubTab = (nextTab) => {
-    const cleanTab =
-      nextTab === 'suites' || nextTab === 'plan' ? nextTab : 'cases';
-    setLocalSubTab(cleanTab);
-    if (typeof onChangeSubTab === 'function') {
-      onChangeSubTab(cleanTab);
-    }
-    if (typeof setContextSubTab === 'function') {
-      setContextSubTab(cleanTab);
-    }
-  };
+  const setSubTab = useCallback(
+    (nextTab) => {
+      const cleanTab =
+        nextTab === 'suites' || nextTab === 'plan' ? nextTab : 'cases';
+      setLocalSubTab(cleanTab);
+      if (typeof onChangeSubTab === 'function') {
+        onChangeSubTab(cleanTab);
+      }
+      if (typeof setContextSubTab === 'function') {
+        setContextSubTab(cleanTab);
+      }
+    },
+    [onChangeSubTab, setContextSubTab]
+  );
 
   // --- Filter & Search State (Test Cases) ---
   const [searchQuery, setSearchQuery] = useState('');
@@ -328,97 +790,109 @@ export default function TestCasesScreen({
     searchQuery,
   ]);
 
-  const getPriorityBadgeStyle = (priority) => {
-    switch (priority) {
-      case 'P0':
-      case 'Critical':
-        return {
-          bg: colors.dangerSoft,
-          text: colors.danger,
-          border: colors.danger,
-        };
-      case 'P1':
-      case 'High':
-        return {
-          bg: colors.warningSoft,
-          text: colors.warning,
-          border: colors.warning,
-        };
-      case 'P2':
-      case 'Medium':
-        return {
-          bg: colors.primarySoft,
-          text: colors.primary,
-          border: colors.primary,
-        };
-      default:
-        return {
-          bg: colors.surfaceMuted,
-          text: colors.textSecondary,
-          border: colors.border,
-        };
-    }
-  };
+  const getPriorityBadgeStyle = useCallback(
+    (priority) => {
+      switch (priority) {
+        case 'P0':
+        case 'Critical':
+          return {
+            bg: colors.dangerSoft,
+            text: colors.danger,
+            border: colors.danger,
+          };
+        case 'P1':
+        case 'High':
+          return {
+            bg: colors.warningSoft,
+            text: colors.warning,
+            border: colors.warning,
+          };
+        case 'P2':
+        case 'Medium':
+          return {
+            bg: colors.primarySoft,
+            text: colors.primary,
+            border: colors.primary,
+          };
+        default:
+          return {
+            bg: colors.surfaceMuted,
+            text: colors.textSecondary,
+            border: colors.border,
+          };
+      }
+    },
+    [colors]
+  );
 
-  const getStatusBadgeStyle = (status) => {
-    switch (status) {
-      case 'Passed':
-        return { bg: colors.successSoft, text: colors.success };
-      case 'Failed':
-        return { bg: colors.dangerSoft, text: colors.danger };
-      case 'Blocked':
-        return { bg: colors.warningSoft, text: colors.warning };
-      default:
-        return { bg: colors.surfaceMuted, text: colors.textMuted };
-    }
-  };
+  const getStatusBadgeStyle = useCallback(
+    (status) => {
+      switch (status) {
+        case 'Passed':
+          return { bg: colors.successSoft, text: colors.success };
+        case 'Failed':
+          return { bg: colors.dangerSoft, text: colors.danger };
+        case 'Blocked':
+          return { bg: colors.warningSoft, text: colors.warning };
+        default:
+          return { bg: colors.surfaceMuted, text: colors.textMuted };
+      }
+    },
+    [colors]
+  );
 
   // =========================================================================
   // TEST CASE MODAL HANDLERS
   // =========================================================================
 
-  const openCreateCaseModal = (defaultSuiteId = null) => {
-    setEditingCase(null);
-    setFormTitle('');
-    setFormSuiteId(
-      defaultSuiteId ||
-        (selectedSuiteId !== 'all'
-          ? selectedSuiteId
-          : suites[0]?.id || 'suite-general')
-    );
-    setFormPriority('P1');
-    setFormTestType('Functional');
-    setFormTags('');
-    setFormDescription('');
-    setFormPreconditions('');
-    setFormExpectedResult('');
-    setFormSteps([{ action: '', testData: '', expectedResult: '' }]);
-    setCaseFormError(null);
-    setIsFormModalOpen(true);
-  };
+  const openCreateCaseModal = useCallback(
+    (defaultSuiteId = null) => {
+      setEditingCase(null);
+      setFormTitle('');
+      setFormSuiteId(
+        defaultSuiteId ||
+          (selectedSuiteId !== 'all'
+            ? selectedSuiteId
+            : suites[0]?.id || 'suite-general')
+      );
+      setFormPriority('P1');
+      setFormTestType('Functional');
+      setFormTags('');
+      setFormDescription('');
+      setFormPreconditions('');
+      setFormExpectedResult('');
+      setFormSteps([{ action: '', testData: '', expectedResult: '' }]);
+      setCaseFormError(null);
+      setIsFormModalOpen(true);
+    },
+    [selectedSuiteId, suites]
+  );
 
-  const openEditCaseModal = (tc) => {
-    setEditingCase(tc);
-    setFormTitle(tc.title || '');
-    setFormSuiteId(tc.suiteId || suites[0]?.id || 'suite-general');
-    setFormPriority(tc.priority || 'P1');
-    setFormTestType(tc.testType || tc.category || 'Functional');
-    setFormTags(Array.isArray(tc.tags) ? tc.tags.join(', ') : '');
-    setFormDescription(tc.description || '');
-    setFormPreconditions(tc.preconditions || '');
-    setFormExpectedResult(tc.expectedResult || '');
-    setFormSteps(
-      tc.steps && tc.steps.length > 0
-        ? tc.steps.map((s) => ({
-            action: s.action || '',
-            testData: s.testData || '',
-            expectedResult: s.expectedResult || '',
-          }))
-        : [{ action: '', testData: '', expectedResult: '' }]
-    );
-    setCaseFormError(null);
-    setIsFormModalOpen(true);
-  };
+  const openEditCaseModal = useCallback(
+    (tc) => {
+      setEditingCase(tc);
+      setFormTitle(tc.title || '');
+      setFormSuiteId(tc.suiteId || suites[0]?.id || 'suite-general');
+      setFormPriority(tc.priority || 'P1');
+      setFormTestType(tc.testType || tc.category || 'Functional');
+      setFormTags(Array.isArray(tc.tags) ? tc.tags.join(', ') : '');
+      setFormDescription(tc.description || '');
+      setFormPreconditions(tc.preconditions || '');
+      setFormExpectedResult(tc.expectedResult || '');
+      setFormSteps(
+        tc.steps && tc.steps.length > 0
+          ? tc.steps.map((s) => ({
+              action: s.action || '',
+              testData: s.testData || '',
+              expectedResult: s.expectedResult || '',
+            }))
+          : [{ action: '', testData: '', expectedResult: '' }]
+      );
+      setCaseFormError(null);
+      setIsFormModalOpen(true);
+    },
+    [suites]
+  );
 
   const handleStepChange = (index, field, value) => {
     setFormSteps((prev) =>
@@ -503,11 +977,14 @@ export default function TestCasesScreen({
     }
   };
 
-  const openMoveCaseModal = (tc) => {
-    const otherSuite = suites.find((s) => s.id !== tc.suiteId) || suites[0];
-    setMovingCase(tc);
-    setMoveTargetSuiteId(otherSuite ? otherSuite.id : tc.suiteId);
-  };
+  const openMoveCaseModal = useCallback(
+    (tc) => {
+      const otherSuite = suites.find((s) => s.id !== tc.suiteId) || suites[0];
+      setMovingCase(tc);
+      setMoveTargetSuiteId(otherSuite ? otherSuite.id : tc.suiteId);
+    },
+    [suites]
+  );
 
   const handleConfirmMoveCase = async () => {
     if (!movingCase || !moveTargetSuiteId || isMovingCase) return;
@@ -543,7 +1020,7 @@ export default function TestCasesScreen({
   // TEST SUITE MODAL HANDLERS
   // =========================================================================
 
-  const openCreateSuiteModal = () => {
+  const openCreateSuiteModal = useCallback(() => {
     setEditingSuite(null);
     setSuiteNameInput('');
     setSuiteDescInput('');
@@ -552,9 +1029,9 @@ export default function TestCasesScreen({
     setSuiteTagsInput('');
     setSuiteFormError(null);
     setIsSuiteModalOpen(true);
-  };
+  }, [planPhases]);
 
-  const openEditSuiteModal = (suite) => {
+  const openEditSuiteModal = useCallback((suite) => {
     setEditingSuite(suite);
     setSuiteNameInput(suite.name || '');
     setSuiteDescInput(suite.description || '');
@@ -563,7 +1040,7 @@ export default function TestCasesScreen({
     setSuiteTagsInput(Array.isArray(suite.tags) ? suite.tags.join(', ') : '');
     setSuiteFormError(null);
     setIsSuiteModalOpen(true);
-  };
+  }, []);
 
   const handleSaveSuite = async () => {
     if (suiteSubmitLockRef.current || isSubmittingSuite) return;
@@ -620,18 +1097,21 @@ export default function TestCasesScreen({
     }
   };
 
-  const openDeleteSuiteConfirm = (suite) => {
-    const otherSuites = suites.filter((s) => s.id !== suite.id);
-    const caseCount = suiteStatsMap[suite.id]?.total || 0;
-    setDeletingSuite(suite);
-    if (caseCount > 0 && otherSuites.length > 0) {
-      setSuiteDeleteMode('move');
-      setSuiteDeleteTargetId(otherSuites[0].id);
-    } else {
-      setSuiteDeleteMode('delete');
-      setSuiteDeleteTargetId('');
-    }
-  };
+  const openDeleteSuiteConfirm = useCallback(
+    (suite) => {
+      const otherSuites = suites.filter((s) => s.id !== suite.id);
+      const caseCount = suiteStatsMap[suite.id]?.total || 0;
+      setDeletingSuite(suite);
+      if (caseCount > 0 && otherSuites.length > 0) {
+        setSuiteDeleteMode('move');
+        setSuiteDeleteTargetId(otherSuites[0].id);
+      } else {
+        setSuiteDeleteMode('delete');
+        setSuiteDeleteTargetId('');
+      }
+    },
+    [suites, suiteStatsMap]
+  );
 
   const handleConfirmDeleteSuite = async () => {
     if (!deletingSuite || isDeletingSuite) return;
@@ -800,6 +1280,148 @@ export default function TestCasesScreen({
   const populatedPlanSections = useMemo(
     () => planDocSections.filter((s) => s.value && String(s.value).trim()),
     [planDocSections]
+  );
+
+  const phaseById = useMemo(() => {
+    const map = new Map();
+    for (let i = 0; i < planPhases.length; i += 1) {
+      const p = planPhases[i];
+      if (p?.id) map.set(p.id, p);
+    }
+    return map;
+  }, [planPhases]);
+
+  const phaseMetricsById = useMemo(() => {
+    const map = new Map();
+    for (let i = 0; i < suites.length; i += 1) {
+      const s = suites[i];
+      if (!s?.phaseId) continue;
+      const existing = map.get(s.phaseId) || { suiteCount: 0, caseCount: 0 };
+      existing.suiteCount += 1;
+      existing.caseCount += suiteStatsMap[s.id]?.total || 0;
+      map.set(s.phaseId, existing);
+    }
+    return map;
+  }, [suites, suiteStatsMap]);
+
+  const handleViewSuiteCases = useCallback(
+    (suiteId) => {
+      setSelectedSuiteId(suiteId);
+      setSubTab('cases');
+    },
+    [setSubTab]
+  );
+
+  const suiteChipKeyExtractor = useCallback(
+    (item, index) => String(item?.id || `suite_chip_${index}`),
+    []
+  );
+
+  const renderSuiteChipItem = useCallback(
+    ({ item: suite }) => (
+      <SuiteChipItem
+        suite={suite}
+        count={suiteStatsMap[suite.id]?.total || 0}
+        active={selectedSuiteId === suite.id}
+        colors={colors}
+        onSelectSuite={setSelectedSuiteId}
+      />
+    ),
+    [suiteStatsMap, selectedSuiteId, colors]
+  );
+
+  const caseKeyExtractor = useCallback(
+    (item, index) => String(item?.id || item?.testCaseId || `case_${index}`),
+    []
+  );
+
+  const renderTestCaseItem = useCallback(
+    ({ item: tc }) => (
+      <TestCaseRowCard
+        tc={tc}
+        prioStyle={getPriorityBadgeStyle(tc.priority)}
+        statusStyle={getStatusBadgeStyle(tc.lastStatus)}
+        colors={colors}
+        canMoveSuite={suites.length > 1}
+        onOpenCase={setSelectedTestCaseId}
+        onMoveCase={openMoveCaseModal}
+        onEditCase={openEditCaseModal}
+        onDeleteCase={setDeletingCase}
+      />
+    ),
+    [
+      getPriorityBadgeStyle,
+      getStatusBadgeStyle,
+      colors,
+      suites.length,
+      setSelectedTestCaseId,
+      openMoveCaseModal,
+      openEditCaseModal,
+    ]
+  );
+
+  const suiteDetailKeyExtractor = useCallback(
+    (item, index) => String(item?.id || `suite_${index}`),
+    []
+  );
+
+  const renderSuiteDetailItem = useCallback(
+    ({ item: suite }) => {
+      const stats = suiteStatsMap[suite.id] || {
+        total: 0,
+        passed: 0,
+        failed: 0,
+        blocked: 0,
+        untested: 0,
+      };
+      return (
+        <TestSuiteRowCard
+          suite={suite}
+          stats={stats}
+          linkedPhase={suite.phaseId ? phaseById.get(suite.phaseId) : null}
+          colors={colors}
+          onViewSuiteCases={handleViewSuiteCases}
+          onAddCaseToSuite={openCreateCaseModal}
+          onEditSuite={openEditSuiteModal}
+          onDeleteSuite={openDeleteSuiteConfirm}
+        />
+      );
+    },
+    [
+      suiteStatsMap,
+      phaseById,
+      colors,
+      handleViewSuiteCases,
+      openCreateCaseModal,
+      openEditSuiteModal,
+      openDeleteSuiteConfirm,
+    ]
+  );
+
+  const phaseKeyExtractor = useCallback(
+    (item, index) => String(item?.id || `phase_${index}`),
+    []
+  );
+
+  const renderPhaseItem = useCallback(
+    ({ item: phase, index }) => {
+      const metrics = phaseMetricsById.get(phase.id) || {
+        suiteCount: 0,
+        caseCount: 0,
+      };
+      return (
+        <TestPhaseRowCard
+          phase={phase}
+          orderNumber={index + 1}
+          suiteCount={metrics.suiteCount}
+          caseCount={metrics.caseCount}
+          colors={colors}
+          onEditPhase={openEditPhaseModal}
+          onDeletePhase={setDeletingPhase}
+        />
+      );
+    },
+    [phaseMetricsById, colors]
   );
 
   return (
@@ -1045,96 +1667,70 @@ export default function TestCasesScreen({
             </View>
 
             {/* Suite Filter Chips */}
-            <ScrollView
+            <FlatList
               horizontal
+              data={suites}
+              keyExtractor={suiteChipKeyExtractor}
+              renderItem={renderSuiteChipItem}
               showsHorizontalScrollIndicator={false}
               onTouchStart={notifyBlockedSwipeTouchStart}
               contentContainerStyle={styles.suiteScrollContent}
-            >
-              <Pressable
-                onPress={() => setSelectedSuiteId('all')}
-                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: selectedSuiteId === 'all' }}
-                accessibilityLabel={`All Suites (${testCases.length})`}
-                style={[
-                  styles.suiteChip,
-                  {
-                    backgroundColor:
-                      selectedSuiteId === 'all'
-                        ? colors.primary
-                        : colors.surfaceMuted,
-                    borderColor:
-                      selectedSuiteId === 'all' ? colors.primary : colors.border,
-                  },
-                ]}
-              >
-                <Text
+              ListHeaderComponent={
+                <Pressable
+                  onPress={() => setSelectedSuiteId('all')}
+                  hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: selectedSuiteId === 'all' }}
+                  accessibilityLabel={`All Suites (${testCases.length})`}
                   style={[
-                    styles.suiteChipText,
+                    styles.suiteChip,
                     {
-                      color:
+                      backgroundColor:
                         selectedSuiteId === 'all'
-                          ? '#ffffff'
-                          : colors.textSecondary,
+                          ? colors.primary
+                          : colors.surfaceMuted,
+                      borderColor:
+                        selectedSuiteId === 'all'
+                          ? colors.primary
+                          : colors.border,
                     },
                   ]}
                 >
-                  All Suites ({testCases.length})
-                </Text>
-              </Pressable>
-
-              {suites.map((suite) => {
-                const count = suiteStatsMap[suite.id]?.total || 0;
-                const active = selectedSuiteId === suite.id;
-                return (
-                  <Pressable
-                    key={suite.id}
-                    onPress={() => setSelectedSuiteId(suite.id)}
-                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                    accessibilityRole="tab"
-                    accessibilityState={{ selected: active }}
-                    accessibilityLabel={`Filter by suite: ${suite.name} (${count} cases)`}
+                  <Text
                     style={[
-                      styles.suiteChip,
+                      styles.suiteChipText,
                       {
-                        backgroundColor: active
-                          ? colors.primary
-                          : colors.surfaceMuted,
-                        borderColor: active ? colors.primary : colors.border,
+                        color:
+                          selectedSuiteId === 'all'
+                            ? '#ffffff'
+                            : colors.textSecondary,
                       },
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.suiteChipText,
-                        { color: active ? '#ffffff' : colors.textSecondary },
-                      ]}
-                    >
-                      {suite.name} ({count})
-                    </Text>
-                  </Pressable>
-                );
-              })}
-
-              <Pressable
-                onPress={openCreateSuiteModal}
-                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                accessibilityRole="button"
-                accessibilityLabel="Create New Test Suite"
-                style={[
-                  styles.suiteChip,
-                  {
-                    backgroundColor: colors.primarySoft,
-                    borderColor: colors.primary,
-                  },
-                ]}
-              >
-                <Text style={[styles.suiteChipText, { color: colors.primary }]}>
-                  + Suite
-                </Text>
-              </Pressable>
-            </ScrollView>
+                    All Suites ({testCases.length})
+                  </Text>
+                </Pressable>
+              }
+              ListFooterComponent={
+                <Pressable
+                  onPress={openCreateSuiteModal}
+                  hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Create New Test Suite"
+                  style={[
+                    styles.suiteChip,
+                    {
+                      backgroundColor: colors.primarySoft,
+                      borderColor: colors.primary,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.suiteChipText, { color: colors.primary }]}>
+                    + Suite
+                  </Text>
+                </Pressable>
+              }
+            />
 
             {/* Priority & Status Filter Row */}
             <ScrollView
@@ -1261,40 +1857,48 @@ export default function TestCasesScreen({
             </ScrollView>
           </View>
 
-          <ScrollView
+          <FlatList
             style={styles.listScroll}
             contentContainerStyle={styles.listContent}
+            data={filteredTestCases}
+            keyExtractor={caseKeyExtractor}
+            renderItem={renderTestCaseItem}
             showsVerticalScrollIndicator={false}
-          >
-            <View style={styles.resultsBar}>
-              <Text style={[styles.resultsCount, { color: colors.textMuted }]}>
-                Showing {filteredTestCases.length} of {testCases.length} test
-                cases
-              </Text>
-              {(selectedSuiteId !== 'all' ||
-                selectedPriority !== 'all' ||
-                selectedStatus !== 'all' ||
-                selectedType !== 'all' ||
-                searchQuery.trim() !== '') && (
-                <Pressable
-                  onPress={() => {
-                    setSelectedSuiteId('all');
-                    setSelectedPriority('all');
-                    setSelectedStatus('all');
-                    setSelectedType('all');
-                    setSearchQuery('');
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Reset test case filters"
-                >
-                  <Text style={[styles.resetText, { color: colors.primary }]}>
-                    Reset Filters
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-
-            {filteredTestCases.length === 0 ? (
+            keyboardShouldPersistTaps="handled"
+            initialNumToRender={10}
+            maxToRenderPerBatch={10}
+            windowSize={7}
+            removeClippedSubviews
+            ListHeaderComponent={
+              <View style={styles.resultsBar}>
+                <Text style={[styles.resultsCount, { color: colors.textMuted }]}>
+                  Showing {filteredTestCases.length} of {testCases.length} test
+                  cases
+                </Text>
+                {(selectedSuiteId !== 'all' ||
+                  selectedPriority !== 'all' ||
+                  selectedStatus !== 'all' ||
+                  selectedType !== 'all' ||
+                  searchQuery.trim() !== '') && (
+                  <Pressable
+                    onPress={() => {
+                      setSelectedSuiteId('all');
+                      setSelectedPriority('all');
+                      setSelectedStatus('all');
+                      setSelectedType('all');
+                      setSearchQuery('');
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Reset test case filters"
+                  >
+                    <Text style={[styles.resetText, { color: colors.primary }]}>
+                      Reset Filters
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+            }
+            ListEmptyComponent={
               <View
                 style={[
                   styles.emptyCard,
@@ -1310,9 +1914,7 @@ export default function TestCasesScreen({
                   color={colors.primary}
                   style={{ marginBottom: 8 }}
                 />
-                <Text
-                  style={[styles.emptyTitle, { color: colors.text }]}
-                >
+                <Text style={[styles.emptyTitle, { color: colors.text }]}>
                   {testCases.length === 0
                     ? 'No Test Cases in This Project Yet'
                     : 'No Matching Test Cases'}
@@ -1336,243 +1938,8 @@ export default function TestCasesScreen({
                   <Text style={styles.emptyCtaText}>+ Create Test Case</Text>
                 </Pressable>
               </View>
-            ) : (
-              filteredTestCases.map((tc) => {
-                const prioStyle = getPriorityBadgeStyle(tc.priority);
-                const statusStyle = getStatusBadgeStyle(tc.lastStatus);
-                return (
-                  <Pressable
-                    key={tc.id}
-                    onPress={() => setSelectedTestCaseId(tc.id)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Open test case ${
-                      tc.testCaseId || tc.id
-                    }: ${tc.title}, ${tc.priority} priority, status ${
-                      tc.lastStatus
-                    }`}
-                    style={({ pressed }) => [
-                      styles.caseCard,
-                      {
-                        backgroundColor: colors.surface,
-                        borderColor: colors.border,
-                        opacity: pressed ? 0.92 : 1,
-                      },
-                    ]}
-                  >
-                    <View style={styles.caseTopRow}>
-                      <View style={styles.caseIdBadgeRow}>
-                        <Text
-                          style={[
-                            styles.caseId,
-                            {
-                              color: colors.primary,
-                              fontFamily: monoFontFamily,
-                            },
-                          ]}
-                        >
-                          {tc.testCaseId || tc.id}
-                        </Text>
-                        <View
-                          style={[
-                            styles.prioBadge,
-                            {
-                              backgroundColor: prioStyle.bg,
-                              borderColor: prioStyle.border,
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.prioBadgeText,
-                              { color: prioStyle.text },
-                            ]}
-                          >
-                            {tc.priority}
-                          </Text>
-                        </View>
-                      </View>
-                      <View
-                        style={[
-                          styles.statusBadge,
-                          { backgroundColor: statusStyle.bg },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.statusBadgeText,
-                            { color: statusStyle.text },
-                          ]}
-                        >
-                          {tc.lastStatus}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <Text
-                      style={[styles.caseTitle, { color: colors.text }]}
-                    >
-                      {tc.title}
-                    </Text>
-
-                    {!!tc.description && (
-                      <Text
-                        style={[
-                          styles.caseDesc,
-                          { color: colors.textSecondary },
-                        ]}
-                        numberOfLines={2}
-                      >
-                        {tc.description}
-                      </Text>
-                    )}
-
-                    <View style={styles.caseFooterRow}>
-                      <View style={styles.caseMetaRow}>
-                        <View
-                          style={[
-                            styles.metaPill,
-                            { backgroundColor: colors.surfaceMuted },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.metaPillText,
-                              { color: colors.textSecondary },
-                            ]}
-                          >
-                            {tc.suiteName}
-                          </Text>
-                        </View>
-                        <View
-                          style={[
-                            styles.metaPill,
-                            { backgroundColor: colors.surfaceMuted },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.metaPillText,
-                              { color: colors.textMuted },
-                            ]}
-                          >
-                            {tc.testType || tc.category}
-                          </Text>
-                        </View>
-                      </View>
-                      <Text
-                        style={[
-                          styles.stepsCountText,
-                          { color: colors.textMuted },
-                        ]}
-                      >
-                        {(tc.steps || []).length} steps
-                      </Text>
-                    </View>
-
-                    {/* Quick Card Actions: Move Suite | Edit | Delete */}
-                    <View
-                      style={[
-                        styles.cardActionsBar,
-                        { borderTopColor: colors.border },
-                      ]}
-                    >
-                      {suites.length > 1 && (
-                        <Pressable
-                          onPress={(e) => {
-                            e.stopPropagation?.();
-                            openMoveCaseModal(tc);
-                          }}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Move ${
-                            tc.testCaseId || tc.id
-                          } to another suite`}
-                          style={[
-                            styles.cardMiniBtn,
-                            {
-                              backgroundColor: colors.surfaceMuted,
-                              borderColor: colors.border,
-                            },
-                          ]}
-                        >
-                          <VectorIcon
-                            name="switch"
-                            size={12}
-                            color={colors.textSecondary}
-                          />
-                          <Text
-                            style={[
-                              styles.cardMiniBtnText,
-                              { color: colors.textSecondary },
-                            ]}
-                          >
-                            Move Suite
-                          </Text>
-                        </Pressable>
-                      )}
-                      <Pressable
-                        onPress={(e) => {
-                          e.stopPropagation?.();
-                          openEditCaseModal(tc);
-                        }}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Edit ${tc.testCaseId || tc.id}`}
-                        style={[
-                          styles.cardMiniBtn,
-                          {
-                            backgroundColor: colors.surfaceMuted,
-                            borderColor: colors.border,
-                          },
-                        ]}
-                      >
-                        <VectorIcon
-                          name="edit"
-                          size={12}
-                          color={colors.primary}
-                        />
-                        <Text
-                          style={[
-                            styles.cardMiniBtnText,
-                            { color: colors.primary },
-                          ]}
-                        >
-                          Edit
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={(e) => {
-                          e.stopPropagation?.();
-                          setDeletingCase(tc);
-                        }}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Delete ${tc.testCaseId || tc.id}`}
-                        style={[
-                          styles.cardMiniBtn,
-                          {
-                            backgroundColor: colors.dangerSoft,
-                            borderColor: colors.danger,
-                          },
-                        ]}
-                      >
-                        <VectorIcon
-                          name="trash"
-                          size={12}
-                          color={colors.danger}
-                        />
-                        <Text
-                          style={[
-                            styles.cardMiniBtnText,
-                            { color: colors.danger },
-                          ]}
-                        >
-                          Delete
-                        </Text>
-                      </Pressable>
-                    </View>
-                  </Pressable>
-                );
-              })
-            )}
-          </ScrollView>
+            }
+          />
         </>
       )}
 
@@ -1580,51 +1947,58 @@ export default function TestCasesScreen({
           SUB-VIEW 2: TEST SUITES
          =================================================================== */}
       {subTab === 'suites' && (
-        <ScrollView
+        <FlatList
           style={styles.listScroll}
           contentContainerStyle={styles.listContent}
+          data={suites}
+          keyExtractor={suiteDetailKeyExtractor}
+          renderItem={renderSuiteDetailItem}
           showsVerticalScrollIndicator={false}
-        >
-          <View
-            style={[
-              styles.sectionBannerCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <View style={{ flex: 1 }}>
-              <Text
-                style={[
-                  styles.sectionBannerTitle,
-                  { color: colors.text },
-                ]}
-              >
-                Test Suites ({suites.length})
-              </Text>
-              <Text
-                style={[
-                  styles.sectionBannerSub,
-                  { color: colors.textSecondary },
-                ]}
-              >
-                Organize project test cases into logical functional, regression,
-                or security suites.
-              </Text>
-            </View>
-            <Pressable
-              onPress={openCreateSuiteModal}
-              accessibilityRole="button"
-              accessibilityLabel="New Suite"
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          removeClippedSubviews
+          ListHeaderComponent={
+            <View
               style={[
-                styles.primaryActionBtn,
-                { backgroundColor: colors.primary },
+                styles.sectionBannerCard,
+                { backgroundColor: colors.surface, borderColor: colors.border },
               ]}
             >
-              <VectorIcon name="plus" size={14} color="#ffffff" />
-              <Text style={styles.primaryActionBtnText}>New Suite</Text>
-            </Pressable>
-          </View>
-
-          {suites.length === 0 ? (
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.sectionBannerTitle,
+                    { color: colors.text },
+                  ]}
+                >
+                  Test Suites ({suites.length})
+                </Text>
+                <Text
+                  style={[
+                    styles.sectionBannerSub,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Organize project test cases into logical functional,
+                  regression, or security suites.
+                </Text>
+              </View>
+              <Pressable
+                onPress={openCreateSuiteModal}
+                accessibilityRole="button"
+                accessibilityLabel="New Suite"
+                style={[
+                  styles.primaryActionBtn,
+                  { backgroundColor: colors.primary },
+                ]}
+              >
+                <VectorIcon name="plus" size={14} color="#ffffff" />
+                <Text style={styles.primaryActionBtnText}>New Suite</Text>
+              </Pressable>
+            </View>
+          }
+          ListEmptyComponent={
             <View
               style={[
                 styles.emptyCard,
@@ -1656,667 +2030,311 @@ export default function TestCasesScreen({
                 <Text style={styles.emptyCtaText}>+ Create First Suite</Text>
               </Pressable>
             </View>
-          ) : (
-            suites.map((suite) => {
-              const stats = suiteStatsMap[suite.id] || {
-                total: 0,
-                passed: 0,
-                failed: 0,
-                blocked: 0,
-                untested: 0,
-              };
-              const linkedPhase = planPhases.find(
-                (p) => p.id === suite.phaseId
-              );
-              return (
-                <View
-                  key={suite.id}
-                  style={[
-                    styles.suiteDetailCard,
-                    {
-                      backgroundColor: colors.surface,
-                      borderColor: colors.border,
-                    },
-                  ]}
-                >
-                  <View style={styles.suiteDetailTop}>
-                    <View style={{ flex: 1, gap: 4 }}>
-                      <View style={styles.suiteBadgeRow}>
-                        <View
-                          style={[
-                            styles.metaPill,
-                            { backgroundColor: colors.primarySoft },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.metaPillText,
-                              { color: colors.primary },
-                            ]}
-                          >
-                            {suite.category || 'Functional'}
-                          </Text>
-                        </View>
-                        {linkedPhase && (
-                          <View
-                            style={[
-                              styles.metaPill,
-                              { backgroundColor: colors.surfaceMuted },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.metaPillText,
-                                { color: colors.textSecondary },
-                              ]}
-                            >
-                              Phase: {linkedPhase.name}
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-                      <Text
-                        style={[
-                          styles.suiteDetailName,
-                          { color: colors.text },
-                        ]}
-                      >
-                        {suite.name}
-                      </Text>
-                    </View>
-                    <View
-                      style={[
-                        styles.caseCountBadge,
-                        {
-                          backgroundColor: colors.surfaceMuted,
-                          borderColor: colors.border,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.caseCountNumber,
-                          { color: colors.primary },
-                        ]}
-                      >
-                        {stats.total}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.caseCountLabel,
-                          { color: colors.textMuted },
-                        ]}
-                      >
-                        {stats.total === 1 ? 'Case' : 'Cases'}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <Text
-                    style={[
-                      styles.suiteDetailDesc,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    {suite.description || 'No suite description provided.'}
-                  </Text>
-
-                  {Array.isArray(suite.tags) && suite.tags.length > 0 && (
-                    <View style={styles.suiteTagsRow}>
-                      {suite.tags.map((tag, idx) => (
-                        <View
-                          key={`${suite.id}-tag-${idx}`}
-                          style={[
-                            styles.metaPill,
-                            { backgroundColor: colors.surfaceMuted },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.metaPillText,
-                              { color: colors.textMuted },
-                            ]}
-                          >
-                            #{tag}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-
-                  {/* Suite Status Breakdown */}
-                  <View
-                    style={[
-                      styles.suiteStatsRow,
-                      { backgroundColor: colors.surfaceMuted },
-                    ]}
-                  >
-                    <Text
-                      style={[styles.suiteStatItem, { color: colors.success }]}
-                    >
-                      Passed: {stats.passed}
-                    </Text>
-                    <Text
-                      style={[styles.suiteStatItem, { color: colors.danger }]}
-                    >
-                      Failed: {stats.failed}
-                    </Text>
-                    <Text
-                      style={[styles.suiteStatItem, { color: colors.warning }]}
-                    >
-                      Blocked: {stats.blocked}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.suiteStatItem,
-                        { color: colors.textMuted },
-                      ]}
-                    >
-                      Untested: {stats.untested}
-                    </Text>
-                  </View>
-
-                  <View
-                    style={[
-                      styles.cardActionsBar,
-                      { borderTopColor: colors.border },
-                    ]}
-                  >
-                    <Pressable
-                      onPress={() => {
-                        setSelectedSuiteId(suite.id);
-                        setSubTab('cases');
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`View ${stats.total} cases in suite ${suite.name}`}
-                      style={[
-                        styles.cardMiniBtn,
-                        {
-                          backgroundColor: colors.primarySoft,
-                          borderColor: colors.primary,
-                        },
-                      ]}
-                    >
-                      <VectorIcon
-                        name="layers"
-                        size={12}
-                        color={colors.primary}
-                      />
-                      <Text
-                        style={[
-                          styles.cardMiniBtnText,
-                          { color: colors.primary },
-                        ]}
-                      >
-                        View Cases ({stats.total})
-                      </Text>
-                    </Pressable>
-
-                    <Pressable
-                      onPress={() => openCreateCaseModal(suite.id)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Add case to suite ${suite.name}`}
-                      style={[
-                        styles.cardMiniBtn,
-                        {
-                          backgroundColor: colors.surfaceMuted,
-                          borderColor: colors.border,
-                        },
-                      ]}
-                    >
-                      <VectorIcon
-                        name="plus"
-                        size={12}
-                        color={colors.text}
-                      />
-                      <Text
-                        style={[
-                          styles.cardMiniBtnText,
-                          { color: colors.text },
-                        ]}
-                      >
-                        Add Case
-                      </Text>
-                    </Pressable>
-
-                    <Pressable
-                      onPress={() => openEditSuiteModal(suite)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Edit suite ${suite.name}`}
-                      style={[
-                        styles.cardMiniBtn,
-                        {
-                          backgroundColor: colors.surfaceMuted,
-                          borderColor: colors.border,
-                        },
-                      ]}
-                    >
-                      <VectorIcon
-                        name="edit"
-                        size={12}
-                        color={colors.textSecondary}
-                      />
-                      <Text
-                        style={[
-                          styles.cardMiniBtnText,
-                          { color: colors.textSecondary },
-                        ]}
-                      >
-                        Edit
-                      </Text>
-                    </Pressable>
-
-                    <Pressable
-                      onPress={() => openDeleteSuiteConfirm(suite)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Delete suite ${suite.name}`}
-                      style={[
-                        styles.cardMiniBtn,
-                        {
-                          backgroundColor: colors.dangerSoft,
-                          borderColor: colors.danger,
-                        },
-                      ]}
-                    >
-                      <VectorIcon
-                        name="trash"
-                        size={12}
-                        color={colors.danger}
-                      />
-                      <Text
-                        style={[
-                          styles.cardMiniBtnText,
-                          { color: colors.danger },
-                        ]}
-                      >
-                        Delete
-                      </Text>
-                    </Pressable>
-                  </View>
-                </View>
-              );
-            })
-          )}
-        </ScrollView>
+          }
+        />
       )}
 
       {/* ===================================================================
           SUB-VIEW 3: TEST PLAN
          =================================================================== */}
       {subTab === 'plan' && (
-        <ScrollView
+        <FlatList
           style={styles.listScroll}
           contentContainerStyle={styles.listContent}
+          data={planPhases}
+          keyExtractor={phaseKeyExtractor}
+          renderItem={renderPhaseItem}
           showsVerticalScrollIndicator={false}
-        >
-          {/* Test Plan Master Header Card */}
-          <View
-            style={[
-              styles.planHeaderCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <View style={styles.planHeaderTop}>
-              <View style={{ flex: 1, gap: 4 }}>
-                <Text
-                  style={[
-                    styles.planIdLabel,
-                    { color: colors.primary, fontFamily: monoFontFamily },
-                  ]}
-                >
-                  {testPlan?.id || `plan_${activeProject?.id || 'project'}`}
-                </Text>
-                <Text
-                  style={[styles.planTitle, { color: colors.text }]}
-                >
-                  {testPlan?.name ||
-                    `${activeProject?.name || 'Project'} Master Test Plan`}
-                </Text>
-              </View>
-              <Pressable
-                onPress={openEditPlanModal}
-                accessibilityRole="button"
-                accessibilityLabel="Edit Plan"
-                style={[
-                  styles.primaryActionBtn,
-                  { backgroundColor: colors.primary },
-                ]}
-              >
-                <VectorIcon name="edit" size={14} color="#ffffff" />
-                <Text style={styles.primaryActionBtnText}>Edit Plan</Text>
-              </Pressable>
-            </View>
-
-            <View
-              style={[
-                styles.planSummaryStrip,
-                { backgroundColor: colors.surfaceMuted },
-              ]}
-            >
-              <View style={styles.planMetricBox}>
-                <Text
-                  style={[styles.planMetricVal, { color: colors.text }]}
-                >
-                  {planPhases.length}
-                </Text>
-                <Text
-                  style={[styles.planMetricLbl, { color: colors.textMuted }]}
-                >
-                  Phases
-                </Text>
-              </View>
-              <View style={styles.planMetricBox}>
-                <Text
-                  style={[styles.planMetricVal, { color: colors.text }]}
-                >
-                  {suites.length}
-                </Text>
-                <Text
-                  style={[styles.planMetricLbl, { color: colors.textMuted }]}
-                >
-                  Suites
-                </Text>
-              </View>
-              <View style={styles.planMetricBox}>
-                <Text
-                  style={[styles.planMetricVal, { color: colors.text }]}
-                >
-                  {testCases.length}
-                </Text>
-                <Text
-                  style={[styles.planMetricLbl, { color: colors.textMuted }]}
-                >
-                  Test Cases
-                </Text>
-              </View>
-              <View style={styles.planMetricBox}>
-                <Text style={[styles.planMetricVal, { color: colors.primary }]}>
-                  {populatedPlanSections.length}/{planDocSections.length}
-                </Text>
-                <Text
-                  style={[styles.planMetricLbl, { color: colors.textMuted }]}
-                >
-                  Sections
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Testing Phases Section (`testPlan.phases`) */}
-          <View
-            style={[
-              styles.planSectionCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <View style={styles.planSectionHeader}>
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={[
-                    styles.planSectionTitle,
-                    { color: colors.text },
-                  ]}
-                >
-                  Testing Phases ({planPhases.length})
-                </Text>
-                <Text
-                  style={[
-                    styles.planSectionSub,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  Define execution milestones (e.g. Smoke, Functional,
-                  Regression, Release Gate).
-                </Text>
-              </View>
-              <Pressable
-                onPress={openCreatePhaseModal}
-                accessibilityRole="button"
-                accessibilityLabel="Add Testing Phase"
-                style={[
-                  styles.secondaryActionBtn,
-                  {
-                    backgroundColor: colors.primarySoft,
-                    borderColor: colors.primary,
-                  },
-                ]}
-              >
-                <VectorIcon name="plus" size={12} color={colors.primary} />
-                <Text
-                  style={[
-                    styles.secondaryActionBtnText,
-                    { color: colors.primary },
-                  ]}
-                >
-                  Add Phase
-                </Text>
-              </Pressable>
-            </View>
-
-            {planPhases.length === 0 ? (
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={7}
+          ListHeaderComponent={
+            <View style={{ gap: 10 }}>
+              {/* Test Plan Master Header Card */}
               <View
                 style={[
-                  styles.inlineEmptyBox,
+                  styles.planHeaderCard,
                   {
-                    backgroundColor: colors.surfaceMuted,
+                    backgroundColor: colors.surface,
                     borderColor: colors.border,
                   },
                 ]}
               >
-                <Text
-                  style={[
-                    styles.inlineEmptyText,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  No testing phases added yet. Add phases to structure your test
-                  plan milestones.
-                </Text>
-              </View>
-            ) : (
-              planPhases.map((phase, idx) => {
-                const phaseSuites = suites.filter(
-                  (s) => s.phaseId === phase.id
-                );
-                const phaseCasesCount = phaseSuites.reduce(
-                  (acc, s) => acc + (suiteStatsMap[s.id]?.total || 0),
-                  0
-                );
-                return (
-                  <View
-                    key={phase.id}
-                    style={[
-                      styles.phaseRowCard,
-                      {
-                        backgroundColor: colors.surfaceMuted,
-                        borderColor: colors.border,
-                      },
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.phaseOrderCircle,
-                        { backgroundColor: colors.primary },
-                      ]}
-                    >
-                      <Text style={styles.phaseOrderText}>{idx + 1}</Text>
-                    </View>
-                    <View style={{ flex: 1, gap: 2 }}>
-                      <Text
-                        style={[
-                          styles.phaseRowName,
-                          { color: colors.text },
-                        ]}
-                      >
-                        {phase.name}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.phaseRowDesc,
-                          { color: colors.textSecondary },
-                        ]}
-                      >
-                        {phase.description || 'No phase description'}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.phaseRowStats,
-                          { color: colors.textMuted },
-                        ]}
-                      >
-                        {phaseSuites.length} suites · {phaseCasesCount} cases
-                      </Text>
-                    </View>
-                    <View style={styles.phaseRowActions}>
-                      <Pressable
-                        onPress={() => openEditPhaseModal(phase)}
-                        hitSlop={{ top: 9, bottom: 9, left: 9, right: 9 }}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Edit testing phase ${phase.name}`}
-                        style={[
-                          styles.iconSquareBtn,
-                          {
-                            backgroundColor: colors.surface,
-                            borderColor: colors.border,
-                          },
-                        ]}
-                      >
-                        <VectorIcon
-                          name="edit"
-                          size={13}
-                          color={colors.primary}
-                        />
-                      </Pressable>
-                      <Pressable
-                        onPress={() => setDeletingPhase(phase)}
-                        hitSlop={{ top: 9, bottom: 9, left: 9, right: 9 }}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Delete testing phase ${phase.name}`}
-                        style={[
-                          styles.iconSquareBtn,
-                          {
-                            backgroundColor: colors.dangerSoft,
-                            borderColor: colors.danger,
-                          },
-                        ]}
-                      >
-                        <VectorIcon
-                          name="trash"
-                          size={13}
-                          color={colors.danger}
-                        />
-                      </Pressable>
-                    </View>
-                  </View>
-                );
-              })
-            )}
-          </View>
-
-          {/* Test Plan Documentation & Criteria Sections */}
-          <View
-            style={[
-              styles.planSectionCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <View style={styles.planSectionHeader}>
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={[
-                    styles.planSectionTitle,
-                    { color: colors.text },
-                  ]}
-                >
-                  Test Plan Specification
-                </Text>
-                <Text
-                  style={[
-                    styles.planSectionSub,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  Objectives, scope, entry/exit criteria, environment, and
-                  deliverables.
-                </Text>
-              </View>
-            </View>
-
-            {populatedPlanSections.length === 0 ? (
-              <View
-                style={[
-                  styles.inlineEmptyBox,
-                  {
-                    backgroundColor: colors.surfaceMuted,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.inlineEmptyText,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  No test plan specification details have been authored yet. Tap
-                  &quot;Edit Plan&quot; to document objectives, scope, strategy,
-                  and criteria.
-                </Text>
-                <Pressable
-                  onPress={openEditPlanModal}
-                  accessibilityRole="button"
-                  accessibilityLabel="Author Test Plan Details"
-                  style={[
-                    styles.emptyCta,
-                    { backgroundColor: colors.primary, marginTop: 8 },
-                  ]}
-                >
-                  <Text style={styles.emptyCtaText}>
-                    Author Test Plan Details
-                  </Text>
-                </Pressable>
-              </View>
-            ) : (
-              planDocSections.map((sec) => {
-                const hasVal = sec.value && String(sec.value).trim();
-                return (
-                  <View
-                    key={sec.key}
-                    style={[
-                      styles.planDocBlock,
-                      {
-                        backgroundColor: colors.surfaceMuted,
-                        borderColor: colors.border,
-                      },
-                    ]}
-                  >
+                <View style={styles.planHeaderTop}>
+                  <View style={{ flex: 1, gap: 4 }}>
                     <Text
                       style={[
-                        styles.planDocLabel,
+                        styles.planIdLabel,
+                        { color: colors.primary, fontFamily: monoFontFamily },
+                      ]}
+                    >
+                      {testPlan?.id || `plan_${activeProject?.id || 'project'}`}
+                    </Text>
+                    <Text style={[styles.planTitle, { color: colors.text }]}>
+                      {testPlan?.name ||
+                        `${activeProject?.name || 'Project'} Master Test Plan`}
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={openEditPlanModal}
+                    accessibilityRole="button"
+                    accessibilityLabel="Edit Plan"
+                    style={[
+                      styles.primaryActionBtn,
+                      { backgroundColor: colors.primary },
+                    ]}
+                  >
+                    <VectorIcon name="edit" size={14} color="#ffffff" />
+                    <Text style={styles.primaryActionBtnText}>Edit Plan</Text>
+                  </Pressable>
+                </View>
+
+                <View
+                  style={[
+                    styles.planSummaryStrip,
+                    { backgroundColor: colors.surfaceMuted },
+                  ]}
+                >
+                  <View style={styles.planMetricBox}>
+                    <Text
+                      style={[styles.planMetricVal, { color: colors.text }]}
+                    >
+                      {planPhases.length}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.planMetricLbl,
                         { color: colors.textMuted },
                       ]}
                     >
-                      {sec.label}
+                      Phases
+                    </Text>
+                  </View>
+                  <View style={styles.planMetricBox}>
+                    <Text
+                      style={[styles.planMetricVal, { color: colors.text }]}
+                    >
+                      {suites.length}
                     </Text>
                     <Text
                       style={[
-                        styles.planDocValue,
+                        styles.planMetricLbl,
+                        { color: colors.textMuted },
+                      ]}
+                    >
+                      Suites
+                    </Text>
+                  </View>
+                  <View style={styles.planMetricBox}>
+                    <Text
+                      style={[styles.planMetricVal, { color: colors.text }]}
+                    >
+                      {testCases.length}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.planMetricLbl,
+                        { color: colors.textMuted },
+                      ]}
+                    >
+                      Test Cases
+                    </Text>
+                  </View>
+                  <View style={styles.planMetricBox}>
+                    <Text
+                      style={[styles.planMetricVal, { color: colors.primary }]}
+                    >
+                      {populatedPlanSections.length}/{planDocSections.length}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.planMetricLbl,
+                        { color: colors.textMuted },
+                      ]}
+                    >
+                      Sections
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Testing Phases Header Card (`testPlan.phases`) */}
+              <View
+                style={[
+                  styles.planSectionCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <View style={styles.planSectionHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.planSectionTitle,
+                        { color: colors.text },
+                      ]}
+                    >
+                      Testing Phases ({planPhases.length})
+                    </Text>
+                    <Text
+                      style={[
+                        styles.planSectionSub,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Define execution milestones (e.g. Smoke, Functional,
+                      Regression, Release Gate).
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={openCreatePhaseModal}
+                    accessibilityRole="button"
+                    accessibilityLabel="Add Testing Phase"
+                    style={[
+                      styles.secondaryActionBtn,
+                      {
+                        backgroundColor: colors.primarySoft,
+                        borderColor: colors.primary,
+                      },
+                    ]}
+                  >
+                    <VectorIcon name="plus" size={12} color={colors.primary} />
+                    <Text
+                      style={[
+                        styles.secondaryActionBtnText,
+                        { color: colors.primary },
+                      ]}
+                    >
+                      Add Phase
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          }
+          ListEmptyComponent={
+            <View
+              style={[
+                styles.inlineEmptyBox,
+                {
+                  backgroundColor: colors.surfaceMuted,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.inlineEmptyText,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                No testing phases added yet. Add phases to structure your test
+                plan milestones.
+              </Text>
+            </View>
+          }
+          ListFooterComponent={
+            <View
+              style={[
+                styles.planSectionCard,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <View style={styles.planSectionHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={[styles.planSectionTitle, { color: colors.text }]}
+                  >
+                    Test Plan Specification
+                  </Text>
+                  <Text
+                    style={[
+                      styles.planSectionSub,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    Objectives, scope, entry/exit criteria, environment, and
+                    deliverables.
+                  </Text>
+                </View>
+              </View>
+
+              {populatedPlanSections.length === 0 ? (
+                <View
+                  style={[
+                    styles.inlineEmptyBox,
+                    {
+                      backgroundColor: colors.surfaceMuted,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.inlineEmptyText,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    No test plan specification details have been authored yet.
+                    Tap &quot;Edit Plan&quot; to document objectives, scope,
+                    strategy, and criteria.
+                  </Text>
+                  <Pressable
+                    onPress={openEditPlanModal}
+                    accessibilityRole="button"
+                    accessibilityLabel="Author Test Plan Details"
+                    style={[
+                      styles.emptyCta,
+                      { backgroundColor: colors.primary, marginTop: 8 },
+                    ]}
+                  >
+                    <Text style={styles.emptyCtaText}>
+                      Author Test Plan Details
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : (
+                planDocSections.map((sec) => {
+                  const hasVal = sec.value && String(sec.value).trim();
+                  return (
+                    <View
+                      key={sec.key}
+                      style={[
+                        styles.planDocBlock,
                         {
-                          color: hasVal
-                            ? colors.text
-                            : colors.textMuted,
-                          fontStyle: hasVal ? 'normal' : 'italic',
+                          backgroundColor: colors.surfaceMuted,
+                          borderColor: colors.border,
                         },
                       ]}
                     >
-                      {hasVal ? sec.value : 'Not specified'}
-                    </Text>
-                  </View>
-                );
-              })
-            )}
-          </View>
-        </ScrollView>
+                      <Text
+                        style={[
+                          styles.planDocLabel,
+                          { color: colors.textMuted },
+                        ]}
+                      >
+                        {sec.label}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.planDocValue,
+                          {
+                            color: hasVal ? colors.text : colors.textMuted,
+                            fontStyle: hasVal ? 'normal' : 'italic',
+                          },
+                        ]}
+                      >
+                        {hasVal ? sec.value : 'Not specified'}
+                      </Text>
+                    </View>
+                  );
+                })
+              )}
+            </View>
+          }
+        />
       )}
 
       <TestCaseDetailModal

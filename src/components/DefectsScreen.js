@@ -3,6 +3,7 @@ import {
   View,
   Text,
   ScrollView,
+  FlatList,
   TouchableOpacity,
   TextInput,
   ActivityIndicator,
@@ -30,6 +31,225 @@ import DefectFormModal from './defects/DefectFormModal';
 import DefectDeleteModal from './defects/DefectDeleteModal';
 
 export { validateDefectExternalUrl, openDefectExternalUrl };
+
+export function resolveDefaultDefectEnvironment(profile, currentProject) {
+  const parts = [];
+  const profileDevice =
+    typeof profile?.defaultDevice === 'string'
+      ? profile.defaultDevice.trim()
+      : '';
+  const profileBuild =
+    typeof profile?.defaultBuild === 'string'
+      ? profile.defaultBuild.trim()
+      : '';
+  const projectEnv =
+    typeof currentProject?.environment === 'string'
+      ? currentProject.environment.trim()
+      : '';
+
+  if (profileDevice) {
+    parts.push(profileDevice);
+  }
+  if (profileBuild) {
+    parts.push(`Build ${profileBuild}`);
+  }
+  if (projectEnv) {
+    const lowerParts = parts.join(' ').toLowerCase();
+    if (!lowerParts.includes(projectEnv.toLowerCase())) {
+      parts.push(projectEnv);
+    }
+  }
+  return parts.join(' · ');
+}
+
+const DefectRowCard = React.memo(function DefectRowCard({
+  bug,
+  theme,
+  hasLinkedCase,
+  hasLinkedRun,
+  sevMeta,
+  priMeta,
+  stMeta,
+  onPressDefect,
+  onOpenExternalUrl,
+  onEditDefect,
+  onRequestDeleteDefect,
+}) {
+  const displayId = bug.defectId || bug.id;
+  const externalUrlValid = Boolean(
+    bug.externalUrl && validateDefectExternalUrl(bug.externalUrl).isValid
+  );
+
+  return (
+    <View
+      style={[
+        styles.defectCard,
+        {
+          backgroundColor: theme.surface,
+          borderColor: theme.border,
+        },
+      ]}
+    >
+      <TouchableOpacity
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={`Open defect ${displayId}: ${bug.title}`}
+        onPress={() => onPressDefect(bug.id)}
+      >
+        <View style={styles.cardTopRow}>
+          <View style={styles.idAndSev}>
+            <VectorIcon name="alert" size={14} color={sevMeta.color} />
+            <Text
+              style={[
+                styles.bugId,
+                { color: theme.primary, fontFamily: monoFontFamily },
+              ]}
+            >
+              {displayId}
+            </Text>
+            <View style={[styles.badge, { backgroundColor: sevMeta.bg }]}>
+              <Text style={[styles.badgeText, { color: sevMeta.color }]}>
+                {bug.severity}
+              </Text>
+            </View>
+            <View style={[styles.badge, { backgroundColor: priMeta.bg }]}>
+              <Text style={[styles.badgeText, { color: priMeta.color }]}>
+                P: {bug.priority || bug.severity}
+              </Text>
+            </View>
+          </View>
+
+          <View style={[styles.badge, { backgroundColor: stMeta.bg }]}>
+            <Text style={[styles.badgeText, { color: stMeta.color }]}>
+              {bug.status}
+            </Text>
+          </View>
+        </View>
+
+        <Text style={[styles.bugTitle, { color: theme.text }]}>
+          {bug.title}
+        </Text>
+
+        {bug.description ? (
+          <Text
+            style={[
+              styles.bugDescriptionSnippet,
+              { color: theme.textSecondary },
+            ]}
+            numberOfLines={2}
+          >
+            {bug.description}
+          </Text>
+        ) : null}
+
+        <Text
+          style={[styles.envLine, { color: theme.textMuted }]}
+          numberOfLines={1}
+        >
+          Env: {bug.environment || 'Not specified'}
+        </Text>
+
+        <View style={[styles.cardFooter, { borderTopColor: theme.border }]}>
+          <View style={styles.linksRow}>
+            {(hasLinkedCase || bug.linkedTestCaseId) && (
+              <View
+                style={[
+                  styles.linkChip,
+                  { backgroundColor: theme.primarySoft },
+                ]}
+              >
+                <VectorIcon name="tag" size={10} color={theme.primary} />
+                <Text style={[styles.linkChipText, { color: theme.primary }]}>
+                  {bug.linkedTestCaseId}
+                </Text>
+              </View>
+            )}
+            {(hasLinkedRun || bug.linkedTestRunId) && (
+              <View
+                style={[styles.linkChip, { backgroundColor: theme.infoSoft }]}
+              >
+                <VectorIcon name="layers" size={10} color={theme.info} />
+                <Text style={[styles.linkChipText, { color: theme.info }]}>
+                  {bug.linkedTestRunId}
+                </Text>
+              </View>
+            )}
+            {externalUrlValid ? (
+              <TouchableOpacity
+                activeOpacity={0.75}
+                accessibilityRole="link"
+                accessibilityLabel={`Open external issue link for ${displayId}`}
+                accessibilityHint="Opens the external issue URL in your browser"
+                onPress={() => onOpenExternalUrl(bug.externalUrl)}
+                style={[
+                  styles.linkChip,
+                  {
+                    backgroundColor: theme.primarySoft,
+                    borderWidth: 1,
+                    borderColor: theme.primary,
+                    maxWidth: 150,
+                  },
+                ]}
+              >
+                <VectorIcon name="globe" size={10} color={theme.primary} />
+                <Text
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                  style={[
+                    styles.linkChipText,
+                    {
+                      color: theme.primary,
+                      textDecorationLine: 'underline',
+                      flexShrink: 1,
+                    },
+                  ]}
+                >
+                  External Issue
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          <View style={styles.cardBottomRightActions}>
+            <Text style={[styles.dateText, { color: theme.textMuted }]}>
+              {formatShortTimestamp(bug.updatedAt || bug.createdAt)}
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.cardMiniBtn,
+                {
+                  backgroundColor: theme.surfaceMuted,
+                  borderColor: theme.border,
+                },
+              ]}
+              hitSlop={{ top: 11, bottom: 11, left: 11, right: 11 }}
+              accessibilityRole="button"
+              accessibilityLabel={`Edit defect ${displayId}`}
+              onPress={() => onEditDefect(bug)}
+            >
+              <VectorIcon name="edit" size={12} color={theme.textSecondary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.cardMiniBtn,
+                {
+                  backgroundColor: theme.dangerSoft,
+                  borderColor: theme.danger,
+                },
+              ]}
+              hitSlop={{ top: 11, bottom: 11, left: 11, right: 11 }}
+              accessibilityRole="button"
+              accessibilityLabel={`Delete defect ${displayId}`}
+              onPress={() => onRequestDeleteDefect(bug)}
+            >
+              <VectorIcon name="trash" size={12} color={theme.danger} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </TouchableOpacity>
+    </View>
+  );
+});
 
 export default function DefectsScreen() {
   const { colors: theme } = useTheme();
@@ -77,9 +297,12 @@ export default function DefectsScreen() {
   const [reproSteps, setReproSteps] = useState('');
   const [expectedResult, setExpectedResult] = useState('');
   const [actualResult, setActualResult] = useState('');
-  const [environment, setEnvironment] = useState(
-    'Pixel 8 Pro • Android 14 • v2.4.0-rc3'
+  const defaultDefectEnvironment = useMemo(
+    () => resolveDefaultDefectEnvironment(profile, currentProject),
+    [profile, currentProject]
   );
+
+  const [environment, setEnvironment] = useState(defaultDefectEnvironment);
   const [externalUrl, setExternalUrl] = useState('');
   const [linkedTestCaseId, setLinkedTestCaseId] = useState('');
   const [linkedTestRunId, setLinkedTestRunId] = useState('');
@@ -166,10 +389,11 @@ export default function DefectsScreen() {
       );
       setExpectedResult(draftDefectFromExecution.expectedResult || '');
       setActualResult(draftDefectFromExecution.actualResult || '');
-      setEnvironment(
-        draftDefectFromExecution.environment ||
-          'Pixel 8 Pro • Android 14 • v2.4.0-rc3'
-      );
+      const draftEnv =
+        typeof draftDefectFromExecution.environment === 'string'
+          ? draftDefectFromExecution.environment.trim()
+          : '';
+      setEnvironment(draftEnv || defaultDefectEnvironment);
       setExternalUrl(draftDefectFromExecution.externalUrl || '');
       setLinkedTestCaseId(draftDefectFromExecution.linkedTestCaseId || '');
       setLinkedTestRunId(draftDefectFromExecution.linkedTestRunId || '');
@@ -178,7 +402,11 @@ export default function DefectsScreen() {
       setFormModalVisible(true);
       setDraftDefectFromExecution(null);
     }
-  }, [draftDefectFromExecution, setDraftDefectFromExecution]);
+  }, [
+    draftDefectFromExecution,
+    setDraftDefectFromExecution,
+    defaultDefectEnvironment,
+  ]);
 
   // Defect KPI summary metrics
   const defectSummary = useMemo(() => {
@@ -250,12 +478,7 @@ export default function DefectsScreen() {
     setReproSteps('');
     setExpectedResult('');
     setActualResult('');
-    setEnvironment(
-      currentProject?.environment ||
-        `${profile?.defaultDevice || 'Android 14'} · Build ${
-          profile?.defaultBuild || '1.0.0'
-        }`
-    );
+    setEnvironment(defaultDefectEnvironment);
     setExternalUrl('');
     setLinkedTestCaseId(testCases[0]?.id || '');
     setLinkedTestRunId(testRuns[0]?.id || '');
@@ -264,28 +487,32 @@ export default function DefectsScreen() {
     setFormModalVisible(true);
   };
 
-  const openEditDefectForm = (defect) => {
-    if (!defect) return;
-    closeDetailModal();
-    setEditingDefectId(defect.id);
-    setTitle(defect.title || '');
-    setDescription(defect.description || '');
-    setSeverity(defect.severity || 'High');
-    setPriority(defect.priority || defect.severity || 'High');
-    setStatus(defect.status || 'Open');
-    setReproSteps(defect.reproductionSteps || defect.steps || '');
-    setExpectedResult(defect.expectedResult || '');
-    setActualResult(defect.actualResult || '');
-    setEnvironment(
-      defect.environment || 'Pixel 8 Pro • Android 14 • v2.4.0-rc3'
-    );
-    setExternalUrl(defect.externalUrl || '');
-    setLinkedTestCaseId(defect.linkedTestCaseId || '');
-    setLinkedTestRunId(defect.linkedTestRunId || '');
-    setLinkedExecutionId(defect.linkedExecutionId || '');
-    setFormError('');
-    setFormModalVisible(true);
-  };
+  const openEditDefectForm = useCallback(
+    (defect) => {
+      if (!defect) return;
+      setViewingDefectId(null);
+      setSelectedDefectId(null);
+      setEditingDefectId(defect.id);
+      setTitle(defect.title || '');
+      setDescription(defect.description || '');
+      setSeverity(defect.severity || 'High');
+      setPriority(defect.priority || defect.severity || 'High');
+      setStatus(defect.status || 'Open');
+      setReproSteps(defect.reproductionSteps || defect.steps || '');
+      setExpectedResult(defect.expectedResult || '');
+      setActualResult(defect.actualResult || '');
+      setEnvironment(
+        typeof defect.environment === 'string' ? defect.environment.trim() : ''
+      );
+      setExternalUrl(defect.externalUrl || '');
+      setLinkedTestCaseId(defect.linkedTestCaseId || '');
+      setLinkedTestRunId(defect.linkedTestRunId || '');
+      setLinkedExecutionId(defect.linkedExecutionId || '');
+      setFormError('');
+      setFormModalVisible(true);
+    },
+    [setSelectedDefectId]
+  );
 
   const handleSelectLinkedCaseInForm = (caseId) => {
     setLinkedTestCaseId(caseId);
@@ -354,7 +581,7 @@ export default function DefectsScreen() {
         expectedResult:
           expectedResult.trim() || 'App should function without error.',
         actualResult: actualResult.trim(),
-        environment: environment.trim() || 'Android Device',
+        environment: environment.trim(),
         externalUrl: trimmedExternalUrl,
         linkedTestCaseId: linkedTestCaseId || null,
         linkedTestRunId: linkedTestRunId || null,
@@ -400,11 +627,11 @@ export default function DefectsScreen() {
     }
   };
 
-  const handleOpenExternalUrl = async (rawUrl) => {
+  const handleOpenExternalUrl = useCallback(async (rawUrl) => {
     await openDefectExternalUrl(rawUrl, {
       onError: (msg) => showFeedback('error', msg),
     });
-  };
+  }, []);
 
   const handleConfirmDeleteDefect = async () => {
     if (!defectPendingDelete || isDeletingDefect) return;
@@ -428,35 +655,107 @@ export default function DefectsScreen() {
     }
   };
 
-  const getSeverityBadge = (sev) => {
-    if (sev === 'Critical')
-      return { color: theme.danger, bg: theme.dangerSoft };
-    if (sev === 'High' || sev === 'Major')
-      return { color: theme.warning, bg: theme.warningSoft };
-    if (sev === 'Medium' || sev === 'Minor')
-      return { color: theme.info, bg: theme.infoSoft };
-    return { color: theme.textSecondary, bg: theme.surfaceMuted };
-  };
+  const getSeverityBadge = useCallback(
+    (sev) => {
+      if (sev === 'Critical')
+        return { color: theme.danger, bg: theme.dangerSoft };
+      if (sev === 'High' || sev === 'Major')
+        return { color: theme.warning, bg: theme.warningSoft };
+      if (sev === 'Medium' || sev === 'Minor')
+        return { color: theme.info, bg: theme.infoSoft };
+      return { color: theme.textSecondary, bg: theme.surfaceMuted };
+    },
+    [theme]
+  );
 
-  const getPriorityBadge = (pri) => {
-    if (pri === 'Critical')
-      return { color: theme.danger, bg: theme.dangerSoft };
-    if (pri === 'High') return { color: theme.warning, bg: theme.warningSoft };
-    if (pri === 'Medium') return { color: theme.info, bg: theme.infoSoft };
-    return { color: theme.textSecondary, bg: theme.surfaceMuted };
-  };
+  const getPriorityBadge = useCallback(
+    (pri) => {
+      if (pri === 'Critical')
+        return { color: theme.danger, bg: theme.dangerSoft };
+      if (pri === 'High')
+        return { color: theme.warning, bg: theme.warningSoft };
+      if (pri === 'Medium') return { color: theme.info, bg: theme.infoSoft };
+      return { color: theme.textSecondary, bg: theme.surfaceMuted };
+    },
+    [theme]
+  );
 
-  const getStatusBadge = (st) => {
-    if (st === 'Open' || st === 'Reopened')
-      return { color: theme.danger, bg: theme.dangerSoft };
-    if (st === 'In Progress')
-      return { color: theme.warning, bg: theme.warningSoft };
-    if (st === 'Ready for Retest')
-      return { color: theme.info, bg: theme.infoSoft };
-    if (st === 'Resolved')
-      return { color: theme.success, bg: theme.successSoft };
-    return { color: theme.textMuted, bg: theme.surfaceMuted };
-  };
+  const getStatusBadge = useCallback(
+    (st) => {
+      if (st === 'Open' || st === 'Reopened')
+        return { color: theme.danger, bg: theme.dangerSoft };
+      if (st === 'In Progress')
+        return { color: theme.warning, bg: theme.warningSoft };
+      if (st === 'Ready for Retest')
+        return { color: theme.info, bg: theme.infoSoft };
+      if (st === 'Resolved')
+        return { color: theme.success, bg: theme.successSoft };
+      return { color: theme.textMuted, bg: theme.surfaceMuted };
+    },
+    [theme]
+  );
+
+  const testCaseIdSet = useMemo(() => {
+    const set = new Set();
+    for (let i = 0; i < testCases.length; i += 1) {
+      if (testCases[i]?.id) set.add(testCases[i].id);
+    }
+    return set;
+  }, [testCases]);
+
+  const testRunIdSet = useMemo(() => {
+    const set = new Set();
+    for (let i = 0; i < testRuns.length; i += 1) {
+      if (testRuns[i]?.id) set.add(testRuns[i].id);
+    }
+    return set;
+  }, [testRuns]);
+
+  const handleOpenDefectDetail = useCallback(
+    (defectId) => {
+      setViewingDefectId(defectId);
+      setSelectedDefectId(defectId);
+    },
+    [setSelectedDefectId]
+  );
+
+  const defectKeyExtractor = useCallback(
+    (item, index) => String(item?.id || item?.defectId || `defect_${index}`),
+    []
+  );
+
+  const renderDefectItem = useCallback(
+    ({ item: bug }) => (
+      <DefectRowCard
+        bug={bug}
+        theme={theme}
+        hasLinkedCase={Boolean(
+          bug.linkedTestCaseId && testCaseIdSet.has(bug.linkedTestCaseId)
+        )}
+        hasLinkedRun={Boolean(
+          bug.linkedTestRunId && testRunIdSet.has(bug.linkedTestRunId)
+        )}
+        sevMeta={getSeverityBadge(bug.severity)}
+        priMeta={getPriorityBadge(bug.priority || bug.severity)}
+        stMeta={getStatusBadge(bug.status)}
+        onPressDefect={handleOpenDefectDetail}
+        onOpenExternalUrl={handleOpenExternalUrl}
+        onEditDefect={openEditDefectForm}
+        onRequestDeleteDefect={setDefectPendingDelete}
+      />
+    ),
+    [
+      theme,
+      testCaseIdSet,
+      testRunIdSet,
+      getSeverityBadge,
+      getPriorityBadge,
+      getStatusBadge,
+      handleOpenDefectDetail,
+      handleOpenExternalUrl,
+      openEditDefectForm,
+    ]
+  );
 
   if (!currentProject) {
     return (
@@ -897,252 +1196,26 @@ export default function DefectsScreen() {
       </View>
 
       {/* Defect List */}
-      <ScrollView
+      <FlatList
         style={styles.container}
         contentContainerStyle={styles.contentContainer}
+        data={filteredDefects}
+        keyExtractor={defectKeyExtractor}
+        renderItem={renderDefectItem}
         showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.resultsBar}>
-          <Text style={[styles.resultsCount, { color: theme.textSecondary }]}>
-            Showing {filteredDefects.length} of {defects.length} defects
-          </Text>
-        </View>
-
-        {filteredDefects.map((bug) => {
-          const sevMeta = getSeverityBadge(bug.severity);
-          const priMeta = getPriorityBadge(bug.priority || bug.severity);
-          const stMeta = getStatusBadge(bug.status);
-          const linkedCase = testCases.find(
-            (tc) => tc.id === bug.linkedTestCaseId
-          );
-          const linkedRun = testRuns.find((r) => r.id === bug.linkedTestRunId);
-
-          return (
-            <View
-              key={bug.id}
-              style={[
-                styles.defectCard,
-                {
-                  backgroundColor: theme.surface,
-                  borderColor: theme.border,
-                },
-              ]}
-            >
-              <TouchableOpacity
-                activeOpacity={0.85}
-                accessibilityRole="button"
-                accessibilityLabel={`Open defect ${
-                  bug.defectId || bug.id
-                }: ${bug.title}`}
-                onPress={() => {
-                  setViewingDefectId(bug.id);
-                  setSelectedDefectId(bug.id);
-                }}
-              >
-                <View style={styles.cardTopRow}>
-                  <View style={styles.idAndSev}>
-                    <VectorIcon name="alert" size={14} color={sevMeta.color} />
-                    <Text
-                      style={[
-                        styles.bugId,
-                        { color: theme.primary, fontFamily: monoFontFamily },
-                      ]}
-                    >
-                      {bug.defectId || bug.id}
-                    </Text>
-                    <View
-                      style={[styles.badge, { backgroundColor: sevMeta.bg }]}
-                    >
-                      <Text
-                        style={[styles.badgeText, { color: sevMeta.color }]}
-                      >
-                        {bug.severity}
-                      </Text>
-                    </View>
-                    <View
-                      style={[styles.badge, { backgroundColor: priMeta.bg }]}
-                    >
-                      <Text
-                        style={[styles.badgeText, { color: priMeta.color }]}
-                      >
-                        P: {bug.priority || bug.severity}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={[styles.badge, { backgroundColor: stMeta.bg }]}>
-                    <Text style={[styles.badgeText, { color: stMeta.color }]}>
-                      {bug.status}
-                    </Text>
-                  </View>
-                </View>
-
-                <Text style={[styles.bugTitle, { color: theme.text }]}>
-                  {bug.title}
-                </Text>
-
-                {bug.description ? (
-                  <Text
-                    style={[
-                      styles.bugDescriptionSnippet,
-                      { color: theme.textSecondary },
-                    ]}
-                    numberOfLines={2}
-                  >
-                    {bug.description}
-                  </Text>
-                ) : null}
-
-                <Text
-                  style={[styles.envLine, { color: theme.textMuted }]}
-                  numberOfLines={1}
-                >
-                  Env: {bug.environment || 'Android Device'}
-                </Text>
-
-                <View
-                  style={[
-                    styles.cardFooter,
-                    { borderTopColor: theme.border },
-                  ]}
-                >
-                  <View style={styles.linksRow}>
-                    {(linkedCase || bug.linkedTestCaseId) && (
-                      <View
-                        style={[
-                          styles.linkChip,
-                          { backgroundColor: theme.primarySoft },
-                        ]}
-                      >
-                        <VectorIcon
-                          name="tag"
-                          size={10}
-                          color={theme.primary}
-                        />
-                        <Text
-                          style={[
-                            styles.linkChipText,
-                            { color: theme.primary },
-                          ]}
-                        >
-                          {bug.linkedTestCaseId}
-                        </Text>
-                      </View>
-                    )}
-                    {(linkedRun || bug.linkedTestRunId) && (
-                      <View
-                        style={[
-                          styles.linkChip,
-                          { backgroundColor: theme.infoSoft },
-                        ]}
-                      >
-                        <VectorIcon
-                          name="layers"
-                          size={10}
-                          color={theme.info}
-                        />
-                        <Text
-                          style={[styles.linkChipText, { color: theme.info }]}
-                        >
-                          {bug.linkedTestRunId}
-                        </Text>
-                      </View>
-                    )}
-                    {bug.externalUrl &&
-                    validateDefectExternalUrl(bug.externalUrl).isValid ? (
-                      <TouchableOpacity
-                        activeOpacity={0.75}
-                        accessibilityRole="link"
-                        accessibilityLabel={`Open external issue link for ${
-                          bug.defectId || bug.id
-                        }`}
-                        accessibilityHint="Opens the external issue URL in your browser"
-                        onPress={() => handleOpenExternalUrl(bug.externalUrl)}
-                        style={[
-                          styles.linkChip,
-                          {
-                            backgroundColor: theme.primarySoft,
-                            borderWidth: 1,
-                            borderColor: theme.primary,
-                            maxWidth: 150,
-                          },
-                        ]}
-                      >
-                        <VectorIcon
-                          name="globe"
-                          size={10}
-                          color={theme.primary}
-                        />
-                        <Text
-                          numberOfLines={1}
-                          ellipsizeMode="tail"
-                          style={[
-                            styles.linkChipText,
-                            {
-                              color: theme.primary,
-                              textDecorationLine: 'underline',
-                              flexShrink: 1,
-                            },
-                          ]}
-                        >
-                          External Issue
-                        </Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-
-                  <View style={styles.cardBottomRightActions}>
-                    <Text
-                      style={[styles.dateText, { color: theme.textMuted }]}
-                    >
-                      {formatShortTimestamp(bug.updatedAt || bug.createdAt)}
-                    </Text>
-                    <TouchableOpacity
-                      style={[
-                        styles.cardMiniBtn,
-                        {
-                          backgroundColor: theme.surfaceMuted,
-                          borderColor: theme.border,
-                        },
-                      ]}
-                      hitSlop={{ top: 11, bottom: 11, left: 11, right: 11 }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Edit defect ${
-                        bug.defectId || bug.id
-                      }`}
-                      onPress={() => openEditDefectForm(bug)}
-                    >
-                      <VectorIcon
-                        name="edit"
-                        size={12}
-                        color={theme.textSecondary}
-                      />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[
-                        styles.cardMiniBtn,
-                        {
-                          backgroundColor: theme.dangerSoft,
-                          borderColor: theme.danger,
-                        },
-                      ]}
-                      hitSlop={{ top: 11, bottom: 11, left: 11, right: 11 }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Delete defect ${
-                        bug.defectId || bug.id
-                      }`}
-                      onPress={() => setDefectPendingDelete(bug)}
-                    >
-                      <VectorIcon name="trash" size={12} color={theme.danger} />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            </View>
-          );
-        })}
-
-        {filteredDefects.length === 0 && (
+        keyboardShouldPersistTaps="handled"
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={7}
+        removeClippedSubviews
+        ListHeaderComponent={
+          <View style={styles.resultsBar}>
+            <Text style={[styles.resultsCount, { color: theme.textSecondary }]}>
+              Showing {filteredDefects.length} of {defects.length} defects
+            </Text>
+          </View>
+        }
+        ListEmptyComponent={
           <View
             style={[
               styles.emptyState,
@@ -1160,10 +1233,9 @@ export default function DefectsScreen() {
               Try adjusting your severity, priority, or status filters, or report a new defect.
             </Text>
           </View>
-        )}
-
-        <View style={{ height: 32 }} />
-      </ScrollView>
+        }
+        ListFooterComponent={<View style={{ height: 32 }} />}
+      />
 
       <DefectDetailModal
         theme={theme}

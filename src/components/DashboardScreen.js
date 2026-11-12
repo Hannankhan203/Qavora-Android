@@ -128,6 +128,133 @@ export default function DashboardScreen({ onNavigateToDestination }) {
     ? metrics.phaseProgress
     : [];
 
+  const modeToggleNode = (
+    <View
+      accessibilityRole="tablist"
+      style={[
+        styles.modeToggleContainer,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <Pressable
+        onPress={() => setDashboardSubTab('overview')}
+        hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+        accessibilityRole="tab"
+        accessibilityState={{ selected: dashboardSubTab === 'overview' }}
+        accessibilityLabel="QA Dashboard overview"
+        style={[
+          styles.modeToggleBtn,
+          {
+            backgroundColor:
+              dashboardSubTab === 'overview' ? colors.primary : 'transparent',
+          },
+        ]}
+      >
+        <VectorIcon
+          name="layers"
+          size={14}
+          color={
+            dashboardSubTab === 'overview'
+              ? colors.textOnPrimary
+              : colors.textSecondary
+          }
+        />
+        <Text
+          style={[
+            styles.modeToggleBtnText,
+            {
+              color:
+                dashboardSubTab === 'overview'
+                  ? colors.textOnPrimary
+                  : colors.textSecondary,
+              fontWeight: dashboardSubTab === 'overview' ? '700' : '600',
+            },
+          ]}
+        >
+          QA Dashboard
+        </Text>
+      </Pressable>
+
+      <Pressable
+        onPress={handleOpenChecklists}
+        hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+        accessibilityRole="tab"
+        accessibilityState={{ selected: false }}
+        accessibilityLabel="QA Checklists"
+        style={[
+          styles.modeToggleBtn,
+          {
+            backgroundColor: 'transparent',
+          },
+        ]}
+      >
+        <VectorIcon
+          name="clipboard"
+          size={14}
+          color={colors.textSecondary}
+        />
+        <Text
+          style={[
+            styles.modeToggleBtnText,
+            {
+              color: colors.textSecondary,
+              fontWeight: '600',
+            },
+          ]}
+        >
+          QA Checklists
+        </Text>
+      </Pressable>
+
+      <Pressable
+        onPress={() => setDashboardSubTab('reports')}
+        hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+        accessibilityRole="tab"
+        accessibilityState={{ selected: dashboardSubTab === 'reports' }}
+        accessibilityLabel="Reports and Analytics"
+        style={[
+          styles.modeToggleBtn,
+          {
+            backgroundColor:
+              dashboardSubTab === 'reports' ? colors.primary : 'transparent',
+          },
+        ]}
+      >
+        <VectorIcon
+          name="file-text"
+          size={14}
+          color={
+            dashboardSubTab === 'reports'
+              ? colors.textOnPrimary
+              : colors.textSecondary
+          }
+        />
+        <Text
+          style={[
+            styles.modeToggleBtnText,
+            {
+              color:
+                dashboardSubTab === 'reports'
+                  ? colors.textOnPrimary
+                  : colors.textSecondary,
+              fontWeight: dashboardSubTab === 'reports' ? '700' : '600',
+            },
+          ]}
+        >
+          Reports & Analytics
+        </Text>
+      </Pressable>
+    </View>
+  );
+
+  if (dashboardSubTab === 'reports') {
+    return (
+      <View style={[styles.scrollRoot, { backgroundColor: colors.background }]}>
+        <ReportsView topHeaderNode={modeToggleNode} />
+      </View>
+    );
+  }
+
   return (
     <ScrollView
       style={[styles.scrollRoot, { backgroundColor: colors.background }]}
@@ -144,131 +271,9 @@ export default function DashboardScreen({ onNavigateToDestination }) {
     >
       <View style={styles.container}>
         {/* Top Segmented Mode Toggle: QA Overview | Reports & Analytics */}
-        <View
-          accessibilityRole="tablist"
-          style={[
-            styles.modeToggleContainer,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-          ]}
-        >
-          <Pressable
-            onPress={() => setDashboardSubTab('overview')}
-            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: dashboardSubTab === 'overview' }}
-            accessibilityLabel="QA Dashboard overview"
-            style={[
-              styles.modeToggleBtn,
-              {
-                backgroundColor:
-                  dashboardSubTab === 'overview'
-                    ? colors.primary
-                    : 'transparent',
-              },
-            ]}
-          >
-            <VectorIcon
-              name="layers"
-              size={14}
-              color={
-                dashboardSubTab === 'overview'
-                  ? colors.textOnPrimary
-                  : colors.textSecondary
-              }
-            />
-            <Text
-              style={[
-                styles.modeToggleBtnText,
-                {
-                  color:
-                    dashboardSubTab === 'overview'
-                      ? colors.textOnPrimary
-                      : colors.textSecondary,
-                  fontWeight: dashboardSubTab === 'overview' ? '700' : '600',
-                },
-              ]}
-            >
-              QA Dashboard
-            </Text>
-          </Pressable>
+        {modeToggleNode}
 
-          <Pressable
-            onPress={handleOpenChecklists}
-            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: false }}
-            accessibilityLabel="QA Checklists"
-            style={[
-              styles.modeToggleBtn,
-              {
-                backgroundColor: 'transparent',
-              },
-            ]}
-          >
-            <VectorIcon
-              name="clipboard"
-              size={14}
-              color={colors.textSecondary}
-            />
-            <Text
-              style={[
-                styles.modeToggleBtnText,
-                {
-                  color: colors.textSecondary,
-                  fontWeight: '600',
-                },
-              ]}
-            >
-              QA Checklists
-            </Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => setDashboardSubTab('reports')}
-            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: dashboardSubTab === 'reports' }}
-            accessibilityLabel="Reports and Analytics"
-            style={[
-              styles.modeToggleBtn,
-              {
-                backgroundColor:
-                  dashboardSubTab === 'reports'
-                    ? colors.primary
-                    : 'transparent',
-              },
-            ]}
-          >
-            <VectorIcon
-              name="file-text"
-              size={14}
-              color={
-                dashboardSubTab === 'reports'
-                  ? colors.textOnPrimary
-                  : colors.textSecondary
-              }
-            />
-            <Text
-              style={[
-                styles.modeToggleBtnText,
-                {
-                  color:
-                    dashboardSubTab === 'reports'
-                      ? colors.textOnPrimary
-                      : colors.textSecondary,
-                  fontWeight: dashboardSubTab === 'reports' ? '700' : '600',
-                },
-              ]}
-            >
-              Reports & Analytics
-            </Text>
-          </Pressable>
-        </View>
-
-        {dashboardSubTab === 'reports' ? (
-          <ReportsView />
-        ) : (
-          <>
+        <>
             {/* 1. Active Project Overview Card */}
             <View
               style={[
@@ -1667,8 +1672,7 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                 </View>
               </View>
             ) : null}
-          </>
-        )}
+        </>
       </View>
     </ScrollView>
   );

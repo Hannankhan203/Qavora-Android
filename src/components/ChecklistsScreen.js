@@ -5,6 +5,8 @@ import {
   TextInput,
   Pressable,
   ScrollView,
+  FlatList,
+  RefreshControl,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -51,6 +53,381 @@ import {
   subscribeToSyncEvents,
   retryProjectOperation,
 } from '../services/offlineSyncService';
+
+function getPriorityBadgeColors(priority, colors) {
+  switch (priority) {
+    case 'Critical':
+      return { bg: colors.dangerSoft, fg: colors.danger };
+    case 'High':
+      return { bg: colors.warningSoft, fg: colors.warning };
+    case 'Low':
+      return { bg: colors.untestedSoft, fg: colors.textMuted };
+    default:
+      return { bg: colors.infoSoft, fg: colors.info };
+  }
+}
+
+function getStatusBadgeColors(status, colors) {
+  switch (status) {
+    case 'Completed':
+      return { bg: colors.successSoft, fg: colors.success };
+    case 'In Progress':
+      return { bg: colors.infoSoft, fg: colors.primary };
+    case 'Archived':
+      return { bg: colors.untestedSoft, fg: colors.textMuted };
+    default:
+      return { bg: colors.warningSoft, fg: colors.warning };
+  }
+}
+
+const ChecklistItemRow = React.memo(function ChecklistItemRow({
+  item,
+  isBusy,
+  colors,
+  onToggle,
+  onEdit,
+  onDelete,
+}) {
+  const prioBadge = getPriorityBadgeColors(item.priority, colors);
+  return (
+    <View
+      style={[
+        styles.itemRow,
+        {
+          backgroundColor: item.completed
+            ? colors.surfaceMuted
+            : colors.surface,
+          borderColor: item.completed ? colors.success : colors.border,
+        },
+      ]}
+    >
+      <Pressable
+        onPress={() => onToggle(item)}
+        disabled={isBusy}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        accessibilityRole="checkbox"
+        accessibilityState={{
+          checked: Boolean(item.completed),
+          disabled: Boolean(isBusy),
+        }}
+        accessibilityLabel={`Mark step "${item.title}" as ${
+          item.completed ? 'incomplete' : 'completed'
+        }`}
+        style={[
+          styles.checkboxHitbox,
+          {
+            backgroundColor: item.completed ? colors.success : colors.surface,
+            borderColor: item.completed ? colors.success : colors.borderStrong,
+          },
+        ]}
+      >
+        {isBusy ? (
+          <ActivityIndicator
+            size="small"
+            color={item.completed ? colors.textOnPrimary : colors.primary}
+          />
+        ) : item.completed ? (
+          <VectorIcon name="check" size={14} color={colors.textOnPrimary} />
+        ) : null}
+      </Pressable>
+
+      <Pressable
+        onPress={() => onToggle(item)}
+        disabled={isBusy}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: Boolean(isBusy) }}
+        accessibilityLabel={`Toggle checklist step "${item.title}", currently ${
+          item.completed ? 'completed' : 'pending'
+        }`}
+        style={styles.itemTextColumn}
+      >
+        <Text
+          style={[
+            styles.itemTitleText,
+            {
+              color: item.completed ? colors.textMuted : colors.text,
+              textDecorationLine: item.completed ? 'line-through' : 'none',
+            },
+          ]}
+        >
+          {item.title}
+        </Text>
+
+        {item.notes ? (
+          <Text style={[styles.itemNotesText, { color: colors.textSecondary }]}>
+            {item.notes}
+          </Text>
+        ) : null}
+
+        <View style={styles.itemMetaRow}>
+          <Text
+            style={[
+              styles.itemPriorityTag,
+              {
+                color: prioBadge.fg,
+                fontFamily: monoFontFamily,
+              },
+            ]}
+          >
+            {item.priority}
+          </Text>
+          <Text style={[styles.itemCategoryTag, { color: colors.textMuted }]}>
+            · {item.category || 'General QA'}
+          </Text>
+          {item.completed && item.completedAt ? (
+            <Text
+              style={[
+                styles.itemCompletedTag,
+                {
+                  color: colors.success,
+                  fontFamily: monoFontFamily,
+                },
+              ]}
+            >
+              · Done
+            </Text>
+          ) : null}
+        </View>
+      </Pressable>
+
+      <View style={styles.itemRowActions}>
+        <Pressable
+          onPress={() => onEdit(item)}
+          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          accessibilityRole="button"
+          accessibilityLabel={`Edit step ${item.title}`}
+          style={[
+            styles.iconBtn,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <VectorIcon name="edit" size={14} color={colors.textSecondary} />
+        </Pressable>
+
+        <Pressable
+          onPress={() => onDelete(item.id)}
+          disabled={isBusy}
+          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: Boolean(isBusy) }}
+          accessibilityLabel={`Delete step ${item.title}`}
+          style={[
+            styles.iconBtn,
+            {
+              backgroundColor: colors.dangerSoft,
+              borderColor: colors.danger,
+            },
+          ]}
+        >
+          <VectorIcon name="trash" size={14} color={colors.danger} />
+        </Pressable>
+      </View>
+    </View>
+  );
+});
+
+const ChecklistRowCard = React.memo(function ChecklistRowCard({
+  chk,
+  projName,
+  syncState,
+  syncLabel,
+  syncBg,
+  syncFg,
+  syncError,
+  colors,
+  onSelect,
+  onPromote,
+  onEdit,
+  onDelete,
+}) {
+  const statusPalette = getStatusBadgeColors(chk.status, colors);
+  const priorityPalette = getPriorityBadgeColors(chk.priority, colors);
+
+  return (
+    <Pressable
+      onPress={() => onSelect(chk)}
+      accessibilityRole="button"
+      accessibilityLabel={`Open checklist ${chk.title}, ${chk.status}, ${chk.completedItems} of ${chk.totalItems} completed`}
+      style={[
+        styles.checklistCard,
+        {
+          backgroundColor: colors.surface,
+          borderColor:
+            syncState === 'conflict' || syncState === 'failed'
+              ? colors.danger
+              : syncState === 'pending'
+              ? colors.warning
+              : colors.border,
+        },
+      ]}
+    >
+      <View style={styles.cardTopRow}>
+        <View style={styles.badgeRow}>
+          <View style={[styles.badge, { backgroundColor: statusPalette.bg }]}>
+            <Text style={[styles.badgeText, { color: statusPalette.fg }]}>
+              {chk.status}
+            </Text>
+          </View>
+          <View style={[styles.badge, { backgroundColor: priorityPalette.bg }]}>
+            <Text style={[styles.badgeText, { color: priorityPalette.fg }]}>
+              {chk.priority}
+            </Text>
+          </View>
+          <View style={[styles.badge, { backgroundColor: colors.surfaceMuted }]}>
+            <Text style={[styles.badgeText, { color: colors.textSecondary }]}>
+              {chk.category}
+            </Text>
+          </View>
+          <View style={[styles.badge, { backgroundColor: syncBg }]}>
+            <Text style={[styles.badgeText, { color: syncFg }]}>
+              {syncLabel}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.cardQuickButtons}>
+          <Pressable
+            onPress={(e) => {
+              if (e && typeof e.stopPropagation === 'function') {
+                e.stopPropagation();
+              }
+              onPromote(chk);
+            }}
+            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Promote checklist ${chk.title} to test cases`}
+            style={[
+              styles.promoteCardBtn,
+              {
+                backgroundColor: colors.surfaceAccent,
+                borderColor: colors.primary,
+              },
+            ]}
+          >
+            <VectorIcon name="layers" size={13} color={colors.primary} />
+            <Text style={[styles.promoteCardBtnText, { color: colors.primary }]}>
+              Promote
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={(e) => {
+              if (e && typeof e.stopPropagation === 'function') {
+                e.stopPropagation();
+              }
+              onEdit(chk);
+            }}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Edit checklist ${chk.title}`}
+            style={[
+              styles.iconBtn,
+              {
+                backgroundColor: colors.background,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <VectorIcon name="edit" size={14} color={colors.textSecondary} />
+          </Pressable>
+
+          <Pressable
+            onPress={(e) => {
+              if (e && typeof e.stopPropagation === 'function') {
+                e.stopPropagation();
+              }
+              onDelete(chk);
+            }}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Delete checklist ${chk.title}`}
+            style={[
+              styles.iconBtn,
+              {
+                backgroundColor: colors.dangerSoft,
+                borderColor: colors.danger,
+              },
+            ]}
+          >
+            <VectorIcon name="trash" size={14} color={colors.danger} />
+          </Pressable>
+        </View>
+      </View>
+
+      <Text style={[styles.cardTitle, { color: colors.text }]}>
+        {chk.title}
+      </Text>
+
+      {chk.description ? (
+        <Text
+          numberOfLines={2}
+          style={[styles.cardDescription, { color: colors.textSecondary }]}
+        >
+          {chk.description}
+        </Text>
+      ) : null}
+
+      {syncState === 'conflict' || syncState === 'failed' ? (
+        <Text
+          numberOfLines={2}
+          style={[
+            styles.cardDescription,
+            { color: colors.danger, fontWeight: '600' },
+          ]}
+        >
+          {syncError}
+        </Text>
+      ) : null}
+
+      <Text
+        style={[
+          styles.metaLine,
+          { color: colors.textMuted, fontFamily: monoFontFamily },
+        ]}
+      >
+        {projName} · {chk.environment || 'Staging'}
+        {chk.targetRelease ? ` · ${chk.targetRelease}` : ''} ·{' '}
+        {chk.completedItems}/{chk.totalItems} checks done
+      </Text>
+
+      {/* Card Progress Bar */}
+      <View style={styles.cardProgressRow}>
+        <View
+          style={[
+            styles.progressTrack,
+            { flex: 1, backgroundColor: colors.surfaceMuted },
+          ]}
+        >
+          <View
+            style={[
+              styles.progressFill,
+              {
+                width: `${Math.min(100, Math.max(0, chk.completionRate))}%`,
+                backgroundColor:
+                  chk.completionRate === 100 ? colors.success : colors.primary,
+              },
+            ]}
+          />
+        </View>
+        <Text
+          style={[
+            styles.cardProgressPercent,
+            {
+              color:
+                chk.completionRate === 100 ? colors.success : colors.primary,
+              fontFamily: monoFontFamily,
+            },
+          ]}
+        >
+          {chk.completionRate}%
+        </Text>
+      </View>
+    </Pressable>
+  );
+});
 
 export default function ChecklistsScreen({
   embedded = false,
@@ -254,6 +631,19 @@ export default function ChecklistsScreen({
   const formEnvRef = useRef(null);
   const formReleaseRef = useRef(null);
   const formCustomItemsRef = useRef(null);
+
+  const scrollDetailToOffset = useCallback((yOffset) => {
+    setTimeout(() => {
+      const target = detailScrollRef.current;
+      if (!target) return;
+      const offset = Math.max(0, yOffset);
+      if (typeof target.scrollToOffset === 'function') {
+        target.scrollToOffset({ offset, animated: true });
+      } else if (typeof target.scrollTo === 'function') {
+        target.scrollTo({ y: offset, animated: true });
+      }
+    }, 120);
+  }, []);
 
   const scrollChecklistFormTo = useCallback((yOffset) => {
     setTimeout(() => {
@@ -1190,6 +1580,18 @@ export default function ChecklistsScreen({
   // ============================================================================
   // CHECKLIST-TO-PROJECT PROMOTION WORKFLOW
   // ============================================================================
+  const projectNameById = useMemo(() => {
+    const map = new Map();
+    if (Array.isArray(projects)) {
+      projects.forEach((p) => {
+        if (p && (p.id || p._id)) {
+          map.set(String(p.id || p._id), p.name || '');
+        }
+      });
+    }
+    return map;
+  }, [projects]);
+
   const availableProjects = useMemo(
     () => (Array.isArray(projects) ? projects.filter((p) => p && (p.id || p._id)) : []),
     [projects]
@@ -1460,65 +1862,34 @@ export default function ChecklistsScreen({
     setActiveTab,
   ]);
 
-  const getPriorityBadgeColors = (priority) => {
-    switch (priority) {
-      case 'Critical':
-        return { bg: colors.dangerSoft, fg: colors.danger };
-      case 'High':
-        return { bg: colors.warningSoft, fg: colors.warning };
-      case 'Low':
-        return { bg: colors.untestedSoft, fg: colors.textMuted };
-      default:
-        return { bg: colors.infoSoft, fg: colors.info };
-    }
-  };
-
-  const getStatusBadgeColors = (status) => {
-    switch (status) {
-      case 'Completed':
-        return { bg: colors.successSoft, fg: colors.success };
-      case 'In Progress':
-        return { bg: colors.infoSoft, fg: colors.primary };
-      case 'Archived':
-        return { bg: colors.untestedSoft, fg: colors.textMuted };
-      default:
-        return { bg: colors.warningSoft, fg: colors.warning };
-    }
-  };
+  const getBoundPriorityBadgeColors = useCallback(
+    (priority) => getPriorityBadgeColors(priority, colors),
+    [colors]
+  );
 
   // ============================================================================
   // RENDER: ACTIVE CHECKLIST INTERACTIVE DETAIL VIEW
   // ============================================================================
   if (activeChecklist) {
-    const statusPalette = getStatusBadgeColors(activeChecklist.status);
-    const priorityPalette = getPriorityBadgeColors(activeChecklist.priority);
+    const statusPalette = getStatusBadgeColors(activeChecklist.status, colors);
+    const priorityPalette = getPriorityBadgeColors(
+      activeChecklist.priority,
+      colors
+    );
     const activeSyncInfo = getChecklistSyncInfo(activeChecklist);
-    const linkedProjectObj = activeChecklist.projectId
-      ? projects.find(
-          (p) => String(p.id || p._id) === String(activeChecklist.projectId)
-        )
-      : null;
+    const linkedProjectName = activeChecklist.projectId
+      ? projectNameById.get(String(activeChecklist.projectId))
+      : '';
     const projectLabel =
-      (linkedProjectObj && linkedProjectObj.name) ||
+      linkedProjectName ||
       activeChecklist.projectName ||
-      (activeChecklist.projectId ? `Project ${activeChecklist.projectId}` : 'Workspace-Wide');
+      (activeChecklist.projectId
+        ? `Project ${activeChecklist.projectId}`
+        : 'Workspace-Wide');
 
-    return (
-      <KeyboardAvoidingView
-        style={[styles.container, { backgroundColor: colors.background }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 76 : 16}
-      >
-        <ScrollView
-          ref={detailScrollRef}
-          contentContainerStyle={[
-            styles.content,
-            embedded && styles.contentEmbedded,
-          ]}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-        >
-          {/* Back Bar & Detail Actions */}
+    const detailListHeaderNode = (
+      <View style={styles.checklistCardsList}>
+        {/* Back Bar & Detail Actions */}
           <View
             style={[
               styles.detailTopBar,
@@ -1972,12 +2343,7 @@ export default function ChecklistsScreen({
                 returnKeyType="next"
                 blurOnSubmit={false}
                 onFocus={() => {
-                  setTimeout(() => {
-                    detailScrollRef.current?.scrollTo({
-                      y: 260,
-                      animated: true,
-                    });
-                  }, 120);
+                  scrollDetailToOffset(260);
                 }}
                 onSubmitEditing={() => newItemNotesRef.current?.focus()}
                 style={[
@@ -2067,12 +2433,7 @@ export default function ChecklistsScreen({
                 accessibilityLabel="Optional verification note or expected outcome"
                 returnKeyType="done"
                 onFocus={() => {
-                  setTimeout(() => {
-                    detailScrollRef.current?.scrollTo({
-                      y: 320,
-                      animated: true,
-                    });
-                  }, 120);
+                  scrollDetailToOffset(320);
                 }}
                 onSubmitEditing={handleAddNewItem}
                 style={[
@@ -2087,14 +2448,14 @@ export default function ChecklistsScreen({
             </View>
           </View>
 
-          {/* Checklist Items List & Filter Tabs */}
+          {/* Checklist Items Header & Filter Tabs */}
           <View
             style={[
               styles.card,
               { backgroundColor: colors.surface, borderColor: colors.border },
             ]}
           >
-            <View style={styles.itemsHeaderRow}>
+            <View style={[styles.itemsHeaderRow, { marginBottom: 0 }]}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>
                 Checklist Items ({filteredActiveItems.length})
               </Text>
@@ -2144,203 +2505,66 @@ export default function ChecklistsScreen({
                 })}
               </View>
             </View>
-
-            {filteredActiveItems.length === 0 ? (
-              <View style={styles.emptyItemsBox}>
-                <Text style={[styles.emptyTitle, { color: colors.text }]}>
-                  {activeChecklist.totalItems === 0
-                    ? 'No items in this checklist yet'
-                    : 'No items match the selected filter'}
-                </Text>
-                <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-                  {activeChecklist.totalItems === 0
-                    ? 'Add verification steps above to start tracking completion progress.'
-                    : 'Switch filter tabs to view all checklist steps.'}
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.itemsList}>
-                {filteredActiveItems.map((item, idx) => {
-                  const isBusy = busyItemId === item.id;
-                  const prioBadge = getPriorityBadgeColors(item.priority);
-                  return (
-                    <View
-                      key={item.id || idx}
-                      style={[
-                        styles.itemRow,
-                        {
-                          backgroundColor: item.completed
-                            ? colors.surfaceMuted
-                            : colors.background,
-                          borderColor: item.completed
-                            ? colors.success
-                            : colors.border,
-                        },
-                      ]}
-                    >
-                      <Pressable
-                        onPress={() => handleToggleItem(item)}
-                        disabled={isBusy}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        accessibilityRole="checkbox"
-                        accessibilityState={{
-                          checked: Boolean(item.completed),
-                          disabled: Boolean(isBusy),
-                        }}
-                        accessibilityLabel={`Mark step "${item.title}" as ${
-                          item.completed ? 'incomplete' : 'completed'
-                        }`}
-                        style={[
-                          styles.checkboxHitbox,
-                          {
-                            backgroundColor: item.completed
-                              ? colors.success
-                              : colors.surface,
-                            borderColor: item.completed
-                              ? colors.success
-                              : colors.borderStrong,
-                          },
-                        ]}
-                      >
-                        {isBusy ? (
-                          <ActivityIndicator
-                            size="small"
-                            color={
-                              item.completed ? colors.textOnPrimary : colors.primary
-                            }
-                          />
-                        ) : item.completed ? (
-                          <VectorIcon
-                            name="check"
-                            size={14}
-                            color={colors.textOnPrimary}
-                          />
-                        ) : null}
-                      </Pressable>
-
-                      <Pressable
-                        onPress={() => handleToggleItem(item)}
-                        disabled={isBusy}
-                        accessibilityRole="button"
-                        accessibilityState={{ disabled: Boolean(isBusy) }}
-                        accessibilityLabel={`Toggle checklist step "${item.title}", currently ${
-                          item.completed ? 'completed' : 'pending'
-                        }`}
-                        style={styles.itemTextColumn}
-                      >
-                        <Text
-                          style={[
-                            styles.itemTitleText,
-                            {
-                              color: item.completed
-                                ? colors.textMuted
-                                : colors.text,
-                              textDecorationLine: item.completed
-                                ? 'line-through'
-                                : 'none',
-                            },
-                          ]}
-                        >
-                          {item.title}
-                        </Text>
-
-                        {item.notes ? (
-                          <Text
-                            style={[
-                              styles.itemNotesText,
-                              { color: colors.textSecondary },
-                            ]}
-                          >
-                            {item.notes}
-                          </Text>
-                        ) : null}
-
-                        <View style={styles.itemMetaRow}>
-                          <Text
-                            style={[
-                              styles.itemPriorityTag,
-                              {
-                                color: prioBadge.fg,
-                                fontFamily: monoFontFamily,
-                              },
-                            ]}
-                          >
-                            {item.priority}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.itemCategoryTag,
-                              { color: colors.textMuted },
-                            ]}
-                          >
-                            · {item.category || 'General QA'}
-                          </Text>
-                          {item.completed && item.completedAt ? (
-                            <Text
-                              style={[
-                                styles.itemCompletedTag,
-                                {
-                                  color: colors.success,
-                                  fontFamily: monoFontFamily,
-                                },
-                              ]}
-                            >
-                              · Done
-                            </Text>
-                          ) : null}
-                        </View>
-                      </Pressable>
-
-                      <View style={styles.itemRowActions}>
-                        <Pressable
-                          onPress={() => openEditItemModal(item)}
-                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Edit step ${item.title}`}
-                          style={[
-                            styles.iconBtn,
-                            {
-                              backgroundColor: colors.surface,
-                              borderColor: colors.border,
-                            },
-                          ]}
-                        >
-                          <VectorIcon
-                            name="edit"
-                            size={14}
-                            color={colors.textSecondary}
-                          />
-                        </Pressable>
-
-                        <Pressable
-                          onPress={() => handleDeleteItem(item.id)}
-                          disabled={isBusy}
-                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                          accessibilityRole="button"
-                          accessibilityState={{ disabled: Boolean(isBusy) }}
-                          accessibilityLabel={`Delete step ${item.title}`}
-                          style={[
-                            styles.iconBtn,
-                            {
-                              backgroundColor: colors.dangerSoft,
-                              borderColor: colors.danger,
-                            },
-                          ]}
-                        >
-                          <VectorIcon
-                            name="trash"
-                            size={14}
-                            color={colors.danger}
-                          />
-                        </Pressable>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
           </View>
-        </ScrollView>
+      </View>
+    );
+
+    const detailEmptyComponent = (
+      <View
+        style={[
+          styles.card,
+          styles.emptyItemsBox,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
+        <Text style={[styles.emptyTitle, { color: colors.text }]}>
+          {activeChecklist.totalItems === 0
+            ? 'No items in this checklist yet'
+            : 'No items match the selected filter'}
+        </Text>
+        <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+          {activeChecklist.totalItems === 0
+            ? 'Add verification steps above to start tracking completion progress.'
+            : 'Switch filter tabs to view all checklist steps.'}
+        </Text>
+      </View>
+    );
+
+    return (
+      <KeyboardAvoidingView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 76 : 16}
+      >
+        <FlatList
+          ref={detailScrollRef}
+          data={filteredActiveItems}
+          keyExtractor={(item, idx) =>
+            String((item && (item.id || item._id)) || `chk-item-${idx}`)
+          }
+          renderItem={({ item }) => (
+            <ChecklistItemRow
+              item={item}
+              isBusy={busyItemId === item.id}
+              colors={colors}
+              onToggle={handleToggleItem}
+              onEdit={openEditItemModal}
+              onDelete={handleDeleteItem}
+            />
+          )}
+          ListHeaderComponent={detailListHeaderNode}
+          ListEmptyComponent={detailEmptyComponent}
+          contentContainerStyle={[
+            styles.content,
+            embedded && styles.contentEmbedded,
+          ]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          initialNumToRender={12}
+          maxToRenderPerBatch={12}
+          windowSize={7}
+          removeClippedSubviews={Platform.OS === 'android'}
+        />
 
         {/* Edit Checklist Item Modal */}
         <ChecklistEditItemModal
@@ -2418,7 +2642,7 @@ export default function ChecklistsScreen({
           closePromoteModal={closePromoteModal}
           isPromoting={isPromoting}
           promoteSourceChecklist={promoteSourceChecklist}
-          getPriorityBadgeColors={getPriorityBadgeColors}
+          getPriorityBadgeColors={getBoundPriorityBadgeColors}
           promoteSuccessResult={promoteSuccessResult}
           handleOpenPromotedProjectTestCases={handleOpenPromotedProjectTestCases}
           availableProjects={availableProjects}
@@ -2438,16 +2662,12 @@ export default function ChecklistsScreen({
   // ============================================================================
   // RENDER: STANDALONE QA CHECKLISTS LIST SCREEN
   // ============================================================================
-  return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView
-        contentContainerStyle={[
-          styles.content,
-          embedded && styles.contentEmbedded,
-        ]}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* Top Module Header & Primary Actions */}
+  const showInitialLoading = isLoading && checklists.length === 0;
+  const standaloneListData = showInitialLoading ? [] : filteredChecklists;
+
+  const standaloneListHeaderNode = (
+    <View style={styles.checklistCardsList}>
+      {/* Top Module Header & Primary Actions */}
         <View
           style={[
             styles.card,
@@ -2979,384 +3199,180 @@ export default function ChecklistsScreen({
           </ScrollView>
         </View>
 
-        {/* Loading / Empty / Checklists List */}
-        {isLoading && checklists.length === 0 ? (
-          <View
-            style={[
-              styles.card,
-              styles.centeredStateCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={[styles.emptyTitle, { color: colors.text, marginTop: 12 }]}>
-              Loading QA Checklists...
-            </Text>
-            <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-              Synchronizing with /api/checklists...
-            </Text>
-          </View>
-        ) : filteredChecklists.length === 0 ? (
-          <View
-            style={[
-              styles.card,
-              styles.centeredStateCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <VectorIcon name="clipboard" size={32} color={colors.primary} />
-            <Text style={[styles.emptyTitle, { color: colors.text, marginTop: 10 }]}>
-              {scopedChecklists.length === 0
-                ? scopeFilter === 'project'
-                  ? `No QA checklists linked to "${selectedProject?.name || 'this project'}" yet`
-                  : 'No QA checklists created yet'
-                : 'No checklists match your active filters'}
-            </Text>
-            <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-              {scopedChecklists.length === 0
-                ? 'Start from a battle-tested QA template or create a custom verification checklist.'
-                : 'Clear your search query or reset status/category filters.'}
-            </Text>
+        {/* Search & Multi-Criteria Filter Bar closed */}
+    </View>
+  );
 
-            {scopedChecklists.length === 0 ? (
-              <View style={styles.emptyTemplateButtons}>
-                {CHECKLIST_STARTER_TEMPLATES.map((tpl) => (
-                  <Pressable
-                    key={tpl.id}
-                    onPress={() => openCreateModal(tpl.id)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Create checklist from template ${tpl.name}`}
-                    style={[
-                      styles.templateQuickBtn,
-                      {
-                        backgroundColor: colors.surfaceAccent,
-                        borderColor: colors.primary,
-                      },
-                    ]}
-                  >
-                    <VectorIcon name="plus" size={14} color={colors.primary} />
-                    <Text
-                      style={[
-                        styles.templateQuickBtnText,
-                        { color: colors.primary },
-                      ]}
-                    >
-                      {tpl.name}
-                    </Text>
-                  </Pressable>
-                ))}
-                {scopeFilter === 'project' && checklists.length > 0 ? (
-                  <Pressable
-                    onPress={() => setScopeFilter('all')}
-                    accessibilityRole="button"
-                    accessibilityLabel={`View all workspace checklists (${checklists.length})`}
-                    style={[
-                      styles.templateQuickBtn,
-                      {
-                        backgroundColor: colors.background,
-                        borderColor: colors.borderStrong,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.templateQuickBtnText,
-                        { color: colors.text },
-                      ]}
-                    >
-                      View All Workspace Checklists ({checklists.length})
-                    </Text>
-                  </Pressable>
-                ) : null}
-              </View>
-            ) : (
-              <Pressable
-                onPress={() => {
-                  setSearchQuery('');
-                  setStatusFilter('All');
-                  setCategoryFilter('All');
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="Reset checklist filters"
+  const standaloneListEmptyNode = showInitialLoading ? (
+    <View
+      style={[
+        styles.card,
+        styles.centeredStateCard,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <ActivityIndicator size="large" color={colors.primary} />
+      <Text style={[styles.emptyTitle, { color: colors.text, marginTop: 12 }]}>
+        Loading QA Checklists...
+      </Text>
+      <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+        Synchronizing with /api/checklists...
+      </Text>
+    </View>
+  ) : (
+    <View
+      style={[
+        styles.card,
+        styles.centeredStateCard,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <VectorIcon name="clipboard" size={32} color={colors.primary} />
+      <Text style={[styles.emptyTitle, { color: colors.text, marginTop: 10 }]}>
+        {scopedChecklists.length === 0
+          ? scopeFilter === 'project'
+            ? `No QA checklists linked to "${selectedProject?.name || 'this project'}" yet`
+            : 'No QA checklists created yet'
+          : 'No checklists match your active filters'}
+      </Text>
+      <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+        {scopedChecklists.length === 0
+          ? 'Start from a battle-tested QA template or create a custom verification checklist.'
+          : 'Clear your search query or reset status/category filters.'}
+      </Text>
+
+      {scopedChecklists.length === 0 ? (
+        <View style={styles.emptyTemplateButtons}>
+          {CHECKLIST_STARTER_TEMPLATES.map((tpl) => (
+            <Pressable
+              key={tpl.id}
+              onPress={() => openCreateModal(tpl.id)}
+              accessibilityRole="button"
+              accessibilityLabel={`Create checklist from template ${tpl.name}`}
+              style={[
+                styles.templateQuickBtn,
+                {
+                  backgroundColor: colors.surfaceAccent,
+                  borderColor: colors.primary,
+                },
+              ]}
+            >
+              <VectorIcon name="plus" size={14} color={colors.primary} />
+              <Text
                 style={[
-                  styles.primaryHeaderBtn,
-                  { backgroundColor: colors.primary, marginTop: 12 },
+                  styles.templateQuickBtnText,
+                  { color: colors.primary },
                 ]}
               >
-                <Text
-                  style={[
-                    styles.primaryHeaderBtnText,
-                    { color: colors.textOnPrimary },
-                  ]}
-                >
-                  Reset Filters
-                </Text>
-              </Pressable>
-            )}
-          </View>
-        ) : (
-          <View style={styles.checklistCardsList}>
-            {filteredChecklists.map((chk) => {
-              const statusPalette = getStatusBadgeColors(chk.status);
-              const priorityPalette = getPriorityBadgeColors(chk.priority);
-              const syncInfo = getChecklistSyncInfo(chk);
-              const linkedProj = chk.projectId
-                ? projects.find(
-                    (p) => String(p.id || p._id) === String(chk.projectId)
-                  )
-                : null;
-              const projName =
-                (linkedProj && linkedProj.name) ||
-                chk.projectName ||
-                (chk.projectId ? `Project ${chk.projectId}` : 'Workspace');
+                {tpl.name}
+              </Text>
+            </Pressable>
+          ))}
+          {scopeFilter === 'project' && checklists.length > 0 ? (
+            <Pressable
+              onPress={() => setScopeFilter('all')}
+              accessibilityRole="button"
+              accessibilityLabel={`View all workspace checklists (${checklists.length})`}
+              style={[
+                styles.templateQuickBtn,
+                {
+                  backgroundColor: colors.background,
+                  borderColor: colors.borderStrong,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.templateQuickBtnText,
+                  { color: colors.text },
+                ]}
+              >
+                View All Workspace Checklists ({checklists.length})
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : (
+        <Pressable
+          onPress={() => {
+            setSearchQuery('');
+            setStatusFilter('All');
+            setCategoryFilter('All');
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Reset checklist filters"
+          style={[
+            styles.primaryHeaderBtn,
+            { backgroundColor: colors.primary, marginTop: 12 },
+          ]}
+        >
+          <Text
+            style={[
+              styles.primaryHeaderBtnText,
+              { color: colors.textOnPrimary },
+            ]}
+          >
+            Reset Filters
+          </Text>
+        </Pressable>
+      )}
+    </View>
+  );
 
-              return (
-                <Pressable
-                  key={chk.id}
-                  onPress={() => handleSelectChecklist(chk)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Open checklist ${chk.title}, ${chk.status}, ${chk.completedItems} of ${chk.totalItems} completed`}
-                  style={[
-                    styles.checklistCard,
-                    {
-                      backgroundColor: colors.surface,
-                      borderColor:
-                        syncInfo.state === 'conflict' || syncInfo.state === 'failed'
-                          ? colors.danger
-                          : syncInfo.state === 'pending'
-                          ? colors.warning
-                          : colors.border,
-                    },
-                  ]}
-                >
-                  <View style={styles.cardTopRow}>
-                    <View style={styles.badgeRow}>
-                      <View
-                        style={[
-                          styles.badge,
-                          { backgroundColor: statusPalette.bg },
-                        ]}
-                      >
-                        <Text
-                          style={[styles.badgeText, { color: statusPalette.fg }]}
-                        >
-                          {chk.status}
-                        </Text>
-                      </View>
-                      <View
-                        style={[
-                          styles.badge,
-                          { backgroundColor: priorityPalette.bg },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.badgeText,
-                            { color: priorityPalette.fg },
-                          ]}
-                        >
-                          {chk.priority}
-                        </Text>
-                      </View>
-                      <View
-                        style={[
-                          styles.badge,
-                          { backgroundColor: colors.surfaceMuted },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.badgeText,
-                            { color: colors.textSecondary },
-                          ]}
-                        >
-                          {chk.category}
-                        </Text>
-                      </View>
-                      <View
-                        style={[
-                          styles.badge,
-                          { backgroundColor: syncInfo.bg },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.badgeText,
-                            { color: syncInfo.fg },
-                          ]}
-                        >
-                          {syncInfo.label}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.cardQuickButtons}>
-                      <Pressable
-                        onPress={(e) => {
-                          if (e && typeof e.stopPropagation === 'function') {
-                            e.stopPropagation();
-                          }
-                          openPromoteModal(chk);
-                        }}
-                        hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Promote checklist ${chk.title} to test cases`}
-                        style={[
-                          styles.promoteCardBtn,
-                          {
-                            backgroundColor: colors.surfaceAccent,
-                            borderColor: colors.primary,
-                          },
-                        ]}
-                      >
-                        <VectorIcon
-                          name="layers"
-                          size={13}
-                          color={colors.primary}
-                        />
-                        <Text
-                          style={[
-                            styles.promoteCardBtnText,
-                            { color: colors.primary },
-                          ]}
-                        >
-                          Promote
-                        </Text>
-                      </Pressable>
-
-                      <Pressable
-                        onPress={(e) => {
-                          if (e && typeof e.stopPropagation === 'function') {
-                            e.stopPropagation();
-                          }
-                          openEditModal(chk);
-                        }}
-                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Edit checklist ${chk.title}`}
-                        style={[
-                          styles.iconBtn,
-                          {
-                            backgroundColor: colors.background,
-                            borderColor: colors.border,
-                          },
-                        ]}
-                      >
-                        <VectorIcon
-                          name="edit"
-                          size={14}
-                          color={colors.textSecondary}
-                        />
-                      </Pressable>
-
-                      <Pressable
-                        onPress={(e) => {
-                          if (e && typeof e.stopPropagation === 'function') {
-                            e.stopPropagation();
-                          }
-                          setDeleteTargetChecklist(chk);
-                        }}
-                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Delete checklist ${chk.title}`}
-                        style={[
-                          styles.iconBtn,
-                          {
-                            backgroundColor: colors.dangerSoft,
-                            borderColor: colors.danger,
-                          },
-                        ]}
-                      >
-                        <VectorIcon
-                          name="trash"
-                          size={14}
-                          color={colors.danger}
-                        />
-                      </Pressable>
-                    </View>
-                  </View>
-
-                  <Text style={[styles.cardTitle, { color: colors.text }]}>
-                    {chk.title}
-                  </Text>
-
-                  {chk.description ? (
-                    <Text
-                      numberOfLines={2}
-                      style={[
-                        styles.cardDescription,
-                        { color: colors.textSecondary },
-                      ]}
-                    >
-                      {chk.description}
-                    </Text>
-                  ) : null}
-
-                  {syncInfo.state === 'conflict' || syncInfo.state === 'failed' ? (
-                    <Text
-                      numberOfLines={2}
-                      style={[
-                        styles.cardDescription,
-                        { color: colors.danger, fontWeight: '600' },
-                      ]}
-                    >
-                      {syncInfo.error}
-                    </Text>
-                  ) : null}
-
-                  <Text
-                    style={[
-                      styles.metaLine,
-                      { color: colors.textMuted, fontFamily: monoFontFamily },
-                    ]}
-                  >
-                    {projName} · {chk.environment || 'Staging'}
-                    {chk.targetRelease ? ` · ${chk.targetRelease}` : ''} ·{' '}
-                    {chk.completedItems}/{chk.totalItems} checks done
-                  </Text>
-
-                  {/* Card Progress Bar */}
-                  <View style={styles.cardProgressRow}>
-                    <View
-                      style={[
-                        styles.progressTrack,
-                        { flex: 1, backgroundColor: colors.surfaceMuted },
-                      ]}
-                    >
-                      <View
-                        style={[
-                          styles.progressFill,
-                          {
-                            width: `${Math.min(100, Math.max(0, chk.completionRate))}%`,
-                            backgroundColor:
-                              chk.completionRate === 100
-                                ? colors.success
-                                : colors.primary,
-                          },
-                        ]}
-                      />
-                    </View>
-                    <Text
-                      style={[
-                        styles.cardProgressPercent,
-                        {
-                          color:
-                            chk.completionRate === 100
-                              ? colors.success
-                              : colors.primary,
-                          fontFamily: monoFontFamily,
-                        },
-                      ]}
-                    >
-                      {chk.completionRate}%
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
-      </ScrollView>
+  return (
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <FlatList
+        data={standaloneListData}
+        keyExtractor={(chk, idx) =>
+          String((chk && (chk.id || chk._id)) || `checklist-${idx}`)
+        }
+        renderItem={({ item: chk }) => {
+          const syncInfo = getChecklistSyncInfo(chk);
+          const linkedProjName = chk.projectId
+            ? projectNameById.get(String(chk.projectId))
+            : '';
+          const projName =
+            linkedProjName ||
+            chk.projectName ||
+            (chk.projectId ? `Project ${chk.projectId}` : 'Workspace');
+          return (
+            <ChecklistRowCard
+              chk={chk}
+              projName={projName}
+              syncState={syncInfo.state}
+              syncLabel={syncInfo.label}
+              syncBg={syncInfo.bg}
+              syncFg={syncInfo.fg}
+              syncError={syncInfo.error}
+              colors={colors}
+              onSelect={handleSelectChecklist}
+              onPromote={openPromoteModal}
+              onEdit={openEditModal}
+              onDelete={setDeleteTargetChecklist}
+            />
+          );
+        }}
+        ListHeaderComponent={standaloneListHeaderNode}
+        ListEmptyComponent={standaloneListEmptyNode}
+        contentContainerStyle={[
+          styles.content,
+          embedded && styles.contentEmbedded,
+        ]}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={() => loadChecklists({ silent: true })}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={7}
+        removeClippedSubviews={Platform.OS === 'android'}
+      />
 
       {renderChecklistModals()}
     </View>

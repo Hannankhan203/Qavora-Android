@@ -1193,8 +1193,10 @@ export function parseAndValidateImportPayload(jsonInput, options = {}) {
     }
     seenProjectIdsInBatch.add(projectId);
 
-    // Normalize legacy nested `testPlan.phases[].suites[].testCases[]` into `testSuites`
-    let rawSuites = Array.isArray(p.testSuites) ? [...p.testSuites] : [];
+    // Merge modern `testSuites` with legacy nested `testPlan.phases[].suites[].testCases[]`,
+    // deduplicating by stable suite ID while preserving phase links and all valid records.
+    const modernSuites = Array.isArray(p.testSuites) ? p.testSuites : [];
+    const legacySuites = [];
     const rawPlan =
       p.testPlan && typeof p.testPlan === 'object' && !Array.isArray(p.testPlan)
         ? { ...p.testPlan }
@@ -1206,13 +1208,22 @@ export function parseAndValidateImportPayload(jsonInput, options = {}) {
         rawPlan.phases = rawPlan.phases
           .filter((ph) => ph && typeof ph === 'object')
           .map((ph, phIdx) => {
-            const phaseId = String(ph.id || `ph_${i}_${phIdx + 1}`);
-            if (Array.isArray(ph.suites) && ph.suites.length > 0 && rawSuites.length === 0) {
+            const phaseId = String(ph.id || `ph_${i}_${phIdx + 1}`).trim();
+            if (Array.isArray(ph.suites) && ph.suites.length > 0) {
               ph.suites.forEach((legacySuite) => {
-                if (legacySuite && typeof legacySuite === 'object') {
-                  rawSuites.push({
+                if (
+                  legacySuite &&
+                  typeof legacySuite === 'object' &&
+                  !Array.isArray(legacySuite)
+                ) {
+                  const explicitPhaseId =
+                    typeof legacySuite.phaseId === 'string' &&
+                    legacySuite.phaseId.trim()
+                      ? legacySuite.phaseId.trim()
+                      : '';
+                  legacySuites.push({
                     ...legacySuite,
-                    phaseId: legacySuite.phaseId || phaseId,
+                    phaseId: explicitPhaseId || phaseId,
                   });
                 }
               });
@@ -1238,17 +1249,115 @@ export function parseAndValidateImportPayload(jsonInput, options = {}) {
         : []
     );
 
-    const seenSuiteIds = new Set();
+    const resolveStableSuiteId = (s) => {
+      if (typeof s.id === 'string' && s.id.trim()) return s.id.trim();
+      if (typeof s.suiteId === 'string' && s.suiteId.trim()) {
+        return s.suiteId.trim();
+      }
+      if (s._id !== undefined && s._id !== null && String(s._id).trim()) {
+        return String(s._id).trim();
+      }
+      return '';
+    };
+
+    const mergedSuitesById = new Map();
+    const combinedRawSuites = [...modernSuites, ...legacySuites];
+    let fallbackSuiteCounter = 0;
+
+    combinedRawSuites.forEach((s) => {
+      if (!s || typeof s !== 'object' || Array.isArray(s)) {
+        return;
+      }
+
+      const explicitId = resolveStableSuiteId(s);
+      let suiteKey = explicitId;
+      if (!suiteKey) {
+        fallbackSuiteCounter += 1;
+        suiteKey = `suite_${i}_${fallbackSuiteCounter}`;
+        while (mergedSuitesById.has(suiteKey)) {
+          fallbackSuiteCounter += 1;
+          suiteKey = `suite_${i}_${fallbackSuiteCounter}`;
+        }
+      }
+
+      const incomingCases = extractSuiteTestCases(s);
+      const existing = mergedSuitesById.get(suiteKey);
+
+      if (!existing) {
+        mergedSuitesById.set(suiteKey, {
+          ...s,
+          id: suiteKey,
+          cases: incomingCases,
+          testCases: incomingCases,
+        });
+        return;
+      }
+
+      const existingCases = extractSuiteTestCases(existing);
+      const combinedCases = extractSuiteTestCases({
+        cases: existingCases,
+        testCases: incomingCases,
+      });
+
+      const existingPhaseId =
+        typeof existing.phaseId === 'string' && existing.phaseId.trim()
+          ? existing.phaseId.trim()
+          : '';
+      const incomingPhaseId =
+        typeof s.phaseId === 'string' && s.phaseId.trim()
+          ? s.phaseId.trim()
+          : '';
+      const resolvedPhaseId =
+        (existingPhaseId && validPhaseIds.has(existingPhaseId)
+          ? existingPhaseId
+          : '') ||
+        (incomingPhaseId && validPhaseIds.has(incomingPhaseId)
+          ? incomingPhaseId
+          : '') ||
+        existingPhaseId ||
+        incomingPhaseId ||
+        null;
+
+      const mergedTags = Array.from(
+        new Set(
+          [
+            ...(Array.isArray(existing.tags) ? existing.tags : []),
+            ...(Array.isArray(s.tags) ? s.tags : []),
+          ]
+            .filter((t) => typeof t === 'string' && t.trim())
+            .map((t) => t.trim())
+        )
+      );
+
+      mergedSuitesById.set(suiteKey, {
+        ...s,
+        ...existing,
+        id: suiteKey,
+        phaseId: resolvedPhaseId,
+        name:
+          (typeof existing.name === 'string' && existing.name.trim()) ||
+          (typeof s.name === 'string' && s.name.trim()) ||
+          '',
+        category:
+          (typeof existing.category === 'string' && existing.category.trim()) ||
+          (typeof s.category === 'string' && s.category.trim()) ||
+          'Functional',
+        description:
+          (typeof existing.description === 'string' &&
+            existing.description.trim()) ||
+          (typeof s.description === 'string' && s.description.trim()) ||
+          '',
+        ...(mergedTags.length > 0 ? { tags: mergedTags } : {}),
+        cases: combinedCases,
+        testCases: combinedCases,
+      });
+    });
+
     const seenCaseIds = new Set();
 
-    const sanitizedSuites = rawSuites
-      .filter((s) => s && typeof s === 'object' && !Array.isArray(s))
-      .map((s, sIdx) => {
-        let suiteId = String(s.id || s._id || `suite_${i}_${sIdx + 1}`).trim();
-        if (seenSuiteIds.has(suiteId)) {
-          suiteId = `${suiteId}_${sIdx + 1}`;
-        }
-        seenSuiteIds.add(suiteId);
+    const sanitizedSuites = Array.from(mergedSuitesById.values()).map(
+      (s, sIdx) => {
+        const suiteId = s.id;
 
         const suiteName =
           typeof s.name === 'string' && s.name.trim()
@@ -1302,8 +1411,12 @@ export function parseAndValidateImportPayload(jsonInput, options = {}) {
 
         casesCount += cleanCases.length;
 
+        const normalizedPhaseId =
+          typeof s.phaseId === 'string' ? s.phaseId.trim() : '';
         const linkedPhaseId =
-          s.phaseId && validPhaseIds.has(s.phaseId) ? s.phaseId : null;
+          normalizedPhaseId && validPhaseIds.has(normalizedPhaseId)
+            ? normalizedPhaseId
+            : null;
 
         return {
           ...s,
@@ -1315,7 +1428,8 @@ export function parseAndValidateImportPayload(jsonInput, options = {}) {
           cases: cleanCases,
           testCases: cleanCases,
         };
-      });
+      }
+    );
 
     suitesCount += sanitizedSuites.length;
 

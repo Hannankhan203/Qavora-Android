@@ -331,7 +331,7 @@ export default function DefectDetailModal({
                   ]}
                 >
                   <Text style={[styles.detailText, { color: theme.text }]}>
-                    {viewingDefect.environment || 'Android Device'}
+                    {viewingDefect.environment || 'Not specified'}
                   </Text>
                   {(() => {
                     const rawExtUrl =

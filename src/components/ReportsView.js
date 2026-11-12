@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -7,8 +7,12 @@ import {
   TextInput,
   Modal,
   ScrollView,
+  FlatList,
+  SectionList,
+  RefreshControl,
   ActivityIndicator,
   Keyboard,
+  Platform,
 } from 'react-native';
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useProjects } from '../context/ProjectContext';
@@ -18,7 +22,471 @@ import {
 } from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
 
-export default function ReportsView() {
+function getReportVerdictBadgeStyle(verdict, colors) {
+  const v = String(verdict || '').toUpperCase();
+  if (
+    v === 'PASSED' ||
+    v === 'PASS' ||
+    v === 'RESOLVED' ||
+    v === 'CLOSED' ||
+    v === 'COMPLETED'
+  ) {
+    return { bg: colors.successSoft, fg: colors.success };
+  }
+  if (
+    v === 'FAILED' ||
+    v === 'FAIL' ||
+    v === 'CRITICAL' ||
+    v === 'OPEN' ||
+    v === 'REOPENED'
+  ) {
+    return { bg: colors.dangerSoft, fg: colors.danger };
+  }
+  if (
+    v === 'BLOCKED' ||
+    v === 'HIGH' ||
+    v === 'IN PROGRESS' ||
+    v === 'READY FOR RETEST'
+  ) {
+    return { bg: colors.warningSoft, fg: colors.warning };
+  }
+  return { bg: colors.surfaceMuted, fg: colors.textSecondary };
+}
+
+const ReportTimelineRow = React.memo(function ReportTimelineRow({ day, colors }) {
+  return (
+    <View
+      style={[
+        styles.timelineRow,
+        styles.virtualRowSpacing,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+        },
+      ]}
+    >
+      <Text
+        style={[
+          styles.timelineDate,
+          { color: colors.text, fontFamily: monoFontFamily },
+        ]}
+      >
+        {day.date}
+      </Text>
+      <Text
+        style={[
+          styles.timelineCounts,
+          {
+            color: colors.textSecondary,
+            fontFamily: monoFontFamily,
+          },
+        ]}
+      >
+        {day.totalRuns} runs · {day.passed}P / {day.failed}F / {day.blocked}B
+      </Text>
+      <Text
+        style={[
+          styles.timelineRate,
+          {
+            color: day.passRate >= 80 ? colors.success : colors.warning,
+            fontFamily: monoFontFamily,
+          },
+        ]}
+      >
+        {day.passRate}%
+      </Text>
+    </View>
+  );
+});
+
+const ReportExecutionRow = React.memo(function ReportExecutionRow({
+  ex,
+  colors,
+  onPressExecution,
+}) {
+  const badge = getReportVerdictBadgeStyle(ex.verdict, colors);
+  return (
+    <Pressable
+      onPress={() => onPressExecution(ex)}
+      accessibilityRole="button"
+      accessibilityLabel={`Open execution record for ${
+        ex.testCaseId || ex.testCaseTitle || 'test case'
+      }`}
+      style={[
+        styles.recordRow,
+        styles.virtualRowSpacing,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+        },
+      ]}
+    >
+      <View style={styles.recordTopRow}>
+        <Text
+          style={[
+            styles.monoCode,
+            { color: colors.primary, fontFamily: monoFontFamily },
+          ]}
+        >
+          {ex.testCaseId || 'EXEC'}
+        </Text>
+        <View style={[styles.verdictBadge, { backgroundColor: badge.bg }]}>
+          <Text
+            style={[
+              styles.verdictBadgeText,
+              { color: badge.fg, fontFamily: monoFontFamily },
+            ]}
+          >
+            {ex.verdict}
+          </Text>
+        </View>
+      </View>
+      <Text numberOfLines={1} style={[styles.recordTitle, { color: colors.text }]}>
+        {ex.testCaseTitle}
+      </Text>
+      <Text
+        style={[
+          styles.recordMeta,
+          {
+            color: colors.textMuted,
+            fontFamily: monoFontFamily,
+          },
+        ]}
+      >
+        {ex.tester} · {ex.environment} ·{' '}
+        {String(ex.executedAt || '').slice(0, 16).replace('T', ' ')}
+      </Text>
+    </Pressable>
+  );
+});
+
+const ReportPhaseRow = React.memo(function ReportPhaseRow({ ph, colors }) {
+  return (
+    <View
+      style={[
+        styles.suiteReportRow,
+        styles.virtualRowSpacing,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+        },
+      ]}
+    >
+      <View style={styles.recordTopRow}>
+        <Text style={[styles.recordTitle, { color: colors.text }]}>
+          Phase: {ph.phaseName}
+        </Text>
+        <Text
+          style={[
+            styles.monoCode,
+            { color: colors.primary, fontFamily: monoFontFamily },
+          ]}
+        >
+          {ph.coveragePct}% Covered
+        </Text>
+      </View>
+      <Text
+        style={[
+          styles.recordMeta,
+          { color: colors.textSecondary, fontFamily: monoFontFamily },
+        ]}
+      >
+        {ph.suiteCount} suites · {ph.executedCount}/{ph.caseCount} cases executed
+      </Text>
+      <View
+        style={[
+          styles.progressTrackSmall,
+          { backgroundColor: colors.surfaceMuted },
+        ]}
+      >
+        <View
+          style={[
+            styles.progressFillSmall,
+            {
+              width: `${Math.min(100, ph.coveragePct)}%`,
+              backgroundColor: colors.primary,
+            },
+          ]}
+        />
+      </View>
+    </View>
+  );
+});
+
+const ReportSuiteRow = React.memo(function ReportSuiteRow({ sq, colors }) {
+  return (
+    <View
+      style={[
+        styles.suiteReportRow,
+        styles.virtualRowSpacing,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+        },
+      ]}
+    >
+      <View style={styles.recordTopRow}>
+        <Text numberOfLines={1} style={[styles.recordTitle, { color: colors.text }]}>
+          {sq.title}
+        </Text>
+        <Text
+          style={[
+            styles.monoCode,
+            {
+              color: sq.passRate >= 80 ? colors.success : colors.warning,
+              fontFamily: monoFontFamily,
+            },
+          ]}
+        >
+          {sq.passRate}% Pass
+        </Text>
+      </View>
+      <Text
+        style={[
+          styles.recordMeta,
+          {
+            color: colors.textSecondary,
+            fontFamily: monoFontFamily,
+          },
+        ]}
+      >
+        Phase: {sq.phaseName} · {sq.totalCases} cases ({sq.passedCases}P /{' '}
+        {sq.failedCases}F / {sq.blockedCases}B / {sq.notRunCases} Not Run)
+      </Text>
+      <View
+        style={[
+          styles.progressTrackSmall,
+          { backgroundColor: colors.surfaceMuted },
+        ]}
+      >
+        <View
+          style={[
+            styles.progressFillSmall,
+            {
+              width: `${Math.min(100, sq.coveragePct)}%`,
+              backgroundColor: colors.success,
+            },
+          ]}
+        />
+      </View>
+    </View>
+  );
+});
+
+const ReportTestCaseRow = React.memo(function ReportTestCaseRow({
+  tc,
+  colors,
+  onPressCase,
+}) {
+  const badge = getReportVerdictBadgeStyle(tc.status, colors);
+  return (
+    <Pressable
+      onPress={() => onPressCase(tc.id)}
+      accessibilityRole="button"
+      accessibilityLabel={`Open test case ${tc.id}: ${tc.title}`}
+      style={[
+        styles.recordRow,
+        styles.virtualRowSpacing,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+        },
+      ]}
+    >
+      <View style={styles.recordTopRow}>
+        <Text
+          style={[
+            styles.monoCode,
+            { color: colors.primary, fontFamily: monoFontFamily },
+          ]}
+        >
+          {tc.id} · {tc.priority}
+        </Text>
+        <View style={[styles.verdictBadge, { backgroundColor: badge.bg }]}>
+          <Text
+            style={[
+              styles.verdictBadgeText,
+              { color: badge.fg, fontFamily: monoFontFamily },
+            ]}
+          >
+            {tc.status}
+          </Text>
+        </View>
+      </View>
+      <Text numberOfLines={1} style={[styles.recordTitle, { color: colors.text }]}>
+        {tc.title}
+      </Text>
+      <Text
+        style={[
+          styles.recordMeta,
+          {
+            color: colors.textMuted,
+            fontFamily: monoFontFamily,
+          },
+        ]}
+      >
+        {tc.suiteName} · {tc.phaseName} · {tc.testType}
+      </Text>
+    </Pressable>
+  );
+});
+
+const ReportTestRunRow = React.memo(function ReportTestRunRow({
+  run,
+  colors,
+  onPressRun,
+}) {
+  const badge = getReportVerdictBadgeStyle(run.status, colors);
+  return (
+    <Pressable
+      onPress={() => onPressRun(run.id)}
+      accessibilityRole="button"
+      accessibilityLabel={`Open test run ${run.id}: ${run.name}`}
+      style={[
+        styles.suiteReportRow,
+        styles.virtualRowSpacing,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+        },
+      ]}
+    >
+      <View style={styles.recordTopRow}>
+        <Text
+          style={[
+            styles.monoCode,
+            { color: colors.primary, fontFamily: monoFontFamily },
+          ]}
+        >
+          {run.id} · Build {run.buildVersion}
+        </Text>
+        <View style={[styles.verdictBadge, { backgroundColor: badge.bg }]}>
+          <Text
+            style={[
+              styles.verdictBadgeText,
+              { color: badge.fg, fontFamily: monoFontFamily },
+            ]}
+          >
+            {run.status}
+          </Text>
+        </View>
+      </View>
+      <Text numberOfLines={1} style={[styles.recordTitle, { color: colors.text }]}>
+        {run.name}
+      </Text>
+      <Text
+        style={[
+          styles.recordMeta,
+          {
+            color: colors.textSecondary,
+            fontFamily: monoFontFamily,
+          },
+        ]}
+      >
+        {run.deviceInfo} · {run.environment} · Tester: {run.tester}
+      </Text>
+      <Text
+        style={[
+          styles.recordMeta,
+          { color: colors.textMuted, fontFamily: monoFontFamily },
+        ]}
+      >
+        {run.executedCases}/{run.totalCases} executed · {run.passedCases} Pass /{' '}
+        {run.failedCases} Fail / {run.blockedCases} Blocked · {run.passRate}%
+        Pass Rate
+      </Text>
+      <View
+        style={[
+          styles.progressTrackSmall,
+          { backgroundColor: colors.surfaceMuted },
+        ]}
+      >
+        <View
+          style={[
+            styles.progressFillSmall,
+            {
+              width: `${Math.min(100, run.coveragePct)}%`,
+              backgroundColor:
+                run.failedCases > 0 ? colors.warning : colors.success,
+            },
+          ]}
+        />
+      </View>
+    </Pressable>
+  );
+});
+
+const ReportDefectRow = React.memo(function ReportDefectRow({
+  d,
+  colors,
+  onPressDefect,
+}) {
+  const sevBadge = getReportVerdictBadgeStyle(d.severity, colors);
+  const stBadge = getReportVerdictBadgeStyle(d.status, colors);
+  return (
+    <Pressable
+      onPress={() => onPressDefect(d.id)}
+      accessibilityRole="button"
+      accessibilityLabel={`Open defect ${d.id}: ${d.title}`}
+      style={[
+        styles.recordRow,
+        styles.virtualRowSpacing,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+        },
+      ]}
+    >
+      <View style={styles.recordTopRow}>
+        <Text
+          style={[
+            styles.monoCode,
+            { color: colors.primary, fontFamily: monoFontFamily },
+          ]}
+        >
+          {d.id}
+        </Text>
+        <View style={styles.badgeRow}>
+          <View style={[styles.verdictBadge, { backgroundColor: sevBadge.bg }]}>
+            <Text
+              style={[
+                styles.verdictBadgeText,
+                { color: sevBadge.fg, fontFamily: monoFontFamily },
+              ]}
+            >
+              {d.severity}
+            </Text>
+          </View>
+          <View style={[styles.verdictBadge, { backgroundColor: stBadge.bg }]}>
+            <Text
+              style={[
+                styles.verdictBadgeText,
+                { color: stBadge.fg, fontFamily: monoFontFamily },
+              ]}
+            >
+              {d.status}
+            </Text>
+          </View>
+        </View>
+      </View>
+      <Text numberOfLines={1} style={[styles.recordTitle, { color: colors.text }]}>
+        {d.title}
+      </Text>
+      <Text
+        style={[
+          styles.recordMeta,
+          { color: colors.textMuted, fontFamily: monoFontFamily },
+        ]}
+      >
+        Assignee: {d.assignee}
+        {d.linkedTestCaseId ? ` · Case: ${d.linkedTestCaseId}` : ''}
+        {d.linkedTestRunId ? ` · Run: ${d.linkedTestRunId}` : ''}
+      </Text>
+    </Pressable>
+  );
+});
+
+export default function ReportsView({ topHeaderNode = null }) {
   const { colors } = useTheme();
   const {
     selectedProject,
@@ -218,30 +686,205 @@ export default function ReportsView() {
     return { bg: colors.surfaceMuted, fg: colors.textSecondary };
   };
 
-  const getVerdictBadgeStyle = (verdict) => {
-    const v = String(verdict || '').toUpperCase();
-    if (v === 'PASSED' || v === 'PASS' || v === 'RESOLVED' || v === 'CLOSED' || v === 'COMPLETED') {
-      return { bg: colors.successSoft, fg: colors.success };
-    }
-    if (v === 'FAILED' || v === 'FAIL' || v === 'CRITICAL' || v === 'OPEN' || v === 'REOPENED') {
-      return { bg: colors.dangerSoft, fg: colors.danger };
-    }
+  const getVerdictBadgeStyle = useCallback(
+    (verdict) => getReportVerdictBadgeStyle(verdict, colors),
+    [colors]
+  );
+
+  const suiteFilterOptions = useMemo(
+    () => [
+      { id: 'ALL', name: `All Suites (${suites.length})`, isAll: true },
+      ...(Array.isArray(suites) ? suites : []),
+    ],
+    [suites]
+  );
+
+  const handleOpenExecutionRow = useCallback(
+    (ex) => {
+      const targetRunId = ex.testRunId || ex.runId;
+      const targetCaseId = ex.testCaseId || ex.caseId;
+      if (targetRunId) {
+        setSelectedTestRunId(targetRunId);
+        setActiveTab('testruns');
+      } else if (targetCaseId) {
+        setSelectedTestCaseId(targetCaseId);
+        setActiveTab('testcases');
+      }
+    },
+    [setActiveTab, setSelectedTestCaseId, setSelectedTestRunId]
+  );
+
+  const handleOpenTestCaseRow = useCallback(
+    (caseId) => {
+      setSelectedTestCaseId(caseId);
+      setActiveTab('testcases');
+    },
+    [setActiveTab, setSelectedTestCaseId]
+  );
+
+  const handleOpenTestRunRow = useCallback(
+    (runId) => {
+      setSelectedTestRunId(runId);
+      setActiveTab('testruns');
+    },
+    [setActiveTab, setSelectedTestRunId]
+  );
+
+  const handleOpenDefectRow = useCallback(
+    (defectId) => {
+      setSelectedDefectId(defectId);
+      setActiveTab('defects');
+    },
+    [setActiveTab, setSelectedDefectId]
+  );
+
+  const reportSections = useMemo(() => {
+    const sections = [];
+    const timelineList = Array.isArray(report.executionTimeline)
+      ? report.executionTimeline
+      : [];
+    const executionsList = Array.isArray(report.executions)
+      ? report.executions
+      : [];
+    const phaseCoverageList = Array.isArray(report.phaseCoverage)
+      ? report.phaseCoverage
+      : [];
+    const suitesQualityList = Array.isArray(report.suitesQuality)
+      ? report.suitesQuality
+      : [];
+    const testCasesList = Array.isArray(report.testCases)
+      ? report.testCases
+      : [];
+    const testRunsList = Array.isArray(report.testRuns) ? report.testRuns : [];
+    const defectsList = Array.isArray(report.defects) ? report.defects : [];
+
     if (
-      v === 'BLOCKED' ||
-      v === 'HIGH' ||
-      v === 'IN PROGRESS' ||
-      v === 'READY FOR RETEST'
+      selectedReportType === 'project_summary' ||
+      selectedReportType === 'execution_summary'
     ) {
-      return { bg: colors.warningSoft, fg: colors.warning };
+      if (timelineList.length > 0) {
+        sections.push({
+          id: 'timeline',
+          title: 'Execution Velocity by Date',
+          countLabel: `${timelineList.length} days`,
+          data: timelineList.map((day, idx) => ({
+            _rowKey: `timeline-${String(day.date || 'day')}-${idx}`,
+            _kind: 'timeline',
+            payload: day,
+          })),
+        });
+      }
+
+      sections.push({
+        id: 'executions',
+        title: 'Execution Log',
+        countLabel: `${executionsList.length} logged`,
+        actionType: 'testruns',
+        actionLabel: 'Open Test Runs →',
+        emptyMessage: 'No execution logs recorded in this timeframe.',
+        data: executionsList.map((ex, idx) => ({
+          _rowKey: `exec-${String(ex.id || ex.testCaseId || 'row')}-${idx}`,
+          _kind: 'execution',
+          payload: ex,
+        })),
+      });
     }
-    return { bg: colors.surfaceMuted, fg: colors.textSecondary };
-  };
+
+    if (
+      selectedReportType === 'project_summary' ||
+      selectedReportType === 'case_status'
+    ) {
+      if (phaseCoverageList.length > 0) {
+        sections.push({
+          id: 'phases',
+          title: 'Test Plan Phase Coverage',
+          countLabel: `${phaseCoverageList.length} phases`,
+          data: phaseCoverageList.map((ph, idx) => ({
+            _rowKey: `phase-${String(ph.phaseName || 'phase')}-${idx}`,
+            _kind: 'phase',
+            payload: ph,
+          })),
+        });
+      }
+
+      sections.push({
+        id: 'suites',
+        title: 'Suites Quality & Pass Rate',
+        countLabel: `${suitesQualityList.length} suites`,
+        actionType: 'suites',
+        actionLabel: 'Manage Suites →',
+        headerExtras: 'priorityBreakdown',
+        emptyMessage: 'No test suites configured in this scope.',
+        data: suitesQualityList.map((sq, idx) => ({
+          _rowKey: `suite-${String(sq.id || 'sq')}-${idx}`,
+          _kind: 'suite',
+          payload: sq,
+        })),
+      });
+
+      if (selectedReportType === 'case_status') {
+        sections.push({
+          id: 'cases',
+          title: `Test Cases Status Log (${testCasesList.length})`,
+          actionType: 'testcases',
+          actionLabel: 'Open Test Cases →',
+          emptyMessage: 'No test cases match the selected filters.',
+          data: testCasesList.map((tc, idx) => ({
+            _rowKey: `case-${String(tc.id || 'tc')}-${idx}`,
+            _kind: 'case',
+            payload: tc,
+          })),
+        });
+      }
+    }
+
+    if (
+      selectedReportType === 'project_summary' ||
+      selectedReportType === 'test_runs'
+    ) {
+      sections.push({
+        id: 'runs',
+        title: 'Test Run Cycles Report',
+        countLabel: `${testRunsList.length} runs`,
+        actionType: 'testruns',
+        actionLabel: 'Open Test Runs →',
+        emptyMessage: 'No test runs recorded in this filter scope.',
+        data: testRunsList.map((run, idx) => ({
+          _rowKey: `run-${String(run.id || 'run')}-${idx}`,
+          _kind: 'run',
+          payload: run,
+        })),
+      });
+    }
+
+    if (
+      selectedReportType === 'project_summary' ||
+      selectedReportType === 'defect_summary'
+    ) {
+      sections.push({
+        id: 'defects',
+        title: `Defects Breakdown & Log (${defectsList.length})`,
+        actionType: 'defects',
+        actionLabel: 'Open Defects →',
+        headerExtras: 'defectBreakdown',
+        emptyMessage: 'No defects recorded in this filter scope.',
+        data: defectsList.map((d, idx) => ({
+          _rowKey: `defect-${String(d.id || 'bug')}-${idx}`,
+          _kind: 'defect',
+          payload: d,
+        })),
+      });
+    }
+
+    return sections;
+  }, [report, selectedReportType]);
 
   const healthStyle = getHealthBadgeStyle(report.healthTone);
   const kpis = report.kpis || {};
 
-  return (
+  const reportHeaderNode = (
     <View style={styles.container}>
+      {topHeaderNode}
       {/* 1. Report Header & Health Status Banner */}
       <View
         style={[
@@ -551,55 +1194,29 @@ export default function ReportsView() {
             >
               TEST SUITE SCOPE
             </Text>
-            <ScrollView
+            <FlatList
               horizontal
+              data={suiteFilterOptions}
+              keyExtractor={(su, idx) =>
+                String((su && (su.id || su._id)) || `suite-scope-${idx}`)
+              }
               showsHorizontalScrollIndicator={false}
               onTouchStart={notifyBlockedSwipeTouchStart}
               contentContainerStyle={styles.horizontalPillsRow}
-            >
-              <Pressable
-                onPress={() => setSelectedSuiteId('ALL')}
-                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: selectedSuiteId === 'ALL' }}
-                accessibilityLabel={`All Suites (${suites.length})`}
-                style={[
-                  styles.filterPillSmall,
-                  {
-                    backgroundColor:
-                      selectedSuiteId === 'ALL'
-                        ? colors.surfaceAccent
-                        : colors.surfaceElevated,
-                    borderColor:
-                      selectedSuiteId === 'ALL' ? colors.primary : colors.border,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.filterPillSmallText,
-                    {
-                      color:
-                        selectedSuiteId === 'ALL'
-                          ? colors.primary
-                          : colors.textSecondary,
-                      fontWeight: selectedSuiteId === 'ALL' ? '700' : '500',
-                    },
-                  ]}
-                >
-                  All Suites ({suites.length})
-                </Text>
-              </Pressable>
-              {suites.map((su) => {
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
+              windowSize={5}
+              renderItem={({ item: su }) => {
                 const active = selectedSuiteId === su.id;
                 return (
                   <Pressable
-                    key={su.id}
                     onPress={() => setSelectedSuiteId(su.id)}
                     hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                     accessibilityRole="tab"
                     accessibilityState={{ selected: active }}
-                    accessibilityLabel={`Filter by suite: ${su.name}`}
+                    accessibilityLabel={
+                      su.isAll ? su.name : `Filter by suite: ${su.name}`
+                    }
                     style={[
                       styles.filterPillSmall,
                       {
@@ -623,8 +1240,8 @@ export default function ReportsView() {
                     </Text>
                   </Pressable>
                 );
-              })}
-            </ScrollView>
+              }}
+            />
           </View>
         ) : null}
 
@@ -1108,644 +1725,116 @@ export default function ReportsView() {
               );
             })}
           </View>
-
-          {/* Daily Execution Velocity / Timeline Table */}
-          {Array.isArray(report.executionTimeline) &&
-          report.executionTimeline.length > 0 ? (
-            <View
-              style={[
-                styles.subSectionBlock,
-                { borderTopColor: colors.border },
-              ]}
-            >
-              <Text style={[styles.subSectionTitle, { color: colors.text }]}>
-                Execution Velocity by Date
-              </Text>
-              <View style={styles.tableList}>
-                {report.executionTimeline.slice(0, 10).map((day) => (
-                  <View
-                    key={day.date}
-                    style={[
-                      styles.timelineRow,
-                      {
-                        backgroundColor: colors.surfaceElevated,
-                        borderColor: colors.border,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.timelineDate,
-                        { color: colors.text, fontFamily: monoFontFamily },
-                      ]}
-                    >
-                      {day.date}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.timelineCounts,
-                        {
-                          color: colors.textSecondary,
-                          fontFamily: monoFontFamily,
-                        },
-                      ]}
-                    >
-                      {day.totalRuns} runs · {day.passed}P / {day.failed}F /{' '}
-                      {day.blocked}B
-                    </Text>
-                    <Text
-                      style={[
-                        styles.timelineRate,
-                        {
-                          color:
-                            day.passRate >= 80
-                              ? colors.success
-                              : colors.warning,
-                          fontFamily: monoFontFamily,
-                        },
-                      ]}
-                    >
-                      {day.passRate}%
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-          ) : null}
-
-          {/* Chronological Executions Log */}
-          <View
-            style={[styles.subSectionBlock, { borderTopColor: colors.border }]}
-          >
-            <View style={styles.sectionHeaderRow}>
-              <Text style={[styles.subSectionTitle, { color: colors.text }]}>
-                Recent Execution Log
-              </Text>
-              <Pressable
-                onPress={() => setActiveTab('testruns')}
-                accessibilityRole="button"
-                accessibilityLabel="Open Test Runs"
-              >
-                <Text style={[styles.linkText, { color: colors.primary }]}>
-                  Open Test Runs →
-                </Text>
-              </Pressable>
-            </View>
-            {report.executions.length === 0 ? (
-              <Text style={[styles.emptyInlineText, { color: colors.textMuted }]}>
-                No execution logs recorded in this timeframe.
-              </Text>
-            ) : (
-              <View style={styles.tableList}>
-                {report.executions.slice(0, 12).map((ex, idx) => {
-                  const badge = getVerdictBadgeStyle(ex.verdict);
-                  return (
-                    <Pressable
-                      key={ex.id || `${ex.testCaseId}-${idx}`}
-                      onPress={() => {
-                        const targetRunId = ex.testRunId || ex.runId;
-                        const targetCaseId = ex.testCaseId || ex.caseId;
-                        if (targetRunId) {
-                          setSelectedTestRunId(targetRunId);
-                          setActiveTab('testruns');
-                        } else if (targetCaseId) {
-                          setSelectedTestCaseId(targetCaseId);
-                          setActiveTab('testcases');
-                        }
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Open execution record for ${
-                        ex.testCaseId || ex.testCaseTitle || 'test case'
-                      }`}
-                      style={[
-                        styles.recordRow,
-                        {
-                          backgroundColor: colors.surfaceElevated,
-                          borderColor: colors.border,
-                        },
-                      ]}
-                    >
-                      <View style={styles.recordTopRow}>
-                        <Text
-                          style={[
-                            styles.monoCode,
-                            { color: colors.primary, fontFamily: monoFontFamily },
-                          ]}
-                        >
-                          {ex.testCaseId || 'EXEC'}
-                        </Text>
-                        <View
-                          style={[
-                            styles.verdictBadge,
-                            { backgroundColor: badge.bg },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.verdictBadgeText,
-                              { color: badge.fg, fontFamily: monoFontFamily },
-                            ]}
-                          >
-                            {ex.verdict}
-                          </Text>
-                        </View>
-                      </View>
-                      <Text
-                        numberOfLines={1}
-                        style={[styles.recordTitle, { color: colors.text }]}
-                      >
-                        {ex.testCaseTitle}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.recordMeta,
-                          {
-                            color: colors.textMuted,
-                            fontFamily: monoFontFamily,
-                          },
-                        ]}
-                      >
-                        {ex.tester} · {ex.environment} ·{' '}
-                        {String(ex.executedAt || '').slice(0, 16).replace('T', ' ')}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            )}
-          </View>
         </View>
       ) : null}
+    </View>
+  );
 
-      {/* 6. Test Case Status, Phases & Suite Coverage (Project Summary & Case Status) */}
-      {selectedReportType === 'project_summary' ||
-      selectedReportType === 'case_status' ? (
+  const handleSectionAction = useCallback(
+    (actionType) => {
+      if (actionType === 'testruns') {
+        setActiveTab('testruns');
+      } else if (actionType === 'suites') {
+        if (typeof openTestSuitesView === 'function') {
+          openTestSuitesView();
+        } else {
+          setActiveTab('testcases');
+        }
+      } else if (actionType === 'testcases') {
+        setActiveTab('testcases');
+      } else if (actionType === 'defects') {
+        setActiveTab('defects');
+      }
+    },
+    [openTestSuitesView, setActiveTab]
+  );
+
+  const renderSectionHeader = ({ section }) => (
+    <View
+      style={[
+        styles.sectionHeaderCard,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <View style={styles.sectionHeaderRow}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          {section.title}
+        </Text>
+        {section.actionLabel ? (
+          <Pressable
+            onPress={() => handleSectionAction(section.actionType)}
+            accessibilityRole="button"
+            accessibilityLabel={section.actionLabel}
+          >
+            <Text style={[styles.linkText, { color: colors.primary }]}>
+              {section.actionLabel}
+            </Text>
+          </Pressable>
+        ) : section.countLabel ? (
+          <Text
+            style={[
+              styles.sectionCounter,
+              { color: colors.textMuted, fontFamily: monoFontFamily },
+            ]}
+          >
+            {section.countLabel}
+          </Text>
+        ) : null}
+      </View>
+
+      {section.headerExtras === 'priorityBreakdown' ? (
         <View
-          style={[
-            styles.card,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-          ]}
+          style={[styles.subSectionBlock, { borderTopColor: colors.border }]}
         >
-          <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              Test Suites & Phase Coverage
-            </Text>
-            <Text
-              style={[
-                styles.sectionCounter,
-                { color: colors.textMuted, fontFamily: monoFontFamily },
-              ]}
-            >
-              {(report.suitesQuality || []).length} suites ·{' '}
-              {(report.phaseCoverage || []).length} phases
-            </Text>
-          </View>
-
-          {/* Phase Coverage Breakdown */}
-          {Array.isArray(report.phaseCoverage) &&
-          report.phaseCoverage.length > 0 ? (
-            <View style={styles.tableList}>
-              {report.phaseCoverage.map((ph) => (
+          <Text style={[styles.subSectionTitle, { color: colors.text }]}>
+            Test Case Priority Distribution
+          </Text>
+          <View style={styles.priorityGrid}>
+            {(report.priorityBreakdown || []).map((prio) => {
+              const badge = getVerdictBadgeStyle(prio.label);
+              return (
                 <View
-                  key={ph.phaseName}
+                  key={prio.label}
                   style={[
-                    styles.suiteReportRow,
+                    styles.priorityStatBox,
                     {
                       backgroundColor: colors.surfaceElevated,
                       borderColor: colors.border,
                     },
                   ]}
                 >
-                  <View style={styles.recordTopRow}>
-                    <Text style={[styles.recordTitle, { color: colors.text }]}>
-                      Phase: {ph.phaseName}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.monoCode,
-                        { color: colors.primary, fontFamily: monoFontFamily },
-                      ]}
-                    >
-                      {ph.coveragePct}% Covered
-                    </Text>
-                  </View>
                   <Text
                     style={[
-                      styles.recordMeta,
-                      { color: colors.textSecondary, fontFamily: monoFontFamily },
+                      styles.priorityStatLabel,
+                      { color: badge.fg, fontFamily: monoFontFamily },
                     ]}
                   >
-                    {ph.suiteCount} suites · {ph.executedCount}/{ph.caseCount} cases executed
+                    {prio.label.toUpperCase()}
                   </Text>
-                  <View
+                  <Text
+                    style={[styles.priorityStatValue, { color: colors.text }]}
+                  >
+                    {prio.count}
+                  </Text>
+                  <Text
                     style={[
-                      styles.progressTrackSmall,
-                      { backgroundColor: colors.surfaceMuted },
+                      styles.priorityStatPct,
+                      { color: colors.textMuted, fontFamily: monoFontFamily },
                     ]}
                   >
-                    <View
-                      style={[
-                        styles.progressFillSmall,
-                        {
-                          width: `${Math.min(100, ph.coveragePct)}%`,
-                          backgroundColor: colors.primary,
-                        },
-                      ]}
-                    />
-                  </View>
+                    {prio.percentage}% of cases
+                  </Text>
                 </View>
-              ))}
-            </View>
-          ) : null}
-
-          {/* Priority Breakdown */}
-          <View
-            style={[styles.subSectionBlock, { borderTopColor: colors.border }]}
-          >
-            <Text style={[styles.subSectionTitle, { color: colors.text }]}>
-              Test Case Priority Distribution
-            </Text>
-            <View style={styles.priorityGrid}>
-              {(report.priorityBreakdown || []).map((prio) => {
-                const badge = getVerdictBadgeStyle(prio.label);
-                return (
-                  <View
-                    key={prio.label}
-                    style={[
-                      styles.priorityStatBox,
-                      {
-                        backgroundColor: colors.surfaceElevated,
-                        borderColor: colors.border,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.priorityStatLabel,
-                        { color: badge.fg, fontFamily: monoFontFamily },
-                      ]}
-                    >
-                      {prio.label.toUpperCase()}
-                    </Text>
-                    <Text
-                      style={[styles.priorityStatValue, { color: colors.text }]}
-                    >
-                      {prio.count}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.priorityStatPct,
-                        { color: colors.textMuted, fontFamily: monoFontFamily },
-                      ]}
-                    >
-                      {prio.percentage}% of cases
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
+              );
+            })}
           </View>
-
-          {/* Suites Quality Breakdown */}
-          <View
-            style={[styles.subSectionBlock, { borderTopColor: colors.border }]}
-          >
-            <View style={styles.sectionHeaderRow}>
-              <Text style={[styles.subSectionTitle, { color: colors.text }]}>
-                Suites Quality & Pass Rate
-              </Text>
-              <Pressable
-                onPress={() => {
-                  if (typeof openTestSuitesView === 'function') {
-                    openTestSuitesView();
-                  } else {
-                    setActiveTab('testcases');
-                  }
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="Manage Test Suites"
-              >
-                <Text style={[styles.linkText, { color: colors.primary }]}>
-                  Manage Suites →
-                </Text>
-              </Pressable>
-            </View>
-            {(report.suitesQuality || []).length === 0 ? (
-              <Text style={[styles.emptyInlineText, { color: colors.textMuted }]}>
-                No test suites configured in this scope.
-              </Text>
-            ) : (
-              <View style={styles.tableList}>
-                {report.suitesQuality.map((sq) => (
-                  <View
-                    key={sq.id}
-                    style={[
-                      styles.suiteReportRow,
-                      {
-                        backgroundColor: colors.surfaceElevated,
-                        borderColor: colors.border,
-                      },
-                    ]}
-                  >
-                    <View style={styles.recordTopRow}>
-                      <Text
-                        numberOfLines={1}
-                        style={[styles.recordTitle, { color: colors.text }]}
-                      >
-                        {sq.title}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.monoCode,
-                          {
-                            color:
-                              sq.passRate >= 80
-                                ? colors.success
-                                : colors.warning,
-                            fontFamily: monoFontFamily,
-                          },
-                        ]}
-                      >
-                        {sq.passRate}% Pass
-                      </Text>
-                    </View>
-                    <Text
-                      style={[
-                        styles.recordMeta,
-                        {
-                          color: colors.textSecondary,
-                          fontFamily: monoFontFamily,
-                        },
-                      ]}
-                    >
-                      Phase: {sq.phaseName} · {sq.totalCases} cases ({sq.passedCases}P /{' '}
-                      {sq.failedCases}F / {sq.blockedCases}B / {sq.notRunCases} Not Run)
-                    </Text>
-                    <View
-                      style={[
-                        styles.progressTrackSmall,
-                        { backgroundColor: colors.surfaceMuted },
-                      ]}
-                    >
-                      <View
-                        style={[
-                          styles.progressFillSmall,
-                          {
-                            width: `${Math.min(100, sq.coveragePct)}%`,
-                            backgroundColor: colors.success,
-                          },
-                        ]}
-                      />
-                    </View>
-                  </View>
-                ))}
-              </View>
-            )}
-          </View>
-
-          {/* Filtered Test Cases List when viewing Test Case Status Report */}
-          {selectedReportType === 'case_status' ? (
-            <View
-              style={[styles.subSectionBlock, { borderTopColor: colors.border }]}
-            >
-              <Text style={[styles.subSectionTitle, { color: colors.text }]}>
-                Test Cases Status Log ({report.testCases.length})
-              </Text>
-              {report.testCases.length === 0 ? (
-                <Text
-                  style={[styles.emptyInlineText, { color: colors.textMuted }]}
-                >
-                  No test cases match the selected filters.
-                </Text>
-              ) : (
-                <View style={styles.tableList}>
-                  {report.testCases.slice(0, 20).map((tc) => {
-                    const badge = getVerdictBadgeStyle(tc.status);
-                    return (
-                      <Pressable
-                        key={tc.id}
-                        onPress={() => {
-                          setSelectedTestCaseId(tc.id);
-                          setActiveTab('testcases');
-                        }}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Open test case ${tc.id}: ${tc.title}`}
-                        style={[
-                          styles.recordRow,
-                          {
-                            backgroundColor: colors.surfaceElevated,
-                            borderColor: colors.border,
-                          },
-                        ]}
-                      >
-                        <View style={styles.recordTopRow}>
-                          <Text
-                            style={[
-                              styles.monoCode,
-                              {
-                                color: colors.primary,
-                                fontFamily: monoFontFamily,
-                              },
-                            ]}
-                          >
-                            {tc.id} · {tc.priority}
-                          </Text>
-                          <View
-                            style={[
-                              styles.verdictBadge,
-                              { backgroundColor: badge.bg },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.verdictBadgeText,
-                                { color: badge.fg, fontFamily: monoFontFamily },
-                              ]}
-                            >
-                              {tc.status}
-                            </Text>
-                          </View>
-                        </View>
-                        <Text
-                          numberOfLines={1}
-                          style={[styles.recordTitle, { color: colors.text }]}
-                        >
-                          {tc.title}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.recordMeta,
-                            {
-                              color: colors.textMuted,
-                              fontFamily: monoFontFamily,
-                            },
-                          ]}
-                        >
-                          {tc.suiteName} · {tc.phaseName} · {tc.testType}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              )}
-            </View>
-          ) : null}
         </View>
       ) : null}
 
-      {/* 7. Test Run Cycles Report (Project Summary & Test Runs Report) */}
-      {selectedReportType === 'project_summary' ||
-      selectedReportType === 'test_runs' ? (
+      {section.headerExtras === 'defectBreakdown' ? (
         <View
-          style={[
-            styles.card,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-          ]}
+          style={[styles.subSectionBlock, { borderTopColor: colors.border }]}
         >
-          <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              Test Run Cycles Report
-            </Text>
-            <Pressable
-              onPress={() => setActiveTab('testruns')}
-              accessibilityRole="button"
-              accessibilityLabel="Open Test Runs"
-            >
-              <Text style={[styles.linkText, { color: colors.primary }]}>
-                Open Test Runs →
-              </Text>
-            </Pressable>
-          </View>
-
-          {report.testRuns.length === 0 ? (
-            <Text style={[styles.emptyInlineText, { color: colors.textMuted }]}>
-              No test runs recorded in this filter scope.
-            </Text>
-          ) : (
-            <View style={styles.tableList}>
-              {report.testRuns.map((run) => {
-                const badge = getVerdictBadgeStyle(run.status);
-                return (
-                  <Pressable
-                    key={run.id}
-                    onPress={() => {
-                      setSelectedTestRunId(run.id);
-                      setActiveTab('testruns');
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Open test run ${run.id}: ${run.name}`}
-                    style={[
-                      styles.suiteReportRow,
-                      {
-                        backgroundColor: colors.surfaceElevated,
-                        borderColor: colors.border,
-                      },
-                    ]}
-                  >
-                    <View style={styles.recordTopRow}>
-                      <Text
-                        style={[
-                          styles.monoCode,
-                          { color: colors.primary, fontFamily: monoFontFamily },
-                        ]}
-                      >
-                        {run.id} · Build {run.buildVersion}
-                      </Text>
-                      <View
-                        style={[
-                          styles.verdictBadge,
-                          { backgroundColor: badge.bg },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.verdictBadgeText,
-                            { color: badge.fg, fontFamily: monoFontFamily },
-                          ]}
-                        >
-                          {run.status}
-                        </Text>
-                      </View>
-                    </View>
-                    <Text
-                      numberOfLines={1}
-                      style={[styles.recordTitle, { color: colors.text }]}
-                    >
-                      {run.name}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.recordMeta,
-                        {
-                          color: colors.textSecondary,
-                          fontFamily: monoFontFamily,
-                        },
-                      ]}
-                    >
-                      {run.deviceInfo} · {run.environment} · Tester: {run.tester}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.recordMeta,
-                        { color: colors.textMuted, fontFamily: monoFontFamily },
-                      ]}
-                    >
-                      {run.executedCases}/{run.totalCases} executed ·{' '}
-                      {run.passedCases} Pass / {run.failedCases} Fail /{' '}
-                      {run.blockedCases} Blocked · {run.passRate}% Pass Rate
-                    </Text>
-                    <View
-                      style={[
-                        styles.progressTrackSmall,
-                        { backgroundColor: colors.surfaceMuted },
-                      ]}
-                    >
-                      <View
-                        style={[
-                          styles.progressFillSmall,
-                          {
-                            width: `${Math.min(100, run.coveragePct)}%`,
-                            backgroundColor:
-                              run.failedCases > 0
-                                ? colors.warning
-                                : colors.success,
-                          },
-                        ]}
-                      />
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
-        </View>
-      ) : null}
-
-      {/* 8. Defect Summary & Breakdown (Project Summary & Defect Summary) */}
-      {selectedReportType === 'project_summary' ||
-      selectedReportType === 'defect_summary' ? (
-        <View
-          style={[
-            styles.card,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-          ]}
-        >
-          <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              Defects Breakdown & Triage
-            </Text>
-            <Pressable
-              onPress={() => setActiveTab('defects')}
-              accessibilityRole="button"
-              accessibilityLabel="Open Defects"
-            >
-              <Text style={[styles.linkText, { color: colors.primary }]}>
-                Open Defects →
-              </Text>
-            </Pressable>
-          </View>
-
-          {/* By Severity Grid */}
           <Text
             style={[
               styles.filterSectionLabel,
@@ -1791,7 +1880,6 @@ export default function ReportsView() {
             })}
           </View>
 
-          {/* By Status Grid */}
           <Text
             style={[
               styles.filterSectionLabel,
@@ -1847,122 +1935,100 @@ export default function ReportsView() {
               );
             })}
           </View>
-
-          {/* Defects Table */}
-          <View
-            style={[styles.subSectionBlock, { borderTopColor: colors.border }]}
-          >
-            <Text style={[styles.subSectionTitle, { color: colors.text }]}>
-              Defects Log ({report.defects.length})
-            </Text>
-            {report.defects.length === 0 ? (
-              <Text style={[styles.emptyInlineText, { color: colors.textMuted }]}>
-                No defects recorded in this filter scope.
-              </Text>
-            ) : (
-              <View style={styles.tableList}>
-                {report.defects.slice(0, 15).map((d) => {
-                  const sevBadge = getVerdictBadgeStyle(d.severity);
-                  const stBadge = getVerdictBadgeStyle(d.status);
-                  return (
-                    <Pressable
-                      key={d.id}
-                      onPress={() => {
-                        setSelectedDefectId(d.id);
-                        setActiveTab('defects');
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Open defect ${d.id}: ${d.title}`}
-                      style={[
-                        styles.recordRow,
-                        {
-                          backgroundColor: colors.surfaceElevated,
-                          borderColor: colors.border,
-                        },
-                      ]}
-                    >
-                      <View style={styles.recordTopRow}>
-                        <Text
-                          style={[
-                            styles.monoCode,
-                            {
-                              color: colors.primary,
-                              fontFamily: monoFontFamily,
-                            },
-                          ]}
-                        >
-                          {d.id}
-                        </Text>
-                        <View style={styles.badgeRow}>
-                          <View
-                            style={[
-                              styles.verdictBadge,
-                              { backgroundColor: sevBadge.bg },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.verdictBadgeText,
-                                {
-                                  color: sevBadge.fg,
-                                  fontFamily: monoFontFamily,
-                                },
-                              ]}
-                            >
-                              {d.severity}
-                            </Text>
-                          </View>
-                          <View
-                            style={[
-                              styles.verdictBadge,
-                              { backgroundColor: stBadge.bg },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.verdictBadgeText,
-                                {
-                                  color: stBadge.fg,
-                                  fontFamily: monoFontFamily,
-                                },
-                              ]}
-                            >
-                              {d.status}
-                            </Text>
-                          </View>
-                        </View>
-                      </View>
-                      <Text
-                        numberOfLines={1}
-                        style={[styles.recordTitle, { color: colors.text }]}
-                      >
-                        {d.title}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.recordMeta,
-                          {
-                            color: colors.textMuted,
-                            fontFamily: monoFontFamily,
-                          },
-                        ]}
-                      >
-                        Assignee: {d.assignee}
-                        {d.linkedTestCaseId
-                          ? ` · Case: ${d.linkedTestCaseId}`
-                          : ''}
-                        {d.linkedTestRunId
-                          ? ` · Run: ${d.linkedTestRunId}`
-                          : ''}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            )}
-          </View>
         </View>
       ) : null}
+    </View>
+  );
+
+  const renderSectionFooter = ({ section }) => {
+    if (!section.emptyMessage || section.data.length > 0) return null;
+    return (
+      <View
+        style={[
+          styles.sectionEmptyBox,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
+        <Text style={[styles.emptyInlineText, { color: colors.textMuted }]}>
+          {section.emptyMessage}
+        </Text>
+      </View>
+    );
+  };
+
+  const renderSectionItem = ({ item }) => {
+    if (!item || !item.payload) return null;
+    switch (item._kind) {
+      case 'timeline':
+        return <ReportTimelineRow day={item.payload} colors={colors} />;
+      case 'execution':
+        return (
+          <ReportExecutionRow
+            ex={item.payload}
+            colors={colors}
+            onPressExecution={handleOpenExecutionRow}
+          />
+        );
+      case 'phase':
+        return <ReportPhaseRow ph={item.payload} colors={colors} />;
+      case 'suite':
+        return <ReportSuiteRow sq={item.payload} colors={colors} />;
+      case 'case':
+        return (
+          <ReportTestCaseRow
+            tc={item.payload}
+            colors={colors}
+            onPressCase={handleOpenTestCaseRow}
+          />
+        );
+      case 'run':
+        return (
+          <ReportTestRunRow
+            run={item.payload}
+            colors={colors}
+            onPressRun={handleOpenTestRunRow}
+          />
+        );
+      case 'defect':
+        return (
+          <ReportDefectRow
+            d={item.payload}
+            colors={colors}
+            onPressDefect={handleOpenDefectRow}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <View style={styles.root}>
+      <SectionList
+        sections={reportSections}
+        keyExtractor={(item) => item._rowKey}
+        renderItem={renderSectionItem}
+        renderSectionHeader={renderSectionHeader}
+        renderSectionFooter={renderSectionFooter}
+        ListHeaderComponent={reportHeaderNode}
+        stickySectionHeadersEnabled={false}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.sectionListContent}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshingAny}
+            onRefresh={handleRefreshAnalytics}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+        initialNumToRender={12}
+        maxToRenderPerBatch={12}
+        windowSize={7}
+        removeClippedSubviews={Platform.OS === 'android'}
+      />
 
       {/* 9. Export Preview & Share Modal */}
       <Modal
@@ -2112,8 +2178,37 @@ export default function ReportsView() {
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
+  sectionListContent: {
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 28,
+    maxWidth: 920,
+    width: '100%',
+    alignSelf: 'center',
+  },
   container: {
     gap: 14,
+  },
+  sectionHeaderCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 16,
+    gap: 12,
+    marginTop: 14,
+    marginBottom: 8,
+  },
+  sectionEmptyBox: {
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  virtualRowSpacing: {
+    marginBottom: 8,
   },
   card: {
     borderRadius: 14,
