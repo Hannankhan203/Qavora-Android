@@ -15,9 +15,9 @@
       }
     },
     "production": {
-      "distribution": "internal",
+      "distribution": "store",
       "android": {
-        "buildType": "apk"
+        "buildType": "app-bundle"
       },
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://qavora-mongo-db-integrated.vercel.app",
