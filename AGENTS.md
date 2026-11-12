@@ -1,41 +1,56 @@
-This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+# Qavora Android — Agent & Developer Guide
 
-## Expo has changed — do not trust your training data
+This is **Qavora Android**, a mobile-first **Expo (SDK 58) / React Native (0.88.1) + React Native Web** QA management client written in **plain JavaScript (`.js`)**. Prioritize mobile-first responsiveness (`360dp–390dp`), offline resilience, and cross-platform compatibility across Android, iOS, and Web.
 
-Expo ships breaking changes every SDK release. APIs you remember are likely renamed, moved, or removed. Before writing any code that touches an Expo, EAS, or React Native API:
+> **Important:** Inspect `package.json`, `app.json`, and `https://docs.expo.dev/versions/v58.0.0/` (or `https://docs.expo.dev/llms.txt`) before introducing or modifying Expo or React Native APIs.
 
-1. Read the major version of the `expo` package in `package.json`.
-2. Fetch the matching versioned docs: `https://docs.expo.dev/versions/v<major>.0.0/`
-3. For anything else, fetch https://docs.expo.dev/llms.txt — an index of all Expo docs with corrections to common LLM misconceptions. Follow its links to the specific page you need; never answer from memory.
+## Package Manager & Lockfile
+
+- **Authoritative Package Manager:** **Bun** (`bun` + `bun.lock`).
+- Do **not** generate conflicting lockfiles (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`).
+- Do **not** hand-edit `bun.lock`.
 
 ## Commands
 
-Use `bunx` instead of `npx` if the project uses bun (`bun.lock` present).
-
 ```bash
-npx expo install <package>  # ALWAYS use instead of npm/yarn/pnpm/bun add — resolves SDK-compatible versions
-npx expo start              # start the dev server
-npx expo lint               # lint
-npx tsc --noEmit            # typecheck
-npx expo-doctor             # diagnose dependency and config issues
-npx expo install --fix      # fix incompatible package versions
+bun install                          # install dependencies matching bun.lock
+bun install --frozen-lockfile        # verify/install strictly from bun.lock
+bunx expo install <package>          # install SDK-58-compatible Expo/RN packages
+bun run dev                          # start Expo Web dev server on port 3000 (alias: start, web)
+bun run android                      # start Expo Metro bundler for Android
+bun run ios                          # start Expo Metro bundler for iOS
+bun run build                        # export production web bundle (expo export --platform web)
+bun run lint                         # syntax-check all 28 .js source files via node --check
+bun audit                            # check installed dependencies for vulnerabilities (alias: bun run audit)
+bunx expo config --type public --json # inspect resolved public Expo configuration
+bunx expo-doctor                     # diagnose Expo dependency and app.json schema issues
+bunx eas-cli <command>               # run EAS cloud builds/updates (eas.json)
 ```
 
-Run lint and typecheck before declaring any task done.
+> Note: The repository uses plain JavaScript (`.js`) with `node --check` syntax validation; TypeScript (`tsc`), ESLint, Expo Router, and automated test suites are **not** currently configured.
 
-## Navigation & Routing
+## Entry Point, Navigation & Folder Structure
 
-- Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
-- Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
-- Docs: https://docs.expo.dev/router/introduction.md
+- **Entry Point:** `/index.js` registers `/App.js` via Expo's `registerRootComponent(App)`.
+- **Navigation Architecture:** State- and Context-driven navigation inside `/App.js` (`QavoraQAShell`) backed by `/src/context/WorkspaceContext.js` (not Expo Router). Navigation combines:
+  - Root auth gate (`AuthScreen` when unauthenticated; `ProjectProvider` -> `WorkspaceProvider` -> `QavoraQAShell` when authenticated)
+  - Slide-out global drawer (`NAVIGATION_DESTINATIONS` across 11 destinations)
+  - Bottom 5-tab bar (`dashboard`, `testcases`, `testruns`, `defects`, `profile`)
+  - Nested sub-view states (`projectViewMode`, `dashboardSubTab`, `testCasesSubTab`, `testRunsViewMode`, `profileSubView`) and Android `BackHandler` integration
+- **Project Structure:**
+  - `/index.js` & `/App.js` — App root registration, provider hierarchy, shell UI, drawer, bottom tabs, back handler
+  - `/src/context/` — `AuthContext.js`, `ProjectContext.js`, `WorkspaceContext.js`
+  - `/src/components/` — Screens, modals, and UI icons (`AuthScreen.js`, `ProjectSelectionScreen.js`, `ProjectDetailsScreen.js`, `ProjectFormModal.js`, `DashboardScreen.js`, `TestCasesScreen.js`, `TestRunsScreen.js`, `DefectsScreen.js`, `ChecklistsScreen.js`, `ReportsView.js`, `ProfileSettingsScreen.js`, `DataManagementSection.js`, `VectorIcon.js`)
+  - `/src/services/` — HTTP transport, secure cookies, auth, projects, checklists, offline sync, data backup/recovery, and reports (`apiClient.js`, `cookieManager.js`, `authService.js`, `projectService.js`, `checklistService.js`, `offlineSyncService.js`, `dataManagementService.js`, `reportService.js`)
+  - `/src/theme/theme.js` — Light/dark color palettes and typography constants
+  - `/src/data/initialData.js` — Sample QA dataset and domain constants
+  - `/assets/` — App icons, Android adaptive icon layers, and web favicon
+  - `/app.json`, `/eas.json`, `/.env.example`, `/package.json`, `/bun.lock` — Expo, EAS, env, and dependency config
 
-## Building with EAS
+## Preserved Security & Native Rules
 
-Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
-Docs: https://docs.expo.dev/eas/index.md
+- **Native Auth & Cookie Storage:** Keep authentication and CSRF cookies in `expo-secure-store` (`qavora.auth.cookie_jar.v1` with `SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`), never plaintext `AsyncStorage`. Keep `credentials: 'omit'` on native React Native requests vs `credentials: 'include'` on Web DOM (`apiClient.js`).
+- **HTTPS & Input Validation:** Preserve HTTPS enforcement for production / `__Host-` cookies, sensitive diagnostic redaction (`authService.js`), user-scoped `AsyncStorage` prefixes, and NoSQL `$`/dotted-key/prototype-pollution validation (`projectService.js`, `dataManagementService.js`).
+- **Continuous Native Generation (CNG):** Do not create or manually edit `/ios` or `/android` native directories; configure native behavior in `app.json` and config plugins.
+- **EAS Cloud Builds:** `eas.json` defines `preview` and `production` Android APK profiles with `EXPO_PUBLIC_API_BASE_URL` and `EXPO_PUBLIC_TRUSTED_ORIGIN`.
 
-## Rules
-
-- If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
-- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
-- Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
