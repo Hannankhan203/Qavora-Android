@@ -38,39 +38,6 @@ import { startConnectivityMonitoring } from './src/services/offlineSyncService';
 
 export { NAVIGATION_DESTINATIONS };
 
-const BOTTOM_TABS = [
-  {
-    id: 'dashboard',
-    label: 'Dashboard',
-    icon: 'dashboard',
-    accessibilityLabel: 'Dashboard tab',
-  },
-  {
-    id: 'checklists',
-    label: 'Checklists',
-    icon: 'clipboard',
-    accessibilityLabel: 'QA Checklists tab',
-  },
-  {
-    id: 'testcases',
-    label: 'Test Cases',
-    icon: 'layers',
-    accessibilityLabel: 'Test Cases, Plans, and Suites tab',
-  },
-  {
-    id: 'testruns',
-    label: 'Test Execution',
-    icon: 'play-circle',
-    accessibilityLabel: 'Test Execution and Test Runs tab',
-  },
-  {
-    id: 'profile',
-    label: 'Profile',
-    icon: 'user',
-    accessibilityLabel: 'Profile and Settings tab',
-  },
-];
-
 const SCREEN_TITLES = {
   dashboard: 'QA Overview',
   testcases: 'Test Cases',
@@ -95,6 +62,74 @@ const DESTINATION_LABELS = {
   [NAVIGATION_DESTINATIONS.DATA_MANAGEMENT]: 'Data Management',
   [NAVIGATION_DESTINATIONS.SETTINGS]: 'Profile & Settings',
 };
+
+const THEME_RAY_ANGLES = ['0deg', '45deg', '90deg', '-45deg'];
+
+function ThemeToggleIcon({ isDark, iconColor, maskColor }) {
+  if (isDark) {
+    // 21x21 8-ray Sun with separated outer rays and solid center disc
+    return (
+      <View style={styles.themeIconCanvas}>
+        {THEME_RAY_ANGLES.map((angle) => (
+          <View
+            key={angle}
+            style={[
+              styles.sunRayBar,
+              {
+                backgroundColor: iconColor,
+                transform: [{ rotate: angle }],
+              },
+            ]}
+          />
+        ))}
+        <View
+          style={[
+            styles.sunRayGapMask,
+            { backgroundColor: maskColor },
+          ]}
+        />
+        <View
+          style={[
+            styles.sunCoreDisc,
+            { backgroundColor: iconColor },
+          ]}
+        />
+      </View>
+    );
+  }
+
+  // 21x21 Crescent Moon silhouette with offset cutout and subtle star accents
+  return (
+    <View style={styles.themeIconCanvas}>
+      <View style={styles.moonBodyWrap}>
+        <View
+          style={[
+            styles.moonFullDisc,
+            { backgroundColor: iconColor },
+          ]}
+        />
+        <View
+          style={[
+            styles.moonCutoutDisc,
+            { backgroundColor: maskColor },
+          ]}
+        />
+      </View>
+      <View
+        style={[
+          styles.moonStarPrimary,
+          { backgroundColor: iconColor },
+        ]}
+      />
+      <View
+        style={[
+          styles.moonStarSecondary,
+          { backgroundColor: iconColor },
+        ]}
+      />
+    </View>
+  );
+}
 
 function QavoraQAShell() {
   const { colors, isDark, toggleTheme } = useTheme();
@@ -149,17 +184,20 @@ function QavoraQAShell() {
   } = useWorkspace();
 
   const { width: viewportWidth } = useWindowDimensions();
-  const drawerWidth = Math.min(
-    304,
-    Math.max(264, Math.round((viewportWidth || 360) * 0.82))
+  const drawerWidth = Math.max(
+    220,
+    Math.round((viewportWidth || 360) * 0.8)
   );
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [isDrawerRendered, setIsDrawerRendered] = useState(false);
   const drawerAnim = useRef(new Animated.Value(0)).current;
   const isKeyboardOpenRef = useRef(false);
   const isDrawerOpenRef = useRef(false);
   const drawerWidthRef = useRef(drawerWidth);
   const gestureStartOpenRef = useRef(false);
+  const touchStartXRef = useRef(null);
+  const touchStartYRef = useRef(null);
+  const gestureLockedVerticalRef = useRef(false);
+  const gestureBlockedByTargetRef = useRef(false);
 
   useEffect(() => {
     isDrawerOpenRef.current = isDrawerOpen;
@@ -192,7 +230,6 @@ function QavoraQAShell() {
     Keyboard.dismiss();
     isKeyboardOpenRef.current = false;
     isDrawerOpenRef.current = true;
-    setIsDrawerRendered(true);
     setIsDrawerOpen(true);
     Animated.timing(drawerAnim, {
       toValue: 1,
@@ -208,11 +245,7 @@ function QavoraQAShell() {
       toValue: 0,
       duration: 180,
       useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished && !isDrawerOpenRef.current) {
-        setIsDrawerRendered(false);
-      }
-    });
+    }).start();
   }, [drawerAnim]);
 
   const openDrawerRef = useRef(openDrawer);
@@ -222,45 +255,157 @@ function QavoraQAShell() {
     closeDrawerRef.current = closeDrawer;
   }, [openDrawer, closeDrawer]);
 
-  // Edge activation zone (~28dp) and horizontal thresholds for drawer swipe gestures
-  const DRAWER_EDGE_ZONE_DP = 28;
-  const DRAWER_SWIPE_CAPTURE_DX = 14;
+  // Horizontal thresholds and direction dominance for full-content-area drawer swipe gestures
+  const DRAWER_SWIPE_CAPTURE_DX = 16;
   const DRAWER_SWIPE_COMMIT_DX = 56;
   const DRAWER_SWIPE_COMMIT_VX = 0.35;
+  const VERTICAL_LOCK_DY = 10;
+
+  const isTouchInsideInputOrHorizontalScroll = useCallback((evt) => {
+    // 1. Check React Fiber hierarchy (works across React Native Android/iOS and Web)
+    let fiber = evt && evt._targetInst;
+    let fiberDepth = 0;
+    while (fiber && fiberDepth < 35) {
+      const props = fiber.memoizedProps;
+      if (props) {
+        if (props.horizontal === true) {
+          return true;
+        }
+        if (
+          typeof props.onChangeText === 'function' ||
+          (typeof props.placeholder === 'string' && props.editable !== false)
+        ) {
+          return true;
+        }
+      }
+      fiber = fiber.return;
+      fiberDepth += 1;
+    }
+
+    // 2. Fallback check for DOM targets (React Native Web preview)
+    const rawTarget =
+      (evt && evt.nativeEvent && evt.nativeEvent.target) || (evt && evt.target);
+    if (!rawTarget || typeof rawTarget !== 'object') {
+      return false;
+    }
+    let node = rawTarget;
+    let depth = 0;
+    while (node && depth < 15) {
+      const tagName =
+        typeof node.tagName === 'string' ? node.tagName.toUpperCase() : '';
+      if (
+        tagName === 'INPUT' ||
+        tagName === 'TEXTAREA' ||
+        node.isContentEditable
+      ) {
+        return true;
+      }
+      if (
+        typeof node.scrollWidth === 'number' &&
+        typeof node.clientWidth === 'number' &&
+        node.scrollWidth > node.clientWidth + 2 &&
+        typeof window !== 'undefined' &&
+        typeof window.getComputedStyle === 'function'
+      ) {
+        const style = window.getComputedStyle(node);
+        if (
+          style &&
+          (style.overflowX === 'auto' || style.overflowX === 'scroll')
+        ) {
+          return true;
+        }
+      }
+      node = node.parentElement || node.parentNode;
+      depth += 1;
+    }
+    return false;
+  }, []);
+
+  const handleTouchStartCapture = useCallback(
+    (evt) => {
+      const nativeEvent = evt && evt.nativeEvent;
+      touchStartXRef.current =
+        nativeEvent && typeof nativeEvent.pageX === 'number'
+          ? nativeEvent.pageX
+          : null;
+      touchStartYRef.current =
+        nativeEvent && typeof nativeEvent.pageY === 'number'
+          ? nativeEvent.pageY
+          : null;
+      gestureLockedVerticalRef.current = false;
+      gestureBlockedByTargetRef.current =
+        isTouchInsideInputOrHorizontalScroll(evt);
+      // Never intercept touch-start so taps on buttons, cards, and inputs work normally
+      return false;
+    },
+    [isTouchInsideInputOrHorizontalScroll]
+  );
 
   const shouldCaptureDrawerSwipe = useCallback((evt, gestureState) => {
     if (!gestureState) return false;
-    const { dx, dy } = gestureState;
+
+    const nativeEvent = evt && evt.nativeEvent;
+    const pageX =
+      nativeEvent && typeof nativeEvent.pageX === 'number'
+        ? nativeEvent.pageX
+        : null;
+    const pageY =
+      nativeEvent && typeof nativeEvent.pageY === 'number'
+        ? nativeEvent.pageY
+        : null;
+
+    const dx =
+      pageX !== null && typeof touchStartXRef.current === 'number'
+        ? pageX - touchStartXRef.current
+        : gestureState.dx;
+    const dy =
+      pageY !== null && typeof touchStartYRef.current === 'number'
+        ? pageY - touchStartYRef.current
+        : gestureState.dy;
+
     const absDx = Math.abs(dx);
     const absDy = Math.abs(dy);
 
-    // Require clear horizontal dominance so vertical scrolling is never interrupted
-    if (absDx < DRAWER_SWIPE_CAPTURE_DX || absDx <= absDy * 1.5) {
+    // If vertical movement begins first, lock this gesture to vertical scrolling
+    if (absDy > VERTICAL_LOCK_DY && absDy > absDx) {
+      gestureLockedVerticalRef.current = true;
       return false;
     }
 
-    if (!isDrawerOpenRef.current) {
-      // Closed -> only activate when swiping right from the left 28dp screen edge
-      const startX =
-        typeof gestureState.x0 === 'number' && gestureState.x0 > 0
-          ? gestureState.x0
-          : evt &&
-            evt.nativeEvent &&
-            typeof evt.nativeEvent.pageX === 'number'
-          ? evt.nativeEvent.pageX - dx
-          : 999;
-      return startX >= 0 && startX <= DRAWER_EDGE_ZONE_DP && dx >= DRAWER_SWIPE_CAPTURE_DX && absDy < 28;
+    if (gestureLockedVerticalRef.current || gestureBlockedByTargetRef.current) {
+      return false;
     }
 
-    // Open -> activate when swiping left to close the drawer
-    return dx <= -DRAWER_SWIPE_CAPTURE_DX;
+    // Require clear horizontal dominance so vertical scrolling is never interrupted
+    if (absDx < DRAWER_SWIPE_CAPTURE_DX || absDx <= absDy * 1.75) {
+      return false;
+    }
+
+    const startX =
+      typeof touchStartXRef.current === 'number'
+        ? touchStartXRef.current
+        : typeof gestureState.x0 === 'number' && gestureState.x0 > 0
+        ? gestureState.x0
+        : pageX !== null
+        ? pageX - dx
+        : 0;
+
+    if (!isDrawerOpenRef.current) {
+      // Closed -> recognize intentional left-to-right swipes starting anywhere horizontally across workspaceBody
+      return dx >= DRAWER_SWIPE_CAPTURE_DX && absDy < 32;
+    }
+
+    // Open -> only capture swipe-to-close when touch starts inside the drawer panel,
+    // so outside taps in the uncovered right 20% area are never intercepted
+    const currentDrawerWidth = drawerWidthRef.current || 288;
+    return startX <= currentDrawerWidth && dx <= -DRAWER_SWIPE_CAPTURE_DX;
   }, []);
 
   const drawerPanResponder = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => false,
-        onStartShouldSetPanResponderCapture: () => false,
+        onStartShouldSetPanResponderCapture: handleTouchStartCapture,
         onMoveShouldSetPanResponder: shouldCaptureDrawerSwipe,
         onMoveShouldSetPanResponderCapture: shouldCaptureDrawerSwipe,
         onPanResponderGrant: () => {
@@ -268,24 +413,38 @@ function QavoraQAShell() {
           if (!gestureStartOpenRef.current) {
             Keyboard.dismiss();
             isKeyboardOpenRef.current = false;
-            setIsDrawerRendered(true);
           }
         },
-        onPanResponderMove: (_evt, gestureState) => {
+        onPanResponderMove: (evt, gestureState) => {
           const width = Math.max(drawerWidthRef.current || 280, 1);
+          const nativeEvent = evt && evt.nativeEvent;
+          const pageX =
+            nativeEvent && typeof nativeEvent.pageX === 'number'
+              ? nativeEvent.pageX
+              : null;
+          const dx =
+            pageX !== null && typeof touchStartXRef.current === 'number'
+              ? pageX - touchStartXRef.current
+              : gestureState.dx;
           if (!gestureStartOpenRef.current) {
-            const progress = Math.min(1, Math.max(0, gestureState.dx / width));
+            const progress = Math.min(1, Math.max(0, dx / width));
             drawerAnim.setValue(progress);
           } else {
-            const progress = Math.min(
-              1,
-              Math.max(0, 1 + gestureState.dx / width)
-            );
+            const progress = Math.min(1, Math.max(0, 1 + dx / width));
             drawerAnim.setValue(progress);
           }
         },
-        onPanResponderRelease: (_evt, gestureState) => {
-          const { dx, vx } = gestureState;
+        onPanResponderRelease: (evt, gestureState) => {
+          const nativeEvent = evt && evt.nativeEvent;
+          const pageX =
+            nativeEvent && typeof nativeEvent.pageX === 'number'
+              ? nativeEvent.pageX
+              : null;
+          const dx =
+            pageX !== null && typeof touchStartXRef.current === 'number'
+              ? pageX - touchStartXRef.current
+              : gestureState.dx;
+          const { vx } = gestureState;
           if (!gestureStartOpenRef.current) {
             if (
               dx >= DRAWER_SWIPE_COMMIT_DX ||
@@ -316,7 +475,7 @@ function QavoraQAShell() {
         onPanResponderTerminationRequest: () => false,
         onShouldBlockNativeResponder: () => true,
       }),
-    [drawerAnim, shouldCaptureDrawerSwipe]
+    [drawerAnim, handleTouchStartCapture, shouldCaptureDrawerSwipe]
   );
 
   const toggleDrawer = useCallback(() => {
@@ -815,7 +974,6 @@ function QavoraQAShell() {
     <SafeAreaView
       edges={['top', 'bottom', 'left', 'right']}
       style={[styles.safeRoot, { backgroundColor: colors.background }]}
-      {...drawerPanResponder.panHandlers}
     >
       <StatusBar style={colors.statusBar} />
 
@@ -839,17 +997,15 @@ function QavoraQAShell() {
             style={[
               styles.drawerMenuBtn,
               {
-                backgroundColor: isDrawerOpen
-                  ? colors.primary
-                  : colors.surfaceAccent,
+                backgroundColor: colors.surfaceAccent,
                 borderColor: colors.primary,
               },
             ]}
           >
             <VectorIcon
-              name={isDrawerOpen ? 'close' : 'menu'}
+              name="menu"
               size={16}
-              color={isDrawerOpen ? colors.textOnPrimary : colors.primary}
+              color={colors.primary}
             />
           </Pressable>
 
@@ -903,682 +1059,282 @@ function QavoraQAShell() {
           </Pressable>
 
           <View style={styles.topRightUtilities}>
-            {(isOffline ||
-              (syncStatus &&
-                (syncStatus.totalQueued > 0 ||
-                  syncStatus.conflictCount > 0 ||
-                  syncStatus.isSyncing))) ? (
-              <Pressable
-                onPress={openDataManagementView}
-                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                accessibilityRole="button"
-                accessibilityState={{
-                  selected:
-                    activeDestination ===
-                    NAVIGATION_DESTINATIONS.DATA_MANAGEMENT,
-                }}
-                accessibilityLabel={
-                  syncStatus && syncStatus.conflictCount > 0
-                    ? `Sync conflicts: ${syncStatus.conflictCount}. Open Data Management`
-                    : isOffline
-                    ? `Offline mode${
-                        syncStatus && syncStatus.pendingCount > 0
-                          ? `, ${syncStatus.pendingCount} queued`
-                          : ''
-                      }. Open Data Management`
-                    : 'Synchronizing offline queue. Open Data Management'
-                }
-                style={[
-                  styles.syncPillBtn,
-                  {
-                    backgroundColor:
-                      syncStatus && syncStatus.conflictCount > 0
-                        ? colors.dangerSoft
-                        : colors.surfaceAccent,
-                    borderColor:
-                      syncStatus && syncStatus.conflictCount > 0
-                        ? colors.danger
-                        : isOffline
-                        ? colors.warning
-                        : colors.primary,
-                  },
-                ]}
-              >
-                <VectorIcon
-                  name={
-                    syncStatus && syncStatus.conflictCount > 0
-                      ? 'alert-triangle'
-                      : 'refresh'
-                  }
-                  size={13}
-                  color={
-                    syncStatus && syncStatus.conflictCount > 0
-                      ? colors.danger
-                      : isOffline
-                      ? colors.warning
-                      : colors.primary
-                  }
-                />
-                <Text
-                  numberOfLines={1}
-                  style={[
-                    styles.syncPillText,
-                    {
-                      color:
-                        syncStatus && syncStatus.conflictCount > 0
-                          ? colors.danger
-                          : isOffline
-                          ? colors.warning
-                          : colors.primary,
-                      fontFamily: monoFontFamily,
-                    },
-                  ]}
-                >
-                  {syncStatus && syncStatus.conflictCount > 0
-                    ? String(syncStatus.conflictCount)
-                    : syncStatus && syncStatus.pendingCount > 0
-                    ? String(syncStatus.pendingCount)
-                    : isOffline
-                    ? 'Off'
-                    : '...'}
-                </Text>
-              </Pressable>
-            ) : null}
-
-            {selectedProject ? (
-              <Pressable
-                onPress={() => openDefectsView()}
-                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                accessibilityRole="button"
-                accessibilityState={{
-                  selected:
-                    activeDestination === NAVIGATION_DESTINATIONS.DEFECTS,
-                }}
-                accessibilityLabel={`Defects${
-                  metrics.openDefects > 0
-                    ? `, ${metrics.openDefects} open`
-                    : ''
-                }`}
-                style={[
-                  styles.topActionIconBtn,
-                  {
-                    backgroundColor:
-                      activeDestination === NAVIGATION_DESTINATIONS.DEFECTS
-                        ? colors.primary
-                        : colors.surfaceAccent,
-                    borderColor:
-                      activeDestination === NAVIGATION_DESTINATIONS.DEFECTS
-                        ? colors.primary
-                        : metrics.openDefects > 0
-                        ? colors.danger
-                        : colors.border,
-                  },
-                ]}
-              >
-                <VectorIcon
-                  name="alert"
-                  size={15}
-                  color={
-                    activeDestination === NAVIGATION_DESTINATIONS.DEFECTS
-                      ? colors.textOnPrimary
-                      : metrics.openDefects > 0
-                      ? colors.danger
-                      : colors.textSecondary
-                  }
-                />
-                {metrics.openDefects > 0 ? (
-                  <View
-                    style={[
-                      styles.topIconCountBadge,
-                      {
-                        backgroundColor:
-                          activeDestination === NAVIGATION_DESTINATIONS.DEFECTS
-                            ? colors.surface
-                            : colors.danger,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.topIconCountBadgeText,
-                        {
-                          color:
-                            activeDestination ===
-                            NAVIGATION_DESTINATIONS.DEFECTS
-                              ? colors.primary
-                              : '#ffffff',
-                          fontFamily: monoFontFamily,
-                        },
-                      ]}
-                    >
-                      {metrics.openDefects > 99 ? '99+' : metrics.openDefects}
-                    </Text>
-                  </View>
-                ) : null}
-              </Pressable>
-            ) : null}
-
-            <Pressable
-              onPress={() => {
-                if (effectiveViewMode === 'selection' && selectedProject) {
-                  setProjectViewMode('workspace');
-                } else {
-                  openProjectSelection();
-                }
-              }}
-              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-              accessibilityRole="button"
-              accessibilityState={{
-                selected:
-                  effectiveViewMode === 'selection' ||
-                  effectiveViewMode === 'details',
-              }}
-              accessibilityLabel="My Projects switcher"
-              style={[
-                styles.topActionIconBtn,
-                {
-                  backgroundColor:
-                    effectiveViewMode === 'selection' ||
-                    effectiveViewMode === 'details'
-                      ? colors.primary
-                      : colors.surfaceAccent,
-                  borderColor:
-                    effectiveViewMode === 'selection' ||
-                    effectiveViewMode === 'details'
-                      ? colors.primary
-                      : colors.border,
-                },
-              ]}
-            >
-              <VectorIcon
-                name="folder"
-                size={15}
-                color={
-                  effectiveViewMode === 'selection' ||
-                  effectiveViewMode === 'details'
-                    ? colors.textOnPrimary
-                    : colors.primary
-                }
-              />
-            </Pressable>
-
             <Pressable
               onPress={toggleTheme}
-              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel={
                 isDark ? 'Switch to light theme' : 'Switch to dark theme'
               }
-              style={[
-                styles.topActionIconBtn,
+              style={({ pressed }) => [
+                styles.themeBtn,
                 {
-                  backgroundColor: colors.surfaceAccent,
-                  borderColor: colors.border,
+                  backgroundColor: isDark
+                    ? colors.surfaceElevated
+                    : colors.surfaceMuted,
+                  borderColor: colors.borderStrong,
+                  opacity: pressed ? 0.82 : 1,
                 },
               ]}
             >
-              <VectorIcon
-                name={isDark ? 'sun' : 'moon'}
-                size={15}
-                color={colors.primary}
-              />
-            </Pressable>
-
-            <Pressable
-              onPress={openSettingsView}
-              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-              accessibilityRole="button"
-              accessibilityState={{
-                selected:
-                  !isChecklistsActive &&
-                  effectiveViewMode === 'workspace' &&
-                  activeTab === 'profile' &&
-                  profileSubView !== 'data',
-              }}
-              accessibilityLabel="Profile and Settings"
-              style={[
-                styles.topActionIconBtn,
-                {
-                  backgroundColor:
-                    !isChecklistsActive &&
-                    effectiveViewMode === 'workspace' &&
-                    activeTab === 'profile' &&
-                    profileSubView !== 'data'
-                      ? colors.primary
-                      : colors.surfaceAccent,
-                  borderColor:
-                    !isChecklistsActive &&
-                    effectiveViewMode === 'workspace' &&
-                    activeTab === 'profile' &&
-                    profileSubView !== 'data'
-                      ? colors.primary
-                      : colors.border,
-                },
-              ]}
-            >
-              <VectorIcon
-                name="user"
-                size={15}
-                color={
-                  !isChecklistsActive &&
-                  effectiveViewMode === 'workspace' &&
-                  activeTab === 'profile' &&
-                  profileSubView !== 'data'
-                    ? colors.textOnPrimary
-                    : colors.primary
-                }
+              <ThemeToggleIcon
+                isDark={isDark}
+                iconColor={colors.primary}
+                maskColor={isDark ? colors.surfaceElevated : colors.surfaceMuted}
               />
             </Pressable>
           </View>
         </View>
       </View>
 
-      {/* Non-Blocking Feedback Toast */}
-      {toast ? (
-        <Pressable
-          onPress={dismissToast}
-          accessibilityRole="button"
-          accessibilityLabel={`Dismiss notification: ${toast.message}`}
+      <View
+        style={styles.workspaceBody}
+        collapsable={false}
+        {...drawerPanResponder.panHandlers}
+      >
+        {/* Non-Blocking Feedback Toast */}
+        {toast ? (
+          <Pressable
+            onPress={dismissToast}
+            pointerEvents={isDrawerOpen ? 'none' : 'auto'}
+            accessibilityRole="button"
+            accessibilityLabel={`Dismiss notification: ${toast.message}`}
+            style={[
+              styles.toastBanner,
+              {
+                backgroundColor: colors.surfaceElevated,
+                borderBottomColor:
+                  toast.tone === 'danger'
+                    ? colors.danger
+                    : toast.tone === 'success'
+                    ? colors.success
+                    : colors.primary,
+              },
+            ]}
+          >
+            <Text
+              numberOfLines={2}
+              style={[
+                styles.toastText,
+                { color: colors.text, fontFamily: monoFontFamily },
+              ]}
+            >
+              {toast.message}
+            </Text>
+            <Text style={[styles.toastClose, { color: colors.textMuted }]}>OK</Text>
+          </Pressable>
+        ) : null}
+
+        {/* Active Viewport (Base Layer) */}
+        <View
+          style={styles.mainViewport}
+          collapsable={false}
+          pointerEvents={isDrawerOpen ? 'none' : 'auto'}
+          accessibilityElementsHidden={isDrawerOpen}
+          importantForAccessibility={
+            isDrawerOpen ? 'no-hide-descendants' : 'auto'
+          }
+        >
+          {effectiveViewMode === 'selection' ? (
+            <ProjectSelectionScreen
+              onOpenWorkspace={() => {
+                if (selectedProject) {
+                  setProjectViewMode('workspace');
+                } else {
+                  setProjectViewMode('selection');
+                }
+              }}
+              onOpenProjectDetails={() => setProjectViewMode('details')}
+            />
+          ) : effectiveViewMode === 'details' && selectedProject ? (
+            <ProjectDetailsScreen
+              onBackToWorkspace={() => setProjectViewMode('workspace')}
+              onSwitchProject={() => setProjectViewMode('selection')}
+              onProjectDeleted={() => setProjectViewMode('selection')}
+            />
+          ) : effectiveViewMode === 'checklists' ||
+            (!selectedProject &&
+              effectiveViewMode === 'workspace' &&
+              activeTab === 'dashboard' &&
+              dashboardSubTab === 'checklists') ? (
+            <ChecklistsScreen
+              activeChecklistId={activeChecklistId}
+              onChangeActiveChecklistId={setActiveChecklistId}
+              createModalOpen={checklistCreateModalOpen}
+              onChangeCreateModalOpen={setChecklistCreateModalOpen}
+              initialTemplateId={checklistCreateTemplateId}
+              onResetTemplateId={() => setChecklistCreateTemplateId('none')}
+              onBackToOverview={() => {
+                setChecklistCreateModalOpen(false);
+                setActiveChecklistId(null);
+                if (selectedProject) {
+                  setProjectViewMode('workspace');
+                  setDashboardSubTab('overview');
+                } else {
+                  setProjectViewMode('selection');
+                  setDashboardSubTab('overview');
+                }
+              }}
+            />
+          ) : (
+            <>
+              {activeTab === 'dashboard' &&
+                (selectedProject ? (
+                  <DashboardScreen
+                    onNavigateToDestination={navigateToDestination}
+                  />
+                ) : (
+                  <ProjectSelectionScreen
+                    onOpenWorkspace={() => setProjectViewMode('workspace')}
+                    onOpenProjectDetails={() => setProjectViewMode('details')}
+                  />
+                ))}
+              {activeTab === 'testcases' &&
+                (selectedProject ? (
+                  <TestCasesScreen
+                    subTab={testCasesSubTab}
+                    onChangeSubTab={setTestCasesSubTab}
+                  />
+                ) : (
+                  <ProjectSelectionScreen
+                    onOpenWorkspace={() => setProjectViewMode('workspace')}
+                    onOpenProjectDetails={() => setProjectViewMode('details')}
+                  />
+                ))}
+              {activeTab === 'testruns' &&
+                (selectedProject ? (
+                  <TestRunsScreen
+                    viewMode={testRunsViewMode}
+                    onChangeViewMode={setTestRunsViewMode}
+                    executingCaseId={executingTestCaseId}
+                    onChangeExecutingCaseId={setExecutingTestCaseId}
+                  />
+                ) : (
+                  <ProjectSelectionScreen
+                    onOpenWorkspace={() => setProjectViewMode('workspace')}
+                    onOpenProjectDetails={() => setProjectViewMode('details')}
+                  />
+                ))}
+              {activeTab === 'defects' &&
+                (selectedProject ? (
+                  <DefectsScreen />
+                ) : (
+                  <ProjectSelectionScreen
+                    onOpenWorkspace={() => setProjectViewMode('workspace')}
+                    onOpenProjectDetails={() => setProjectViewMode('details')}
+                  />
+                ))}
+              {activeTab === 'profile' &&
+                (profileSubView === 'data' ? (
+                  <DataManagementSection />
+                ) : (
+                  <ProfileSettingsScreen
+                    activeSection={profileSubView}
+                    onChangeSection={setProfileSubView}
+                  />
+                ))}
+            </>
+          )}
+        </View>
+
+        {/* Full-Screen Translucent Drawer Backdrop Tint (Layer Above Active Screen) */}
+        <Animated.View
+          collapsable={false}
+          pointerEvents="none"
           style={[
-            styles.toastBanner,
+            styles.drawerBackdrop,
             {
-              backgroundColor: colors.surfaceElevated,
-              borderBottomColor:
-                toast.tone === 'danger'
-                  ? colors.danger
-                  : toast.tone === 'success'
-                  ? colors.success
-                  : colors.primary,
+              backgroundColor: isDark
+                ? 'rgba(2, 6, 23, 0.58)'
+                : 'rgba(15, 23, 42, 0.38)',
+              opacity: drawerAnim,
+            },
+          ]}
+        />
+
+        {/* Dedicated Outside-Tap Target for Uncovered Right Area (Above Dim Tint) */}
+        <Pressable
+          collapsable={false}
+          pointerEvents={isDrawerOpen ? 'auto' : 'none'}
+          disabled={!isDrawerOpen}
+          onPress={closeDrawer}
+          accessibilityRole="button"
+          accessibilityLabel="Close navigation drawer backdrop"
+          accessibilityElementsHidden={!isDrawerOpen}
+          importantForAccessibility={
+            isDrawerOpen ? 'auto' : 'no-hide-descendants'
+          }
+          style={[styles.drawerBackdropTouch, { left: drawerWidth }]}
+        />
+
+        {/* Left-Aligned Sliding Drawer Panel (Top Layer, Covers ~80% Width) */}
+        <Animated.View
+          collapsable={false}
+          pointerEvents={isDrawerOpen ? 'auto' : 'none'}
+          accessibilityElementsHidden={!isDrawerOpen}
+          importantForAccessibility={
+            isDrawerOpen ? 'auto' : 'no-hide-descendants'
+          }
+          style={[
+            styles.drawerPanel,
+            {
+              width: drawerWidth,
+              backgroundColor: colors.surface,
+              borderRightColor: colors.border,
+              transform: [
+                {
+                  translateX: drawerAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-drawerWidth, 0],
+                  }),
+                },
+              ],
             },
           ]}
         >
-          <Text
-            numberOfLines={2}
-            style={[
-              styles.toastText,
-              { color: colors.text, fontFamily: monoFontFamily },
-            ]}
-          >
-            {toast.message}
-          </Text>
-          <Text style={[styles.toastClose, { color: colors.textMuted }]}>OK</Text>
-        </Pressable>
-      ) : null}
-
-      {/* Active Viewport */}
-      <View style={styles.mainViewport}>
-        {effectiveViewMode === 'selection' ? (
-          <ProjectSelectionScreen
-            onOpenWorkspace={() => {
-              if (selectedProject) {
-                setProjectViewMode('workspace');
-              } else {
-                setProjectViewMode('selection');
-              }
-            }}
-            onOpenProjectDetails={() => setProjectViewMode('details')}
-          />
-        ) : effectiveViewMode === 'details' && selectedProject ? (
-          <ProjectDetailsScreen
-            onBackToWorkspace={() => setProjectViewMode('workspace')}
-            onSwitchProject={() => setProjectViewMode('selection')}
-            onProjectDeleted={() => setProjectViewMode('selection')}
-          />
-        ) : effectiveViewMode === 'checklists' ||
-          (!selectedProject &&
-            effectiveViewMode === 'workspace' &&
-            activeTab === 'dashboard' &&
-            dashboardSubTab === 'checklists') ? (
-          <ChecklistsScreen
-            activeChecklistId={activeChecklistId}
-            onChangeActiveChecklistId={setActiveChecklistId}
-            createModalOpen={checklistCreateModalOpen}
-            onChangeCreateModalOpen={setChecklistCreateModalOpen}
-            initialTemplateId={checklistCreateTemplateId}
-            onResetTemplateId={() => setChecklistCreateTemplateId('none')}
-            onBackToOverview={() => {
-              setChecklistCreateModalOpen(false);
-              setActiveChecklistId(null);
-              if (selectedProject) {
-                setProjectViewMode('workspace');
-                setDashboardSubTab('overview');
-              } else {
-                setProjectViewMode('selection');
-                setDashboardSubTab('overview');
-              }
-            }}
-          />
-        ) : (
-          <>
-            {activeTab === 'dashboard' &&
-              (selectedProject ? (
-                <DashboardScreen
-                  onNavigateToDestination={navigateToDestination}
-                />
-              ) : (
-                <ProjectSelectionScreen
-                  onOpenWorkspace={() => setProjectViewMode('workspace')}
-                  onOpenProjectDetails={() => setProjectViewMode('details')}
-                />
-              ))}
-            {activeTab === 'testcases' &&
-              (selectedProject ? (
-                <TestCasesScreen
-                  subTab={testCasesSubTab}
-                  onChangeSubTab={setTestCasesSubTab}
-                />
-              ) : (
-                <ProjectSelectionScreen
-                  onOpenWorkspace={() => setProjectViewMode('workspace')}
-                  onOpenProjectDetails={() => setProjectViewMode('details')}
-                />
-              ))}
-            {activeTab === 'testruns' &&
-              (selectedProject ? (
-                <TestRunsScreen
-                  viewMode={testRunsViewMode}
-                  onChangeViewMode={setTestRunsViewMode}
-                  executingCaseId={executingTestCaseId}
-                  onChangeExecutingCaseId={setExecutingTestCaseId}
-                />
-              ) : (
-                <ProjectSelectionScreen
-                  onOpenWorkspace={() => setProjectViewMode('workspace')}
-                  onOpenProjectDetails={() => setProjectViewMode('details')}
-                />
-              ))}
-            {activeTab === 'defects' &&
-              (selectedProject ? (
-                <DefectsScreen />
-              ) : (
-                <ProjectSelectionScreen
-                  onOpenWorkspace={() => setProjectViewMode('workspace')}
-                  onOpenProjectDetails={() => setProjectViewMode('details')}
-                />
-              ))}
-            {activeTab === 'profile' &&
-              (profileSubView === 'data' ? (
-                <DataManagementSection />
-              ) : (
-                <ProfileSettingsScreen
-                  activeSection={profileSubView}
-                  onChangeSection={setProfileSubView}
-                />
-              ))}
-          </>
-        )}
-      </View>
-
-      {/* Primary Mobile Bottom Navigation Bar (5 Icon-Based Destinations) */}
-      <View
-        style={[
-          styles.bottomBar,
-          { backgroundColor: colors.surface, borderTopColor: colors.border },
-        ]}
-      >
-        <View style={styles.bottomBarInner}>
-          {BOTTOM_TABS.map((tab) => {
-            const active =
-              tab.id === 'checklists'
-                ? isChecklistsActive
-                : tab.id === 'profile'
-                ? !isChecklistsActive &&
-                  effectiveViewMode === 'workspace' &&
-                  activeTab === 'profile' &&
-                  profileSubView !== 'data'
-                : tab.id === 'dashboard'
-                ? !isChecklistsActive &&
-                  effectiveViewMode === 'workspace' &&
-                  Boolean(selectedProject) &&
-                  activeTab === 'dashboard'
-                : !isChecklistsActive &&
-                  effectiveViewMode === 'workspace' &&
-                  Boolean(selectedProject) &&
-                  activeTab === tab.id;
-
-            const nestedIndicatorText =
-              active && tab.id === 'dashboard' && dashboardSubTab === 'reports'
-                ? 'Reports'
-                : active && tab.id === 'checklists'
-                ? checklistCreateModalOpen
-                  ? 'New'
-                  : activeChecklistId
-                  ? 'Runner'
-                  : null
-                : active && tab.id === 'testcases'
-                ? testCasesSubTab === 'plan'
-                  ? 'Plans'
-                  : testCasesSubTab === 'suites'
-                  ? 'Suites'
-                  : null
-                : active &&
-                  tab.id === 'testruns' &&
-                  (executingTestCaseId || testRunsViewMode === 'history')
-                ? executingTestCaseId
-                  ? 'Runner'
-                  : 'History'
-                : null;
-
-            return (
-              <Pressable
-                key={tab.id}
-                onPress={() => {
-                  if (tab.id === 'checklists') {
-                    if (
-                      isChecklistsActive &&
-                      (activeChecklistId || checklistCreateModalOpen)
-                    ) {
-                      openChecklistsView({ keepRunner: false });
-                    } else {
-                      openChecklistsView({ keepRunner: true });
-                    }
-                    return;
-                  }
-
-                  if (tab.id === 'profile') {
-                    openSettingsView();
-                    return;
-                  }
-
-                  if (!selectedProject) {
-                    setProjectViewMode('selection');
-                    if (showToast) {
-                      showToast(
-                        `Select or create a QA project first to open ${tab.label}.`,
-                        'info'
-                      );
-                    }
-                    return;
-                  }
-
-                  if (tab.id === 'dashboard') {
-                    openDashboardOverview();
-                    return;
-                  }
-
-                  if (tab.id === 'testcases') {
-                    openTestCasesView('cases');
-                    setSelectedTestCaseId(null);
-                    return;
-                  }
-
-                  if (tab.id === 'testruns') {
-                    openTestExecutionView({ viewMode: 'runs' });
-                    return;
-                  }
-
-                  setProjectViewMode('workspace');
-                  setActiveTab(tab.id, {
-                    clearSelectedCase: true,
-                    clearSelectedDefect: true,
-                  });
-                }}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: active }}
-                accessibilityLabel={
-                  nestedIndicatorText
-                    ? `${tab.accessibilityLabel || tab.label}, ${nestedIndicatorText} active`
-                    : tab.accessibilityLabel || tab.label
-                }
-                style={styles.bottomTabBtn}
+              {/* Drawer Header */}
+              <View
+                style={[
+                  styles.drawerHeader,
+                  { borderBottomColor: colors.border },
+                ]}
               >
-                {active && (
+                <View style={styles.drawerBrandRow}>
                   <View
                     style={[
-                      styles.activeBarIndicator,
+                      styles.brandBadge,
                       { backgroundColor: colors.primary },
                     ]}
-                  />
-                )}
-
-                <View
-                  style={[
-                    styles.bottomTabIconPill,
-                    {
-                      backgroundColor: active
-                        ? colors.surfaceAccent
-                        : 'transparent',
-                      borderColor: active ? colors.primary : 'transparent',
-                    },
-                  ]}
-                >
-                  <VectorIcon
-                    name={tab.icon}
-                    size={17}
-                    color={active ? colors.primary : colors.textSecondary}
-                  />
-                  {nestedIndicatorText ? (
-                    <View
+                  >
+                    <Text
                       style={[
-                        styles.bottomTabNestedDot,
-                        { backgroundColor: colors.primary },
+                        styles.brandBadgeText,
+                        { color: colors.textOnPrimary },
                       ]}
-                    />
-                  ) : null}
+                    >
+                      Q
+                    </Text>
+                  </View>
+                  <View style={styles.drawerBrandTextWrap}>
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.drawerBrandTitle, { color: colors.text }]}
+                    >
+                      Qavora Navigation
+                    </Text>
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        styles.drawerBrandSubtitle,
+                        { color: colors.textMuted, fontFamily: monoFontFamily },
+                      ]}
+                    >
+                      {selectedProject
+                        ? `Project: ${selectedProject.name}`
+                        : 'No Active Project Selected'}
+                    </Text>
+                  </View>
                 </View>
-
-                <Text
-                  numberOfLines={1}
-                  ellipsizeMode="tail"
-                  style={[
-                    styles.bottomTabLabel,
-                    {
-                      color: active ? colors.primary : colors.textSecondary,
-                      fontWeight: active ? '700' : '500',
-                    },
-                  ]}
-                >
-                  {tab.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </View>
-
-      {/* Global Left-Side Slide-Out Navigation Drawer */}
-      {(isDrawerOpen || isDrawerRendered) && (
-        <View
-          style={styles.drawerOverlayRoot}
-          pointerEvents={isDrawerOpen ? 'auto' : 'none'}
-        >
-          <Animated.View
-            style={[
-              styles.drawerBackdrop,
-              {
-                backgroundColor: colors.overlay,
-                opacity: drawerAnim,
-              },
-            ]}
-          >
-            <Pressable
-              onPress={closeDrawer}
-              accessibilityRole="button"
-              accessibilityLabel="Close navigation drawer backdrop"
-              style={styles.drawerBackdropTouch}
-            />
-          </Animated.View>
-
-          <Animated.View
-            style={[
-              styles.drawerPanel,
-              {
-                width: drawerWidth,
-                backgroundColor: colors.surface,
-                borderRightColor: colors.border,
-                transform: [
-                  {
-                    translateX: drawerAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [-drawerWidth, 0],
-                    }),
-                  },
-                ],
-              },
-            ]}
-          >
-            {/* Drawer Header */}
-            <View
-              style={[
-                styles.drawerHeader,
-                { borderBottomColor: colors.border },
-              ]}
-            >
-              <View style={styles.drawerBrandRow}>
-                <View
-                  style={[
-                    styles.brandBadge,
-                    { backgroundColor: colors.primary },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.brandBadgeText,
-                      { color: colors.textOnPrimary },
-                    ]}
-                  >
-                    Q
-                  </Text>
-                </View>
-                <View style={styles.drawerBrandTextWrap}>
-                  <Text
-                    numberOfLines={1}
-                    style={[styles.drawerBrandTitle, { color: colors.text }]}
-                  >
-                    Qavora Navigation
-                  </Text>
-                  <Text
-                    numberOfLines={1}
-                    style={[
-                      styles.drawerBrandSubtitle,
-                      { color: colors.textMuted, fontFamily: monoFontFamily },
-                    ]}
-                  >
-                    {selectedProject
-                      ? `Project: ${selectedProject.name}`
-                      : 'No Active Project Selected'}
-                  </Text>
-                </View>
-                <Pressable
-                  onPress={closeDrawer}
-                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Close navigation drawer"
-                  style={[
-                    styles.drawerCloseBtn,
-                    {
-                      backgroundColor: colors.surfaceMuted,
-                      borderColor: colors.border,
-                    },
-                  ]}
-                >
-                  <VectorIcon
-                    name="close"
-                    size={15}
-                    color={colors.textSecondary}
-                  />
-                </Pressable>
-              </View>
 
               {/* Active Context Pill */}
               <View
@@ -1794,8 +1550,7 @@ function QavoraQAShell() {
               </Pressable>
             </View>
           </Animated.View>
-        </View>
-      )}
+      </View>
     </SafeAreaView>
   );
 }
@@ -1814,12 +1569,7 @@ function AuthRootGate() {
         ]}
       >
         <StatusBar style={colors.statusBar} />
-        <View
-          style={[
-            styles.restoringCard,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-          ]}
-        >
+        <View style={styles.restoringContent}>
           <ActivityIndicator size="small" color={colors.primary} />
           <Text style={[styles.restoringTitle, { color: colors.text }]}>
             Restoring Qavora Session
@@ -1877,12 +1627,9 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 20,
-  },
-  restoringCard: {
-    borderRadius: 16,
-    borderWidth: 1,
     padding: 24,
+  },
+  restoringContent: {
     alignItems: 'center',
     maxWidth: 360,
     width: '100%',
@@ -1903,6 +1650,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     justifyContent: 'center',
     paddingHorizontal: 8,
+    zIndex: 1100,
   },
   topBarInner: {
     maxWidth: 920,
@@ -1959,43 +1707,73 @@ const styles = StyleSheet.create({
     gap: 4,
     flexShrink: 0,
   },
-  topActionIconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 9,
+  themeBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  themeIconCanvas: {
+    width: 21,
+    height: 21,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
   },
-  topIconCountBadge: {
+  sunRayBar: {
     position: 'absolute',
-    top: -4,
-    right: -4,
-    minWidth: 15,
-    height: 15,
+    width: 20,
+    height: 2.2,
+    borderRadius: 1.1,
+  },
+  sunRayGapMask: {
+    position: 'absolute',
+    width: 13.5,
+    height: 13.5,
+    borderRadius: 6.75,
+  },
+  sunCoreDisc: {
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+  },
+  moonBodyWrap: {
+    width: 16,
+    height: 16,
+    position: 'relative',
+    transform: [{ rotate: '-18deg' }],
+  },
+  moonFullDisc: {
+    width: 16,
+    height: 16,
     borderRadius: 8,
-    paddingHorizontal: 3,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  topIconCountBadgeText: {
-    fontSize: 8.5,
-    fontWeight: '700',
+  moonCutoutDisc: {
+    position: 'absolute',
+    width: 13.5,
+    height: 13.5,
+    borderRadius: 6.75,
+    top: -2.5,
+    right: -3.5,
   },
-  syncPillBtn: {
-    height: 36,
-    paddingHorizontal: 7,
-    borderRadius: 9,
-    borderWidth: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
+  moonStarPrimary: {
+    position: 'absolute',
+    top: 3,
+    right: 2.5,
+    width: 2.6,
+    height: 2.6,
+    borderRadius: 1.3,
   },
-  syncPillText: {
-    fontSize: 10,
-    fontWeight: '700',
+  moonStarSecondary: {
+    position: 'absolute',
+    top: 7.5,
+    right: 1,
+    width: 1.8,
+    height: 1.8,
+    borderRadius: 0.9,
   },
   toastBanner: {
     minHeight: 48,
@@ -2017,66 +1795,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  workspaceBody: {
+    flex: 1,
+    position: 'relative',
+  },
   mainViewport: {
     flex: 1,
-  },
-  bottomBar: {
-    minHeight: 60,
-    borderTopWidth: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 2,
-    paddingVertical: 2,
-  },
-  bottomBarInner: {
-    maxWidth: 920,
     width: '100%',
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  bottomTabBtn: {
-    flex: 1,
-    minHeight: 54,
-    minWidth: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 2,
-    paddingTop: 5,
-    paddingBottom: 4,
-    position: 'relative',
-    gap: 3,
-  },
-  bottomTabIconPill: {
-    width: 36,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  bottomTabNestedDot: {
-    position: 'absolute',
-    top: 2,
-    right: 4,
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-  },
-  bottomTabLabel: {
-    fontSize: 10,
-    lineHeight: 12,
-    textAlign: 'center',
-    flexShrink: 1,
-  },
-  activeBarIndicator: {
-    position: 'absolute',
-    top: 0,
-    width: 24,
-    height: 3,
-    borderBottomLeftRadius: 2,
-    borderBottomRightRadius: 2,
+    height: '100%',
+    zIndex: 1,
   },
   drawerMenuBtn: {
     width: 38,
@@ -2087,27 +1814,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexShrink: 0,
   },
-  drawerOverlayRoot: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 1000,
-    elevation: 24,
-    flexDirection: 'row',
-  },
   drawerBackdrop: {
     ...StyleSheet.absoluteFillObject,
+    zIndex: 1000,
   },
   drawerBackdropTouch: {
-    flex: 1,
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    right: 0,
+    zIndex: 1001,
+    backgroundColor: 'rgba(0, 0, 0, 0.005)',
   },
   drawerPanel: {
-    height: '100%',
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 1002,
     borderRightWidth: 1,
     justifyContent: 'space-between',
-    shadowColor: '#000',
-    shadowOffset: { width: 4, height: 0 },
-    shadowOpacity: 0.22,
-    shadowRadius: 12,
-    elevation: 24,
   },
   drawerHeader: {
     paddingHorizontal: 14,
@@ -2133,14 +1859,6 @@ const styles = StyleSheet.create({
   drawerBrandSubtitle: {
     fontSize: 11,
     marginTop: 1,
-  },
-  drawerCloseBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   drawerContextBanner: {
     flexDirection: 'row',

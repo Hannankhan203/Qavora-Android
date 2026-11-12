@@ -30,7 +30,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useAuth } from '../context/AuthContext';
-import { checkBackendHealth, getApiBaseUrl } from '../services/apiClient';
 import {
   EMAIL_REGEX,
   formatAuthErrorMessage,
@@ -42,6 +41,74 @@ const ROLE_OPTIONS = [
   'QA Automation Engineer',
   'QA Manager',
 ];
+
+const THEME_RAY_ANGLES = ['0deg', '45deg', '90deg', '-45deg'];
+
+function ThemeToggleIcon({ isDark, iconColor, maskColor }) {
+  if (isDark) {
+    // 21x21 8-ray Sun with separated outer rays and solid center disc
+    return (
+      <View style={styles.themeIconCanvas}>
+        {THEME_RAY_ANGLES.map((angle) => (
+          <View
+            key={angle}
+            style={[
+              styles.sunRayBar,
+              {
+                backgroundColor: iconColor,
+                transform: [{ rotate: angle }],
+              },
+            ]}
+          />
+        ))}
+        <View
+          style={[
+            styles.sunRayGapMask,
+            { backgroundColor: maskColor },
+          ]}
+        />
+        <View
+          style={[
+            styles.sunCoreDisc,
+            { backgroundColor: iconColor },
+          ]}
+        />
+      </View>
+    );
+  }
+
+  // 21x21 Crescent Moon silhouette with offset cutout and subtle star accents
+  return (
+    <View style={styles.themeIconCanvas}>
+      <View style={styles.moonBodyWrap}>
+        <View
+          style={[
+            styles.moonFullDisc,
+            { backgroundColor: iconColor },
+          ]}
+        />
+        <View
+          style={[
+            styles.moonCutoutDisc,
+            { backgroundColor: maskColor },
+          ]}
+        />
+      </View>
+      <View
+        style={[
+          styles.moonStarPrimary,
+          { backgroundColor: iconColor },
+        ]}
+      />
+      <View
+        style={[
+          styles.moonStarSecondary,
+          { backgroundColor: iconColor },
+        ]}
+      />
+    </View>
+  );
+}
 
 export default function AuthScreen() {
   const { colors, isDark, toggleTheme } = useTheme();
@@ -94,14 +161,6 @@ export default function AuthScreen() {
   const registerEmailInputRef = useRef(null);
   const registerPasswordInputRef = useRef(null);
   const registerConfirmPasswordInputRef = useRef(null);
-
-  // Backend health status
-  const [healthState, setHealthState] = useState({
-    checking: true,
-    ok: false,
-    database: null,
-    message: 'Checking server connection...',
-  });
 
   /**
    * Scrolls the ScrollView so the specified field and adjacent controls remain
@@ -202,48 +261,6 @@ export default function AuthScreen() {
     });
     setLocalError(null);
   }, []);
-
-  const runHealthCheck = useCallback(async () => {
-    const baseUrl = getApiBaseUrl();
-    if (!baseUrl) {
-      setHealthState({
-        checking: false,
-        ok: false,
-        database: null,
-        message: 'Server connection URL is not configured.',
-      });
-      return;
-    }
-
-    setHealthState((prev) => ({
-      ...prev,
-      checking: true,
-      message: 'Checking server connection...',
-    }));
-
-    const result = await checkBackendHealth();
-    if (result.ok) {
-      const dbStatus =
-        (result.data && result.data.database) || 'connected';
-      setHealthState({
-        checking: false,
-        ok: true,
-        database: dbStatus,
-        message: `Connected (${dbStatus}) · ${result.latencyMs}ms`,
-      });
-    } else {
-      setHealthState({
-        checking: false,
-        ok: false,
-        database: 'disconnected',
-        message: formatAuthErrorMessage(result.error, 'health'),
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    runHealthCheck();
-  }, [runHealthCheck]);
 
   const switchMode = useCallback(
     (nextMode) => {
@@ -387,17 +404,26 @@ export default function AuthScreen() {
           <Pressable
             onPress={toggleTheme}
             hitSlop={8}
-            style={[
+            accessibilityRole="button"
+            accessibilityLabel={
+              isDark ? 'Switch to light theme' : 'Switch to dark theme'
+            }
+            style={({ pressed }) => [
               styles.themeBtn,
               {
-                backgroundColor: colors.surfaceAccent,
-                borderColor: colors.primary,
+                backgroundColor: isDark
+                  ? colors.surfaceElevated
+                  : colors.surfaceMuted,
+                borderColor: colors.borderStrong,
+                opacity: pressed ? 0.82 : 1,
               },
             ]}
           >
-            <Text style={[styles.themeBtnText, { color: colors.primary }]}>
-              {isDark ? 'Light' : 'Dark'}
-            </Text>
+            <ThemeToggleIcon
+              isDark={isDark}
+              iconColor={colors.primary}
+              maskColor={isDark ? colors.surfaceElevated : colors.surfaceMuted}
+            />
           </Pressable>
         </View>
       </View>
@@ -427,7 +453,7 @@ export default function AuthScreen() {
             accessible={false}
             style={styles.dismissTouchArea}
           >
-            {/* Main Auth Card */}
+            {/* Direct Authentication Content */}
             <View
               onLayout={(e) => {
                 const y = e?.nativeEvent?.layout?.y;
@@ -435,10 +461,7 @@ export default function AuthScreen() {
                   authCardYRef.current = y;
                 }
               }}
-              style={[
-                styles.authCard,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
+              style={styles.authContent}
             >
               <Text
                 style={[
@@ -459,67 +482,12 @@ export default function AuthScreen() {
                   : 'Register a new tester profile on the Qavora backend.'}
               </Text>
 
-              {/* Backend Connection Status Bar */}
-              <View
-                style={[
-                  styles.healthBar,
-                  {
-                    backgroundColor: colors.background,
-                    borderColor: healthState.ok
-                      ? colors.success
-                      : colors.borderStrong,
-                  },
-                ]}
-              >
-                <View style={styles.healthLeft}>
-                  <View
-                    style={[
-                      styles.healthDot,
-                      {
-                        backgroundColor: healthState.checking
-                          ? colors.warning
-                          : healthState.ok
-                          ? colors.success
-                          : colors.danger,
-                      },
-                    ]}
-                  />
-                  <Text
-                    numberOfLines={2}
-                    style={[
-                      styles.healthText,
-                      { color: colors.textSecondary, fontFamily: monoFontFamily },
-                    ]}
-                  >
-                    {healthState.message}
-                  </Text>
-                </View>
-                <Pressable
-                  onPress={runHealthCheck}
-                  disabled={healthState.checking}
-                  hitSlop={8}
-                  style={[
-                    styles.healthRetryBtn,
-                    { borderColor: colors.borderStrong },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.healthRetryText,
-                      { color: colors.primary, fontFamily: monoFontFamily },
-                    ]}
-                  >
-                    {healthState.checking ? '...' : 'Check'}
-                  </Text>
-                </Pressable>
-              </View>
-
               {/* Mode Switcher Tabs */}
               <View
                 style={[
                   styles.modeTabsRow,
                   {
-                    backgroundColor: colors.background,
+                    backgroundColor: colors.surface,
                     borderColor: colors.border,
                   },
                 ]}
@@ -658,7 +626,7 @@ export default function AuthScreen() {
                       style={[
                         styles.input,
                         {
-                          backgroundColor: colors.background,
+                          backgroundColor: colors.surface,
                           borderColor: fieldErrors.email
                             ? colors.danger
                             : focusedField === 'loginEmail'
@@ -715,7 +683,7 @@ export default function AuthScreen() {
                       style={[
                         styles.passwordInputContainer,
                         {
-                          backgroundColor: colors.background,
+                          backgroundColor: colors.surface,
                           borderColor: fieldErrors.password
                             ? colors.danger
                             : focusedField === 'loginPassword'
@@ -904,7 +872,7 @@ export default function AuthScreen() {
                       style={[
                         styles.input,
                         {
-                          backgroundColor: colors.background,
+                          backgroundColor: colors.surface,
                           borderColor: fieldErrors.name
                             ? colors.danger
                             : focusedField === 'registerName'
@@ -962,7 +930,7 @@ export default function AuthScreen() {
                       style={[
                         styles.input,
                         {
-                          backgroundColor: colors.background,
+                          backgroundColor: colors.surface,
                           borderColor: fieldErrors.email
                             ? colors.danger
                             : focusedField === 'registerEmail'
@@ -999,7 +967,7 @@ export default function AuthScreen() {
                             {
                               backgroundColor: selected
                                 ? colors.primary
-                                : colors.background,
+                                : colors.surface,
                               borderColor: selected
                                 ? colors.primary
                                 : colors.border,
@@ -1067,7 +1035,7 @@ export default function AuthScreen() {
                       style={[
                         styles.passwordInputContainer,
                         {
-                          backgroundColor: colors.background,
+                          backgroundColor: colors.surface,
                           borderColor: fieldErrors.password
                             ? colors.danger
                             : focusedField === 'registerPassword'
@@ -1181,7 +1149,7 @@ export default function AuthScreen() {
                       style={[
                         styles.passwordInputContainer,
                         {
-                          backgroundColor: colors.background,
+                          backgroundColor: colors.surface,
                           borderColor: fieldErrors.confirmPassword
                             ? colors.danger
                             : focusedField === 'registerConfirmPassword'
@@ -1350,11 +1318,11 @@ const styles = StyleSheet.create({
     minHeight: 54,
     borderBottomWidth: 1,
     justifyContent: 'center',
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     paddingVertical: 6,
   },
   topBarInner: {
-    maxWidth: 520,
+    maxWidth: 480,
     width: '100%',
     alignSelf: 'center',
     flexDirection: 'row',
@@ -1393,22 +1361,77 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   themeBtn: {
-    minHeight: 36,
-    minWidth: 54,
-    paddingHorizontal: 10,
-    borderRadius: 8,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
-  themeBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
+  themeIconCanvas: {
+    width: 21,
+    height: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  sunRayBar: {
+    position: 'absolute',
+    width: 20,
+    height: 2.2,
+    borderRadius: 1.1,
+  },
+  sunRayGapMask: {
+    position: 'absolute',
+    width: 13.5,
+    height: 13.5,
+    borderRadius: 6.75,
+  },
+  sunCoreDisc: {
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+  },
+  moonBodyWrap: {
+    width: 16,
+    height: 16,
+    position: 'relative',
+    transform: [{ rotate: '-18deg' }],
+  },
+  moonFullDisc: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+  },
+  moonCutoutDisc: {
+    position: 'absolute',
+    width: 13.5,
+    height: 13.5,
+    borderRadius: 6.75,
+    top: -2.5,
+    right: -3.5,
+  },
+  moonStarPrimary: {
+    position: 'absolute',
+    top: 3,
+    right: 2.5,
+    width: 2.6,
+    height: 2.6,
+    borderRadius: 1.3,
+  },
+  moonStarSecondary: {
+    position: 'absolute',
+    top: 7.5,
+    right: 1,
+    width: 1.8,
+    height: 1.8,
+    borderRadius: 0.9,
   },
   scrollContent: {
-    paddingHorizontal: 12,
-    paddingTop: 18,
-    maxWidth: 520,
+    paddingHorizontal: 20,
+    paddingTop: 28,
+    maxWidth: 480,
     width: '100%',
     alignSelf: 'center',
     flexGrow: 1,
@@ -1416,76 +1439,36 @@ const styles = StyleSheet.create({
   dismissTouchArea: {
     flex: 1,
   },
-  authCard: {
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 16,
+  authContent: {
+    width: '100%',
   },
   kicker: {
     fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 0.5,
-    marginBottom: 4,
+    letterSpacing: 0.8,
+    marginBottom: 6,
   },
   heading: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: '700',
-    marginBottom: 4,
+    letterSpacing: -0.4,
+    marginBottom: 6,
   },
   subheading: {
-    fontSize: 13,
-    lineHeight: 19,
-    marginBottom: 14,
-  },
-  healthBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginBottom: 14,
-    gap: 8,
-  },
-  healthLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flex: 1,
-  },
-  healthDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  healthText: {
-    fontSize: 11,
-    flex: 1,
-  },
-  healthRetryBtn: {
-    minHeight: 32,
-    borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  healthRetryText: {
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 20,
   },
   modeTabsRow: {
     flexDirection: 'row',
     borderRadius: 10,
     borderWidth: 1,
-    padding: 3,
-    marginBottom: 14,
+    padding: 4,
+    marginBottom: 20,
   },
   modeTabBtn: {
     flex: 1,
-    minHeight: 40,
+    minHeight: 42,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1499,7 +1482,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    marginBottom: 14,
+    marginBottom: 18,
   },
   alertText: {
     fontSize: 13,
@@ -1510,12 +1493,12 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   fieldGroup: {
-    marginBottom: 12,
+    marginBottom: 16,
   },
   fieldLabel: {
     fontSize: 13,
     fontWeight: '600',
-    marginBottom: 6,
+    marginBottom: 7,
     flexShrink: 1,
   },
   passwordHeaderRow: {
@@ -1527,21 +1510,21 @@ const styles = StyleSheet.create({
   headerTogglePassBtn: {
     paddingVertical: 2,
     paddingHorizontal: 4,
-    marginBottom: 4,
+    marginBottom: 5,
   },
   togglePassText: {
     fontSize: 12,
     fontWeight: '700',
   },
   input: {
-    minHeight: 46,
+    minHeight: 48,
     borderWidth: 1,
     borderRadius: 10,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     fontSize: 14,
   },
   passwordInputContainer: {
-    minHeight: 46,
+    minHeight: 48,
     borderWidth: 1,
     borderRadius: 10,
     flexDirection: 'row',
@@ -1550,12 +1533,12 @@ const styles = StyleSheet.create({
   },
   passwordInputField: {
     flex: 1,
-    minHeight: 46,
-    paddingHorizontal: 12,
+    minHeight: 48,
+    paddingHorizontal: 14,
     fontSize: 14,
   },
   inlinePasswordToggleBtn: {
-    minHeight: 46,
+    minHeight: 48,
     minWidth: 58,
     paddingHorizontal: 12,
     borderLeftWidth: 1,
@@ -1577,7 +1560,7 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    marginBottom: 10,
+    marginBottom: 12,
   },
   inlineSubmitErrorText: {
     fontSize: 12,
@@ -1588,14 +1571,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginBottom: 12,
+    marginBottom: 16,
   },
   roleChip: {
-    minHeight: 36,
+    minHeight: 38,
     borderWidth: 1,
     borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1604,11 +1587,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   submitBtn: {
-    minHeight: 48,
+    minHeight: 50,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 4,
+    marginTop: 6,
   },
   loadingBtnRow: {
     flexDirection: 'row',
@@ -1620,7 +1603,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   switchLinkWrap: {
-    marginTop: 14,
+    marginTop: 18,
     alignItems: 'center',
     paddingVertical: 8,
   },
