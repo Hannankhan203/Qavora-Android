@@ -181,7 +181,9 @@ export default function TestRunExecutionModal({
                       ? step
                       : step?.action || step?.step || '';
                   const stepExpected =
-                    typeof step === 'object' ? step?.expected || '' : '';
+                    typeof step === 'object'
+                      ? step?.expectedResult || step?.expected || ''
+                      : '';
                   const st = stepStatuses[idx] || 'Untested';
                   return (
                     <View

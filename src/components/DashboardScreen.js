@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useProjects } from '../context/ProjectContext';
-import { useWorkspace } from '../context/WorkspaceContext';
+import { useWorkspace, computeRunMetrics } from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
 import ReportsView from './ReportsView';
 
@@ -1295,6 +1295,15 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                 <View style={styles.rowList}>
                   {recentRuns.map((run) => {
                     const isCompleted = run.status === 'Completed';
+                    const runMetrics =
+                      run.metrics || computeRunMetrics(run.results);
+                    const passedCount =
+                      runMetrics?.passedCases ?? runMetrics?.passed ?? 0;
+                    const failedCount =
+                      runMetrics?.failedCases ?? runMetrics?.failed ?? 0;
+                    const blockedCount =
+                      runMetrics?.blockedCases ?? runMetrics?.blocked ?? 0;
+                    const passRate = runMetrics?.passRate ?? 0;
                     return (
                       <Pressable
                         key={run.id}
@@ -1363,9 +1372,9 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                             },
                           ]}
                         >
-                          {run.deviceInfo} · {run.metrics.passed}P /{' '}
-                          {run.metrics.failed}F / {run.metrics.blocked}B (
-                          {run.metrics.passRate}% Pass)
+                          {run.deviceInfo} · {passedCount}P /{' '}
+                          {failedCount}F / {blockedCount}B (
+                          {passRate}% Pass)
                         </Text>
                       </Pressable>
                     );

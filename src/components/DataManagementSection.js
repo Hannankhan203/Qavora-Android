@@ -104,6 +104,18 @@ export default function DataManagementSection() {
   const samplePreview = getSampleRestorePreview
     ? getSampleRestorePreview()
     : null;
+  const sampleCounts =
+    samplePreview &&
+    samplePreview.sampleCounts &&
+    typeof samplePreview.sampleCounts === 'object'
+      ? samplePreview.sampleCounts
+      : null;
+  const hasSampleCounts = Boolean(sampleCounts);
+  const sampleSuitesCount = sampleCounts?.suites ?? null;
+  const sampleTestCasesCount = sampleCounts?.testCases ?? null;
+  const sampleTestRunsCount = sampleCounts?.testRuns ?? null;
+  const sampleExecutionsCount = sampleCounts?.executions ?? null;
+  const sampleDefectsCount = sampleCounts?.defects ?? null;
 
   // Storage & Snapshot states
   const [storageStats, setStorageStats] = useState(null);
@@ -735,9 +747,16 @@ export default function DataManagementSection() {
       }
 
       if (type === 'restore_sample_dataset') {
-        await resetToSampleData();
-        await loadStorageAndSnapshots();
-        setConfirmActionModal(null);
+        const res = await resetToSampleData({ confirmed: true });
+        if (res && res.ok) {
+          await loadStorageAndSnapshots();
+          setConfirmActionModal(null);
+        } else {
+          showToast(
+            (res && res.error) || 'Failed to restore sample QA dataset',
+            'danger'
+          );
+        }
         return;
       }
 
@@ -2037,7 +2056,7 @@ export default function DataManagementSection() {
           and defects into the active project ({selectedProject?.name || 'Active Project'}), or clear the active project dataset while keeping your project record intact.
         </Text>
 
-        {samplePreview ? (
+        {hasSampleCounts ? (
           <View
             style={[
               styles.metricsGrid,
@@ -2054,10 +2073,10 @@ export default function DataManagementSection() {
                   { color: colors.primary, fontFamily: monoFontFamily },
                 ]}
               >
-                {samplePreview.suitesCount}
+                {sampleSuitesCount ?? '—'}
               </Text>
               <Text style={[styles.metricLabel, { color: colors.textMuted }]}>
-                Sample Suites
+                Suites
               </Text>
             </View>
             <View style={styles.metricCell}>
@@ -2067,10 +2086,23 @@ export default function DataManagementSection() {
                   { color: colors.text, fontFamily: monoFontFamily },
                 ]}
               >
-                {samplePreview.testCasesCount}
+                {sampleTestCasesCount ?? '—'}
               </Text>
               <Text style={[styles.metricLabel, { color: colors.textMuted }]}>
-                Sample Cases
+                Test Cases
+              </Text>
+            </View>
+            <View style={styles.metricCell}>
+              <Text
+                style={[
+                  styles.metricValue,
+                  { color: colors.info || colors.primary, fontFamily: monoFontFamily },
+                ]}
+              >
+                {sampleTestRunsCount ?? '—'}
+              </Text>
+              <Text style={[styles.metricLabel, { color: colors.textMuted }]}>
+                Test Runs
               </Text>
             </View>
             <View style={styles.metricCell}>
@@ -2080,7 +2112,7 @@ export default function DataManagementSection() {
                   { color: colors.success, fontFamily: monoFontFamily },
                 ]}
               >
-                {samplePreview.executionsCount}
+                {sampleExecutionsCount ?? '—'}
               </Text>
               <Text style={[styles.metricLabel, { color: colors.textMuted }]}>
                 Executions
@@ -2093,25 +2125,42 @@ export default function DataManagementSection() {
                   { color: colors.danger, fontFamily: monoFontFamily },
                 ]}
               >
-                {samplePreview.defectsCount}
+                {sampleDefectsCount ?? '—'}
               </Text>
               <Text style={[styles.metricLabel, { color: colors.textMuted }]}>
-                Sample Defects
+                Defects
               </Text>
             </View>
           </View>
-        ) : null}
+        ) : (
+          <Text
+            style={[
+              styles.snapshotMeta,
+              {
+                color: colors.textMuted,
+                fontFamily: monoFontFamily,
+                marginBottom: 12,
+              },
+            ]}
+          >
+            Sample dataset preview counts are currently unavailable.
+          </Text>
+        )}
 
         <View style={styles.actionButtonsRow}>
           <Pressable
             disabled={isRestoringSampleData || isClearingWorkspaceData}
-            onPress={() =>
+            onPress={() => {
+              const currentSummary = `${suites.length} suites, ${testCases.length} test cases, ${testRuns.length} test runs, ${executions.length} executions, ${defects.length} defects`;
+              const sampleSummary = hasSampleCounts
+                ? ` (${sampleSuitesCount ?? '—'} suites, ${sampleTestCasesCount ?? '—'} test cases, ${sampleTestRunsCount ?? '—'} test runs, ${sampleExecutionsCount ?? '—'} executions, ${sampleDefectsCount ?? '—'} defects)`
+                : ' (sample preview counts unavailable)';
               setConfirmActionModal({
                 type: 'restore_sample_dataset',
                 title: 'Restore Sample QA Dataset?',
-                description: `Replace current active project data (${testCases.length} cases, ${testRuns.length} runs, ${defects.length} defects) with the default Qavora sample dataset (${samplePreview?.suitesCount || 4} suites, ${samplePreview?.testCasesCount || 8} cases, ${samplePreview?.testRunsCount || 3} runs, ${samplePreview?.defectsCount || 3} defects).`,
-              })
-            }
+                description: `Replace current active project data (${currentSummary}) with the default Qavora sample dataset${sampleSummary}.`,
+              });
+            }}
             accessibilityRole="button"
             accessibilityState={{
               disabled: Boolean(
