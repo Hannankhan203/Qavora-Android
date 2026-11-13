@@ -30,6 +30,7 @@ import {
   subscribeToSyncEvents,
   subscribeToReconnectSyncResults,
   getPendingProjectOperations,
+  getProjectDeletionTombstones,
 } from '../services/offlineSyncService.js';
 import {
   INITIAL_SUITES,
@@ -65,6 +66,13 @@ import {
   buildBackendDefectsPayload,
   buildProjectWorkspaceState,
 } from './workspace/workspacePayloads.js';
+import {
+  allocateNextDefectIds,
+  computeHighWaterSequences,
+  findDefectById,
+  loadDefectSequenceState,
+  saveDefectSequenceState,
+} from './workspace/defectIdUtils.js';
 
 export {
   WORKSPACE_STORAGE_PREFIX,
@@ -127,6 +135,7 @@ export function WorkspaceProvider({ children }) {
   const queuedDirtyGenRef = useRef({});
   const editGenRef = useRef({});
   const appliedServerStateRef = useRef({});
+  const defectSeqRef = useRef({});
   const prevResolvedUserIdRef = useRef(resolvedUserId);
 
   const initialWorkspace = useMemo(
@@ -888,6 +897,7 @@ export function WorkspaceProvider({ children }) {
       queuedDirtyGenRef.current = {};
       editGenRef.current = {};
       appliedServerStateRef.current = {};
+      defectSeqRef.current = {};
       setProjectDataError(null);
       setProjectDataConflict(null);
     }
@@ -1103,8 +1113,16 @@ export function WorkspaceProvider({ children }) {
       resolvedUserId
         ? getPendingProjectOperations(resolvedUserId).catch(() => [])
         : Promise.resolve([]),
+      loadDefectSequenceState(selectedProjectId, resolvedUserId).catch(
+        () => null
+      ),
+      resolvedUserId
+        ? getProjectDeletionTombstones(resolvedUserId, selectedProjectId).catch(
+            () => null
+          )
+        : Promise.resolve(null),
     ])
-      .then(([raw, pendingOps]) => {
+      .then(([raw, pendingOps, storedSeqState, projectTombstones]) => {
         if (!mounted) return;
         let snapshot = null;
         if (raw) {
@@ -1143,6 +1161,61 @@ export function WorkspaceProvider({ children }) {
           user,
           { preferSnapshot }
         );
+
+        const pendingTombstoneDefectIds = [
+          ...(Array.isArray(projectTombstones?.defects)
+            ? projectTombstones.defects
+            : []),
+        ];
+        projectPendingOps.forEach((op) => {
+          if (Array.isArray(op?.deletionTombstones?.defects)) {
+            pendingTombstoneDefectIds.push(...op.deletionTombstones.defects);
+          }
+          if (Array.isArray(op?.payload?.defects)) {
+            op.payload.defects.forEach((d) => {
+              if (d?.id) pendingTombstoneDefectIds.push(d.id);
+              if (d?.defectId) pendingTombstoneDefectIds.push(d.defectId);
+            });
+          }
+        });
+
+        if (scopedKey) {
+          const mergedStoredAndMemSeq = computeHighWaterSequences({
+            extraIds: [
+              ...(Array.isArray(storedSeqState?.reservedIds)
+                ? storedSeqState.reservedIds
+                : []),
+              ...(Array.isArray(defectSeqRef.current[scopedKey]?.reservedIds)
+                ? defectSeqRef.current[scopedKey].reservedIds
+                : []),
+            ],
+            previousState: {
+              defSeq: Math.max(
+                storedSeqState?.defSeq || 0,
+                defectSeqRef.current[scopedKey]?.defSeq || 0
+              ),
+              bugSeq: Math.max(
+                storedSeqState?.bugSeq || 300,
+                defectSeqRef.current[scopedKey]?.bugSeq || 300
+              ),
+              reservedIds: [],
+            },
+          });
+          const nextSeqState = computeHighWaterSequences({
+            defects: resolved.defects,
+            testRuns: resolved.testRuns,
+            executions: resolved.executions,
+            tombstoneIds: pendingTombstoneDefectIds,
+            previousState: mergedStoredAndMemSeq,
+          });
+          defectSeqRef.current[scopedKey] = nextSeqState;
+          saveDefectSequenceState(
+            selectedProjectId,
+            resolvedUserId,
+            nextSeqState
+          ).catch(() => {});
+        }
+
         applyWorkspaceStateSnapshot(resolved);
         setLastPersistedAt(
           (snapshot && snapshot.savedAt) || formatTimestamp()
@@ -1262,6 +1335,20 @@ export function WorkspaceProvider({ children }) {
     setTestRuns(synced.testRuns);
     setExecutions(synced.executions);
     setDefects(synced.defects);
+    if (scopedKey) {
+      const nextSeqState = computeHighWaterSequences({
+        defects: synced.defects,
+        testRuns: synced.testRuns,
+        executions: synced.executions,
+        previousState: defectSeqRef.current[scopedKey] || null,
+      });
+      defectSeqRef.current[scopedKey] = nextSeqState;
+      saveDefectSequenceState(
+        selectedProjectId,
+        resolvedUserId,
+        nextSeqState
+      ).catch(() => {});
+    }
     applyProfileMetadataOnly();
     setAppliedServerSnapshot(selectedProject, resolvedUserId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1380,6 +1467,21 @@ export function WorkspaceProvider({ children }) {
         setTestRuns(refreshed.testRuns);
         setExecutions(refreshed.executions);
         setDefects(refreshed.defects);
+        const scopedKey = getScopedProjectKey(selectedProjectId, resolvedUserId);
+        if (scopedKey) {
+          const nextSeqState = computeHighWaterSequences({
+            defects: refreshed.defects,
+            testRuns: refreshed.testRuns,
+            executions: refreshed.executions,
+            previousState: defectSeqRef.current[scopedKey] || null,
+          });
+          defectSeqRef.current[scopedKey] = nextSeqState;
+          await saveDefectSequenceState(
+            selectedProjectId,
+            resolvedUserId,
+            nextSeqState
+          );
+        }
         setAppliedServerSnapshot(result.project, resolvedUserId);
         showToast('Reloaded latest project data from server', 'info');
       } else if (!result.ok) {
@@ -3246,18 +3348,30 @@ export function WorkspaceProvider({ children }) {
       const prevRuns = testRunsRef.current;
       const prevExecs = executionsRef.current;
       const currentCases = testCasesRef.current;
+      const targetUserId = resolvedUserIdRef.current;
+      const targetProjectId = selectedProjectIdRef.current;
+      const scopedKey = getScopedProjectKey(targetProjectId, targetUserId);
 
-      const maxNum = prevDefects.reduce((max, bug) => {
-        const m = String(bug.defectId || bug.id || '').match(
-          /(?:DEF|BUG)-(\d+)/i
-        );
-        return m ? Math.max(max, parseInt(m[1], 10)) : max;
-      }, 300);
-      const newId = `BUG-${maxNum + 1}`;
-      const defectDisplayId = `DEF-${String(prevDefects.length + 1).padStart(
-        3,
-        '0'
-      )}`;
+      const {
+        id: newId,
+        defectId: defectDisplayId,
+        nextSequenceState,
+      } = allocateNextDefectIds({
+        defects: prevDefects,
+        testRuns: prevRuns,
+        executions: prevExecs,
+        sequenceState: scopedKey ? defectSeqRef.current[scopedKey] : null,
+      });
+      if (scopedKey) {
+        defectSeqRef.current[scopedKey] = nextSequenceState;
+      }
+      if (targetProjectId) {
+        saveDefectSequenceState(
+          targetProjectId,
+          targetUserId,
+          nextSequenceState
+        ).catch(() => {});
+      }
       const now = formatTimestamp();
 
       const matchedTc = linkedTestCaseId
@@ -3392,6 +3506,14 @@ export function WorkspaceProvider({ children }) {
         return { ...result, defect: null };
       }
 
+      if (targetProjectId) {
+        await saveDefectSequenceState(
+          targetProjectId,
+          targetUserId,
+          nextSequenceState
+        );
+      }
+
       appendActivity(
         'defect',
         `Logged ${newId} (${newDefect.severity}): ${newDefect.title}`,
@@ -3407,6 +3529,7 @@ export function WorkspaceProvider({ children }) {
     [
       selectedProject,
       profile,
+      getScopedProjectKey,
       persistProjectDataToBackend,
       appendActivity,
       showToast,
@@ -3419,11 +3542,20 @@ export function WorkspaceProvider({ children }) {
   const updateDefect = useCallback(
     async (defectId, updates = {}, options = {}) => {
       const cleanId = typeof defectId === 'string' ? defectId.trim() : '';
+      if (!cleanId) {
+        return {
+          ok: false,
+          status: 404,
+          defect: null,
+          error: 'Defect not found.',
+        };
+      }
       const prevDefects = defectsRef.current;
-      const existingDefect = prevDefects.find(
-        (b) => b.id === cleanId || b.defectId === cleanId
+      const { defect: existingDefect, index: targetIndex } = findDefectById(
+        prevDefects,
+        cleanId
       );
-      if (!existingDefect) {
+      if (!existingDefect || targetIndex === -1) {
         return {
           ok: false,
           status: 404,
@@ -3464,6 +3596,8 @@ export function WorkspaceProvider({ children }) {
       const updatedDefect = {
         ...existingDefect,
         ...updates,
+        id: existingDefect.id,
+        defectId: existingDefect.defectId || existingDefect.id,
         title:
           updates.title !== undefined
             ? updates.title.trim()
@@ -3511,8 +3645,8 @@ export function WorkspaceProvider({ children }) {
         updatedAt: now,
       };
 
-      const nextDefects = prevDefects.map((bug) =>
-        bug.id === existingDefect.id ? updatedDefect : bug
+      const nextDefects = prevDefects.map((bug, idx) =>
+        idx === targetIndex ? updatedDefect : bug
       );
 
       // Sync linkedDefectId on run results if linkedTestCaseId changed
@@ -3529,7 +3663,9 @@ export function WorkspaceProvider({ children }) {
             return { ...r, linkedDefectId: existingDefect.id };
           }
           if (
-            r.linkedDefectId === existingDefect.id &&
+            (r.linkedDefectId === existingDefect.id ||
+              (existingDefect.defectId &&
+                r.linkedDefectId === existingDefect.defectId)) &&
             r.testCaseId !== nextLinkedCaseId
           ) {
             return { ...r, linkedDefectId: null };
@@ -3594,30 +3730,44 @@ export function WorkspaceProvider({ children }) {
   const deleteDefect = useCallback(
     async (defectId, options = {}) => {
       const cleanId = typeof defectId === 'string' ? defectId.trim() : '';
+      if (!cleanId) {
+        return { ok: false, status: 404, error: 'Defect not found.' };
+      }
       const prevDefects = defectsRef.current;
-      const target = prevDefects.find(
-        (b) => b.id === cleanId || b.defectId === cleanId
+      const { defect: target, index: targetIndex } = findDefectById(
+        prevDefects,
+        cleanId
       );
-      if (!target) {
+      if (!target || targetIndex === -1) {
         return { ok: false, status: 404, error: 'Defect not found.' };
       }
 
       const prevRuns = testRunsRef.current;
       const prevExecs = executionsRef.current;
 
-      const nextDefects = prevDefects.filter((b) => b.id !== target.id);
+      const nextDefects = prevDefects.filter((_, idx) => idx !== targetIndex);
+      const remainingActiveIds = new Set();
+      nextDefects.forEach((d) => {
+        if (d?.id) remainingActiveIds.add(String(d.id).trim());
+        if (d?.defectId) remainingActiveIds.add(String(d.defectId).trim());
+      });
+
+      const targetIds = [target.id, target.defectId]
+        .filter(Boolean)
+        .map((val) => String(val).trim())
+        .filter((val) => val && !remainingActiveIds.has(val));
+      const targetIdSet = new Set(targetIds);
+
       const nextRuns = prevRuns.map((run) => ({
         ...run,
         results: run.results.map((r) =>
-          r.linkedDefectId === target.id ||
-          r.linkedDefectId === target.defectId
+          r.linkedDefectId && targetIdSet.has(String(r.linkedDefectId).trim())
             ? { ...r, linkedDefectId: null }
             : r
         ),
       }));
       const nextExecs = prevExecs.map((ex) =>
-        ex.linkedDefectId === target.id ||
-        ex.linkedDefectId === target.defectId
+        ex.linkedDefectId && targetIdSet.has(String(ex.linkedDefectId).trim())
           ? { ...ex, linkedDefectId: null }
           : ex
       );
@@ -3636,6 +3786,21 @@ export function WorkspaceProvider({ children }) {
         setSelectedDefectId(null);
       }
 
+      const targetUserId = resolvedUserIdRef.current;
+      const targetProjectId = selectedProjectIdRef.current;
+      const scopedKey = getScopedProjectKey(targetProjectId, targetUserId);
+      const deletedIdsForSequence = [target.id, target.defectId].filter(Boolean);
+      const nextSeqState = computeHighWaterSequences({
+        defects: prevDefects,
+        testRuns: prevRuns,
+        executions: prevExecs,
+        tombstoneIds: deletedIdsForSequence,
+        previousState: scopedKey ? defectSeqRef.current[scopedKey] : null,
+      });
+      if (scopedKey) {
+        defectSeqRef.current[scopedKey] = nextSeqState;
+      }
+
       const { defects: serializedDefects, defectSummaryCounts } =
         buildBackendDefectsPayload(nextDefects);
       const {
@@ -3644,7 +3809,7 @@ export function WorkspaceProvider({ children }) {
         executions: serializedExecs,
       } = buildBackendExecutionsAndRunsPayload(nextRuns, nextExecs);
 
-      const defectTombstoneIds = [target.id, target.defectId].filter(Boolean);
+      const defectTombstoneIds = targetIds;
       const result = await persistProjectDataToBackend(
         {
           defects: serializedDefects,
@@ -3672,6 +3837,14 @@ export function WorkspaceProvider({ children }) {
         return result;
       }
 
+      if (targetProjectId) {
+        await saveDefectSequenceState(
+          targetProjectId,
+          targetUserId,
+          nextSeqState
+        );
+      }
+
       appendActivity(
         'defect',
         `Deleted defect ${target.id}`,
@@ -3682,6 +3855,7 @@ export function WorkspaceProvider({ children }) {
     },
     [
       selectedDefectId,
+      getScopedProjectKey,
       persistProjectDataToBackend,
       appendActivity,
       showToast,
@@ -4014,6 +4188,24 @@ export function WorkspaceProvider({ children }) {
           }
         }
 
+        if (selectedProjectId) {
+          const scopedKey = getScopedProjectKey(selectedProjectId, resolvedUserId);
+          const preservedSeq = computeHighWaterSequences({
+            defects: [...prevDefects, ...INITIAL_DEFECTS],
+            testRuns: [...prevRuns, ...INITIAL_TEST_RUNS],
+            executions: prevExecutions,
+            previousState: scopedKey ? defectSeqRef.current[scopedKey] : null,
+          });
+          if (scopedKey) {
+            defectSeqRef.current[scopedKey] = preservedSeq;
+          }
+          await saveDefectSequenceState(
+            selectedProjectId,
+            resolvedUserId,
+            preservedSeq
+          );
+        }
+
         if (!options.silentToast) {
           showToast('Restored sample QA dataset for active project', 'info');
         }
@@ -4198,6 +4390,24 @@ export function WorkspaceProvider({ children }) {
               error: errMsg,
             };
           }
+        }
+
+        if (selectedProjectId) {
+          const scopedKey = getScopedProjectKey(selectedProjectId, resolvedUserId);
+          const preservedSeq = computeHighWaterSequences({
+            defects: prevDefects,
+            testRuns: prevRuns,
+            executions: prevExecutions,
+            previousState: scopedKey ? defectSeqRef.current[scopedKey] : null,
+          });
+          if (scopedKey) {
+            defectSeqRef.current[scopedKey] = preservedSeq;
+          }
+          await saveDefectSequenceState(
+            selectedProjectId,
+            resolvedUserId,
+            preservedSeq
+          );
         }
 
         if (!options.silentToast) {

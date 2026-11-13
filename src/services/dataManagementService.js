@@ -76,6 +76,10 @@ import {
   removeCachedChecklistOffline,
 } from './checklists/checklistCache.js';
 import { getProjectWorkspaceStorageKey } from '../context/workspace/workspaceConstants.js';
+import {
+  normalizeDefectsWithUniqueIds,
+  recordObservedDefectSequence,
+} from '../context/workspace/defectIdUtils.js';
 
 export const SUPPORTED_BACKUP_VERSION = 1;
 export const SUPPORTED_SCHEMA_VERSION = 1;
@@ -1694,50 +1698,43 @@ export function parseAndValidateImportPayload(jsonInput, options = {}) {
       });
     executionsCount += sanitizedExecs.length;
 
-    // Sanitize defects and validate cross-references (`linkedTestCaseId`, `linkedTestRunId`)
+    // Sanitize defects, enforce unique IDs, and validate cross-references (`linkedTestCaseId`, `linkedTestRunId`)
     const rawDefects = Array.isArray(p.defects) ? p.defects : [];
-    const seenDefectIds = new Set();
-    const sanitizedDefects = rawDefects
-      .filter((d) => d && typeof d === 'object' && !Array.isArray(d))
-      .map((d, dIdx) => {
-        let defectId = String(
-          d.id || d.defectId || `DEF-${String(dIdx + 1).padStart(3, '0')}`
-        ).trim();
-        if (seenDefectIds.has(defectId)) {
-          defectId = `${defectId}_${dIdx + 1}`;
-        }
-        seenDefectIds.add(defectId);
+    const normalizedUniqueDefects = normalizeDefectsWithUniqueIds(rawDefects, {
+      warnings,
+    });
+    const sanitizedDefects = normalizedUniqueDefects.map((d) => {
+      const defectId = String(d.id);
+      let linkedCaseId = d.linkedTestCaseId || d.testCaseId || null;
+      if (linkedCaseId && !seenCaseIds.has(String(linkedCaseId))) {
+        warnings.push(
+          `Defect "${defectId}" referenced non-existent test case "${linkedCaseId}"; reference was safely unlinked.`
+        );
+        linkedCaseId = null;
+      }
 
-        let linkedCaseId = d.linkedTestCaseId || d.testCaseId || null;
-        if (linkedCaseId && !seenCaseIds.has(String(linkedCaseId))) {
-          warnings.push(
-            `Defect "${defectId}" referenced non-existent test case "${linkedCaseId}"; reference was safely unlinked.`
-          );
-          linkedCaseId = null;
-        }
+      let linkedRunId = d.linkedTestRunId || null;
+      if (linkedRunId && !seenRunIds.has(String(linkedRunId))) {
+        linkedRunId = null;
+      }
 
-        let linkedRunId = d.linkedTestRunId || null;
-        if (linkedRunId && !seenRunIds.has(String(linkedRunId))) {
-          linkedRunId = null;
-        }
-
-        return {
-          ...d,
-          id: defectId,
-          defectId: String(d.defectId || defectId),
-          title:
-            typeof d.title === 'string' && d.title.trim()
-              ? d.title.trim()
-              : 'Untitled Defect',
-          severity: d.severity || 'High',
-          priority: d.priority || d.severity || 'High',
-          status: d.status || 'Open',
-          linkedTestCaseId: linkedCaseId,
-          linkedTestRunId: linkedRunId,
-          createdAt: d.createdAt || nowIso,
-          updatedAt: d.updatedAt || nowIso,
-        };
-      });
+      return {
+        ...d,
+        id: defectId,
+        defectId: String(d.defectId || defectId),
+        title:
+          typeof d.title === 'string' && d.title.trim()
+            ? d.title.trim()
+            : 'Untitled Defect',
+        severity: d.severity || 'High',
+        priority: d.priority || d.severity || 'High',
+        status: d.status || 'Open',
+        linkedTestCaseId: linkedCaseId,
+        linkedTestRunId: linkedRunId,
+        createdAt: d.createdAt || nowIso,
+        updatedAt: d.updatedAt || nowIso,
+      };
+    });
     defectsCount += sanitizedDefects.length;
 
     // Recompute accurate summary counters for the project
@@ -3198,6 +3195,16 @@ export async function importWorkspaceOffline({
     const finalProjects = await getCachedProjectsForUser(cleanUser, true);
     const finalChecklists = await getCachedChecklistsForUser(cleanUser);
 
+    for (let i = 0; i < finalProjects.length; i += 1) {
+      const fp = finalProjects[i];
+      if (!fp || !fp.id) continue;
+      await recordObservedDefectSequence(fp.id, cleanUser, {
+        defects: fp.defects,
+        testRuns: fp.executionRuns,
+        executions: fp.executions,
+      });
+    }
+
     notifySyncListeners({
       type: 'offline_import_completed',
       mode,
@@ -3535,16 +3542,19 @@ export async function restoreLocalRecoverySnapshot(
     .map((p) => {
       if (!p || typeof p !== 'object') return null;
       const norm = normalizeProjectRecord({ ...p, userId: cleanUser });
-      return norm
-        ? {
-            ...p,
-            ...norm,
-            userId: cleanUser,
-            _serverUpdatedAt:
-              p._serverUpdatedAt ||
-              (!p._pendingCreation && p.updatedAt ? p.updatedAt : null),
-          }
-        : null;
+      if (!norm) return null;
+      const normalizedDefects = normalizeDefectsWithUniqueIds(
+        Array.isArray(p.defects) ? p.defects : norm.defects
+      );
+      return {
+        ...p,
+        ...norm,
+        defects: normalizedDefects,
+        userId: cleanUser,
+        _serverUpdatedAt:
+          p._serverUpdatedAt ||
+          (!p._pendingCreation && p.updatedAt ? p.updatedAt : null),
+      };
     })
     .filter(Boolean);
 
@@ -3609,6 +3619,15 @@ export async function restoreLocalRecoverySnapshot(
   };
 
   const mergeOrReplaceLocalProjects = async () => {
+    for (let i = 0; i < snapshotProjects.length; i += 1) {
+      const sp = snapshotProjects[i];
+      if (!sp || !sp.id) continue;
+      await recordObservedDefectSequence(sp.id, cleanUser, {
+        defects: sp.defects,
+        testRuns: sp.executionRuns,
+        executions: sp.executions,
+      });
+    }
     if (mode === 'merge') {
       const snapshotProjectIds = new Set(snapshotProjects.map((p) => p.id));
       const preservedProjects = existingCachedProjects.filter(

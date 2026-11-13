@@ -1216,6 +1216,10 @@ export default function TestRunsScreen({
       const d = list[i];
       if (!d) continue;
       if (d.id && !byId.has(d.id)) byId.set(d.id, d);
+    }
+    for (let i = 0; i < list.length; i += 1) {
+      const d = list[i];
+      if (!d) continue;
       if (d.defectId && !byId.has(d.defectId)) byId.set(d.defectId, d);
       if (d.linkedTestCaseId && d.linkedTestRunId) {
         const key = `${d.linkedTestRunId}::${d.linkedTestCaseId}`;

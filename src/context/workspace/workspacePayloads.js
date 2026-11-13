@@ -16,6 +16,7 @@ import {
   computeRunMetrics,
   normalizeTestStep,
 } from './workspaceConstants.js';
+import { normalizeDefectsWithUniqueIds } from './defectIdUtils.js';
 
 /**
  * Serializes workspace `suites` and `testCases` into the nested `testSuites`
@@ -312,11 +313,13 @@ export function buildBackendExecutionsAndRunsPayload(
  */
 export function buildBackendDefectsPayload(defects = []) {
   const nowIso = new Date().toISOString();
-  const safeDefects = Array.isArray(defects) ? defects : [];
+  const safeDefects = normalizeDefectsWithUniqueIds(
+    Array.isArray(defects) ? defects : []
+  );
 
-  const serializedDefects = safeDefects.map((d, idx) => {
-    const id = String(d.id || d.defectId || `DEF-${String(idx + 1).padStart(3, '0')}`);
-    const defectId = String(d.defectId || d.id || id);
+  const serializedDefects = safeDefects.map((d) => {
+    const id = String(d.id);
+    const defectId = String(d.defectId || id);
     const stepsText =
       (typeof d.reproductionSteps === 'string' && d.reproductionSteps.trim()) ||
       (typeof d.steps === 'string' && d.steps.trim()) ||
@@ -690,15 +693,13 @@ export function buildProjectWorkspaceState(
     };
   });
 
-  // 4. Map backend defects
-  const rawDefects = Array.isArray(selectedProject.defects)
-    ? selectedProject.defects
-    : [];
-  const backendDefects = rawDefects.map((bug, idx) => {
-    const id = String(
-      bug.id || bug.defectId || `DEF-${String(idx + 1).padStart(3, '0')}`
-    );
-    const defectId = String(bug.defectId || bug.id || id);
+  // 4. Map backend defects (enforcing unique id and defectId across legacy/imported records)
+  const rawDefects = normalizeDefectsWithUniqueIds(
+    Array.isArray(selectedProject.defects) ? selectedProject.defects : []
+  );
+  const backendDefects = rawDefects.map((bug) => {
+    const id = String(bug.id);
+    const defectId = String(bug.defectId || id);
     const linkedTcId = bug.linkedTestCaseId || bug.testCaseId || null;
     const matchedTc = linkedTcId
       ? backendTestCases.find(
@@ -825,7 +826,7 @@ export function buildProjectWorkspaceState(
         : backendExecutions,
     defects:
       useLocalFallbackOnly && Array.isArray(persistedSnapshot.defects)
-        ? persistedSnapshot.defects
+        ? normalizeDefectsWithUniqueIds(persistedSnapshot.defects)
         : backendDefects,
     activityLog:
       hasValidSnapshot &&

@@ -457,9 +457,9 @@ export default function DefectsScreen() {
   const viewingDefect = useMemo(() => {
     if (!viewingDefectId) return null;
     return (
-      defects.find(
-        (d) => d.id === viewingDefectId || d.defectId === viewingDefectId
-      ) || null
+      defects.find((d) => d && d.id === viewingDefectId) ||
+      defects.find((d) => d && d.defectId === viewingDefectId) ||
+      null
     );
   }, [viewingDefectId, defects]);
 
