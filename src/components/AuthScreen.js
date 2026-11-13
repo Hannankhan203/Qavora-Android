@@ -1011,6 +1011,7 @@ export default function AuthScreen() {
                         <Pressable
                           key={roleOpt}
                           onPress={() => setRegisterRole(roleOpt)}
+                          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                           accessibilityRole="radio"
                           accessibilityState={{ selected, checked: selected }}
                           accessibilityLabel={`QA role: ${roleOpt}`}
@@ -1454,6 +1455,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 28,
+    paddingBottom: 32,
     maxWidth: 480,
     width: '100%',
     alignSelf: 'center',
@@ -1491,7 +1493,7 @@ const styles = StyleSheet.create({
   },
   modeTabBtn: {
     flex: 1,
-    minHeight: 42,
+    minHeight: 44,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1600,7 +1602,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   roleChip: {
-    minHeight: 38,
+    minHeight: 40,
     borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 12,
@@ -1630,7 +1632,9 @@ const styles = StyleSheet.create({
   },
   switchLinkWrap: {
     marginTop: 18,
+    minHeight: 44,
     alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: 8,
   },
   switchLinkText: {

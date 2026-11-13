@@ -2009,8 +2009,8 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   drawerMenuBtn: {
-    width: 38,
-    height: 38,
+    width: 40,
+    height: 40,
     borderRadius: 9,
     borderWidth: 1,
     alignItems: 'center',
@@ -2087,7 +2087,8 @@ const styles = StyleSheet.create({
   },
   drawerScrollContent: {
     paddingHorizontal: 10,
-    paddingVertical: 10,
+    paddingTop: 10,
+    paddingBottom: 20,
     gap: 10,
   },
   drawerSection: {
@@ -2160,11 +2161,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   drawerFooterThemeBtn: {
-    minHeight: 38,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 7,
     borderWidth: 1,
   },

@@ -7,6 +7,7 @@ import {
   Modal,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, monoFontFamily } from '../../theme/theme';
 import VectorIcon from '../VectorIcon';
 import styles from './checklistsStyles';
@@ -30,6 +31,7 @@ export default function ChecklistPromoteModal({
   handleConfirmPromoteChecklist,
 }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
     <Modal
@@ -40,7 +42,14 @@ export default function ChecklistPromoteModal({
     >
       <View
         accessibilityViewIsModal={true}
-        style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+        style={[
+          styles.modalBackdrop,
+          {
+            backgroundColor: colors.overlay,
+            paddingTop: Math.max(16, insets.top),
+            paddingBottom: Math.max(16, insets.bottom + 8),
+          },
+        ]}
       >
         <View
           style={[

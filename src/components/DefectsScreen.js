@@ -178,6 +178,7 @@ const DefectRowCard = React.memo(function DefectRowCard({
             {externalUrlValid ? (
               <TouchableOpacity
                 activeOpacity={0.75}
+                hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
                 accessibilityRole="link"
                 accessibilityLabel={`Open external issue link for ${displayId}`}
                 accessibilityHint="Opens the external issue URL in your browser"
@@ -940,6 +941,7 @@ export default function DefectsScreen() {
           <View style={styles.alertBannerActions}>
             {workspaceConflict && (
               <TouchableOpacity
+                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                 accessibilityRole="button"
                 accessibilityLabel="Reload latest project data"
                 style={[
@@ -955,6 +957,7 @@ export default function DefectsScreen() {
               </TouchableOpacity>
             )}
             <TouchableOpacity
+              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
               accessibilityRole="button"
               accessibilityLabel="Dismiss error banner"
               style={[

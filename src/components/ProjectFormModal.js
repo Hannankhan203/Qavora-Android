@@ -26,6 +26,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useProjects } from '../context/ProjectContext';
 import VectorIcon from './VectorIcon';
@@ -44,6 +45,7 @@ export default function ProjectFormModal({
   onSuccess,
 }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const {
     createProject,
     updateProject,
@@ -244,7 +246,13 @@ export default function ProjectFormModal({
       onRequestClose={handleClose}
     >
       <KeyboardAvoidingView
-        style={[styles.overlay, { backgroundColor: colors.overlay }]}
+        style={[
+          styles.overlay,
+          {
+            backgroundColor: colors.overlay,
+            paddingTop: Math.max(16, insets.top),
+          },
+        ]}
         accessibilityViewIsModal={true}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 16}
@@ -638,7 +646,13 @@ export default function ProjectFormModal({
 
           {/* Footer Actions */}
           <View
-            style={[styles.footerRow, { borderTopColor: colors.border }]}
+            style={[
+              styles.footerRow,
+              {
+                borderTopColor: colors.border,
+                paddingBottom: Math.max(12, insets.bottom + 8),
+              },
+            ]}
           >
             <Pressable
               onPress={handleClose}
@@ -752,8 +766,8 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   closeBtn: {
-    width: 34,
-    height: 34,
+    width: 36,
+    height: 36,
     borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
@@ -790,8 +804,8 @@ const styles = StyleSheet.create({
     gap: 6,
     borderWidth: 1,
     borderRadius: 8,
-    minHeight: 36,
-    paddingHorizontal: 10,
+    minHeight: 44,
+    paddingHorizontal: 12,
   },
   conflictReloadText: {
     fontSize: 12,
@@ -829,7 +843,7 @@ const styles = StyleSheet.create({
   choiceChip: {
     flex: 1,
     minWidth: 88,
-    minHeight: 40,
+    minHeight: 44,
     borderRadius: 10,
     borderWidth: 1,
     alignItems: 'center',
@@ -841,7 +855,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   typePresetChip: {
-    minHeight: 34,
+    minHeight: 38,
     paddingHorizontal: 10,
     borderRadius: 8,
     borderWidth: 1,

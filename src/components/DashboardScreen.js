@@ -970,8 +970,10 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                 </Text>
                 <Pressable
                   onPress={() => setActiveTab('defects')}
+                  hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
                   accessibilityRole="button"
                   accessibilityLabel={`View all ${metrics.totalDefects} defects, ${metrics.defectResolutionRate}% resolved`}
+                  style={styles.sectionLinkBtn}
                 >
                   <Text style={[styles.linkText, { color: colors.primary }]}>
                     {metrics.totalDefects} Total · {metrics.defectResolutionRate}
@@ -1161,8 +1163,10 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                       setActiveTab('testcases', { testCasesSubTab: 'suites' });
                     }
                   }}
+                  hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
                   accessibilityRole="button"
                   accessibilityLabel="View Test Suites"
+                  style={styles.sectionLinkBtn}
                 >
                   <Text style={[styles.linkText, { color: colors.primary }]}>
                     View Suites →
@@ -1275,8 +1279,10 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                 </Text>
                 <Pressable
                   onPress={() => setActiveTab('testruns')}
+                  hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
                   accessibilityRole="button"
                   accessibilityLabel={`View all ${metrics.totalRuns} test runs`}
+                  style={styles.sectionLinkBtn}
                 >
                   <Text style={[styles.linkText, { color: colors.primary }]}>
                     All Runs ({metrics.totalRuns}) →
@@ -1515,8 +1521,10 @@ export default function DashboardScreen({ onNavigateToDestination }) {
                 </Text>
                 <Pressable
                   onPress={() => setActiveTab('defects')}
+                  hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
                   accessibilityRole="button"
                   accessibilityLabel={`View all ${metrics.totalDefects} defects`}
+                  style={styles.sectionLinkBtn}
                 >
                   <Text style={[styles.linkText, { color: colors.primary }]}>
                     All Defects ({metrics.totalDefects}) →
@@ -1694,7 +1702,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 14,
     paddingTop: 14,
-    paddingBottom: 28,
+    paddingBottom: 36,
   },
   container: {
     maxWidth: 920,
@@ -1883,6 +1891,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
   },
+  sectionLinkBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
   linkText: {
     fontSize: 12,
     fontWeight: '700',
@@ -1893,7 +1906,7 @@ const styles = StyleSheet.create({
   },
   emptyPrimaryBtn: {
     alignSelf: 'flex-start',
-    minHeight: 38,
+    minHeight: 44,
     paddingHorizontal: 14,
     borderRadius: 9,
     alignItems: 'center',

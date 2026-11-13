@@ -10,6 +10,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/theme';
 import VectorIcon from '../VectorIcon';
 import styles from './testCasesStyles';
@@ -53,6 +54,7 @@ export default function TestCaseFormModal({
   handleSaveTestCase,
 }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
     <Modal
@@ -64,7 +66,13 @@ export default function TestCaseFormModal({
       <KeyboardAvoidingView
         accessibilityViewIsModal={true}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}
+        style={[
+          styles.modalOverlay,
+          {
+            backgroundColor: colors.overlay,
+            paddingTop: Math.max(16, insets.top),
+          },
+        ]}
       >
         <View
           style={[
@@ -181,6 +189,7 @@ export default function TestCaseFormModal({
                     <Pressable
                       key={s.id}
                       onPress={() => setFormSuiteId(s.id)}
+                      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                       accessibilityRole="radio"
                       accessibilityState={{ selected: active, checked: active }}
                       accessibilityLabel={`Test Suite: ${s.name}`}
@@ -221,6 +230,7 @@ export default function TestCaseFormModal({
                   <Pressable
                     key={p}
                     onPress={() => setFormPriority(p)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                     accessibilityRole="radio"
                     accessibilityState={{ selected: active, checked: active }}
                     accessibilityLabel={`Priority: ${p}`}
@@ -260,6 +270,7 @@ export default function TestCaseFormModal({
                   <Pressable
                     key={t}
                     onPress={() => setFormTestType(t)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                     accessibilityRole="radio"
                     accessibilityState={{ selected: active, checked: active }}
                     accessibilityLabel={`Test Type: ${t}`}
@@ -362,9 +373,11 @@ export default function TestCaseFormModal({
                 Execution Steps
               </Text>
               <Pressable
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 accessibilityRole="button"
                 accessibilityLabel="Add execution step"
                 onPress={addStepRow}
+                style={{ minHeight: 36, justifyContent: 'center' }}
               >
                 <Text style={[styles.addStepLink, { color: colors.primary }]}>
                   + Add Step
@@ -391,9 +404,11 @@ export default function TestCaseFormModal({
                   </Text>
                   {formSteps.length > 1 && (
                     <Pressable
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       accessibilityRole="button"
                       accessibilityLabel={`Remove step ${index + 1}`}
                       onPress={() => removeStepRow(index)}
+                      style={{ minHeight: 36, justifyContent: 'center' }}
                     >
                       <Text
                         style={{
@@ -510,7 +525,13 @@ export default function TestCaseFormModal({
           </ScrollView>
 
           <View
-            style={[styles.modalFooter, { borderTopColor: colors.border }]}
+            style={[
+              styles.modalFooter,
+              {
+                borderTopColor: colors.border,
+                paddingBottom: Math.max(14, insets.bottom + 8),
+              },
+            ]}
           >
             <Pressable
               disabled={isSubmittingCase}

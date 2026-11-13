@@ -389,25 +389,47 @@ mock.module('expo-status-bar', () => ({
   StatusBar: () => null,
 }));
 
+export const safeAreaInsetsController = {
+  current: { top: 0, bottom: 0, left: 0, right: 0 },
+  set(next = {}) {
+    this.current = {
+      top: Number(next.top || 0),
+      bottom: Number(next.bottom || 0),
+      left: Number(next.left || 0),
+      right: Number(next.right || 0),
+    };
+  },
+  reset() {
+    this.current = { top: 0, bottom: 0, left: 0, right: 0 };
+  },
+};
+
 mock.module('react-native-safe-area-context', () => {
   const React = require('react');
   return {
     SafeAreaProvider: ({ children }) => React.createElement('div', null, children),
     SafeAreaView: ({ children }) => React.createElement('div', null, children),
-    useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+    useSafeAreaInsets: () => ({ ...safeAreaInsetsController.current }),
   };
 });
 
 mock.module('react-native', () => {
   const React = require('react');
+  const flattenHostStyle = (s) =>
+    Array.isArray(s)
+      ? Object.assign({}, ...s.filter(Boolean).map((item) => flattenHostStyle(item)))
+      : s && typeof s === 'object'
+        ? s
+        : {};
   const mapHostProps = (props) => {
     const {
       children,
-      style: _style,
+      style,
       accessibilityLabel,
       accessibilityRole,
       accessibilityState: _accessibilityState,
       accessible: _accessible,
+      accessibilityViewIsModal: _accessibilityViewIsModal,
       testID,
       onPress,
       onChangeText,
@@ -420,10 +442,14 @@ mock.module('react-native', () => {
       contentContainerStyle: _contentContainerStyle,
       placeholderTextColor: _placeholderTextColor,
       activeOpacity: _activeOpacity,
-      hitSlop: _hitSlop,
+      hitSlop,
       ...rest
     } = props || {};
     const mapped = { ...rest };
+    const flatStyle = flattenHostStyle(style);
+    if (flatStyle.paddingTop !== undefined) mapped['data-padding-top'] = String(flatStyle.paddingTop);
+    if (flatStyle.paddingBottom !== undefined) mapped['data-padding-bottom'] = String(flatStyle.paddingBottom);
+    if (hitSlop && typeof hitSlop === 'object') mapped['data-hit-slop'] = JSON.stringify(hitSlop);
     if (accessibilityLabel !== undefined) mapped['aria-label'] = accessibilityLabel;
     if (accessibilityRole !== undefined) mapped.role = accessibilityRole;
     if (testID !== undefined) mapped['data-testid'] = testID;

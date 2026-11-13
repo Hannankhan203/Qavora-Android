@@ -10,6 +10,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import VectorIcon from '../VectorIcon';
 import {
   DEFECT_SEVERITIES,
@@ -63,6 +64,8 @@ export default function DefectFormModal({
   defectUrlRef,
   scrollDefectModalTo,
 }) {
+  const insets = useSafeAreaInsets();
+
   return (
     <Modal
       visible={formModalVisible}
@@ -73,7 +76,13 @@ export default function DefectFormModal({
       <KeyboardAvoidingView
         accessibilityViewIsModal={true}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={[styles.modalOverlay, { backgroundColor: theme.overlay }]}
+        style={[
+          styles.modalOverlay,
+          {
+            backgroundColor: theme.overlay,
+            paddingTop: Math.max(16, insets.top),
+          },
+        ]}
       >
         <View
           style={[
@@ -318,6 +327,7 @@ export default function DefectFormModal({
             >
               <TouchableOpacity
                 onPress={() => setLinkedTestCaseId('')}
+                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                 accessibilityRole="radio"
                 accessibilityState={{
                   selected: !linkedTestCaseId,
@@ -355,6 +365,7 @@ export default function DefectFormModal({
                   <TouchableOpacity
                     key={tc.id}
                     onPress={() => handleSelectLinkedCaseInForm(tc.id)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                     accessibilityRole="radio"
                     accessibilityState={{ selected: active, checked: active }}
                     accessibilityLabel={`Link test case ${tc.id}`}
@@ -397,6 +408,7 @@ export default function DefectFormModal({
             >
               <TouchableOpacity
                 onPress={() => setLinkedTestRunId('')}
+                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                 accessibilityRole="radio"
                 accessibilityState={{
                   selected: !linkedTestRunId,
@@ -432,6 +444,7 @@ export default function DefectFormModal({
                   <TouchableOpacity
                     key={run.id}
                     onPress={() => setLinkedTestRunId(run.id)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                     accessibilityRole="radio"
                     accessibilityState={{ selected: active, checked: active }}
                     accessibilityLabel={`Link test run ${run.id}: ${run.name}`}
@@ -614,7 +627,10 @@ export default function DefectFormModal({
           <View
             style={[
               styles.modalFooter,
-              { borderTopColor: theme.border },
+              {
+                borderTopColor: theme.border,
+                paddingBottom: Math.max(16, insets.bottom + 8),
+              },
             ]}
           >
             <TouchableOpacity

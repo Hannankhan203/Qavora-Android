@@ -839,7 +839,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 12,
     paddingTop: 10,
-    paddingBottom: 24,
+    paddingBottom: 36,
     maxWidth: 920,
     width: '100%',
     alignSelf: 'center',

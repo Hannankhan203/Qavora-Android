@@ -6,6 +6,7 @@ import {
   Modal,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import VectorIcon from '../VectorIcon';
 import styles from './testRunsStyles';
 
@@ -18,6 +19,7 @@ export default function TestRunDeleteModal({
   runDeleteError,
   onCancelDeleteRun,
 }) {
+  const insets = useSafeAreaInsets();
   const handleClose = () => {
     if (isDeletingRun) return;
     if (typeof onCancelDeleteRun === 'function') {
@@ -38,7 +40,11 @@ export default function TestRunDeleteModal({
         accessibilityViewIsModal={true}
         style={[
           styles.confirmOverlay,
-          { backgroundColor: theme.overlay },
+          {
+            backgroundColor: theme.overlay,
+            paddingTop: Math.max(24, insets.top),
+            paddingBottom: Math.max(24, insets.bottom + 8),
+          },
         ]}
       >
         <View

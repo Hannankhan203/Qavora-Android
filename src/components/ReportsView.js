@@ -14,6 +14,7 @@ import {
   Keyboard,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useProjects } from '../context/ProjectContext';
 import {
@@ -489,6 +490,7 @@ const ReportDefectRow = React.memo(function ReportDefectRow({
 
 export default function ReportsView({ topHeaderNode = null }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const {
     selectedProject,
     refreshSelectedProject,
@@ -1768,8 +1770,10 @@ export default function ReportsView({ topHeaderNode = null }) {
         {section.actionLabel ? (
           <Pressable
             onPress={() => handleSectionAction(section.actionType)}
+            hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
             accessibilityRole="button"
             accessibilityLabel={section.actionLabel}
+            style={styles.sectionActionBtn}
           >
             <Text style={[styles.linkText, { color: colors.primary }]}>
               {section.actionLabel}
@@ -2043,7 +2047,14 @@ export default function ReportsView({ topHeaderNode = null }) {
         onRequestClose={() => !isExporting && setPreviewModalVisible(false)}
       >
         <View
-          style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+          style={[
+            styles.modalBackdrop,
+            {
+              backgroundColor: colors.overlay,
+              paddingTop: Math.max(16, insets.top),
+              paddingBottom: Math.max(16, insets.bottom + 8),
+            },
+          ]}
           accessibilityViewIsModal={true}
         >
           <View
@@ -2161,7 +2172,12 @@ export default function ReportsView({ topHeaderNode = null }) {
               </Text>
             </ScrollView>
 
-            <View style={styles.modalFooter}>
+            <View
+              style={[
+                styles.modalFooter,
+                { paddingBottom: Math.max(0, insets.bottom) },
+              ]}
+            >
               <Pressable
                 onPress={handleShareFromPreview}
                 disabled={isExporting}
@@ -2200,7 +2216,7 @@ const styles = StyleSheet.create({
   sectionListContent: {
     paddingHorizontal: 14,
     paddingTop: 14,
-    paddingBottom: 28,
+    paddingBottom: 36,
     maxWidth: 920,
     width: '100%',
     alignSelf: 'center',
@@ -2280,12 +2296,13 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   refreshBtn: {
-    minHeight: 36,
-    paddingHorizontal: 11,
+    minHeight: 44,
+    paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 6,
   },
   refreshBtnText: {
@@ -2318,7 +2335,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   filterPill: {
-    minHeight: 36,
+    minHeight: 38,
     paddingHorizontal: 12,
     borderRadius: 9,
     borderWidth: 1,
@@ -2329,7 +2346,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   filterPillSmall: {
-    minHeight: 32,
+    minHeight: 38,
     paddingHorizontal: 10,
     borderRadius: 8,
     borderWidth: 1,
@@ -2368,7 +2385,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   applyCustomDateBtn: {
-    minHeight: 36,
+    minHeight: 44,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2390,7 +2407,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   previewLinkBtn: {
-    paddingVertical: 2,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingVertical: 4,
   },
   previewLinkText: {
     fontSize: 12,
@@ -2404,7 +2423,7 @@ const styles = StyleSheet.create({
   exportBtn: {
     flex: 1,
     minWidth: 92,
-    minHeight: 38,
+    minHeight: 44,
     borderRadius: 9,
     borderWidth: 1,
     flexDirection: 'row',
@@ -2444,7 +2463,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   emptyActionBtn: {
-    minHeight: 36,
+    minHeight: 44,
     paddingHorizontal: 14,
     borderRadius: 8,
     alignItems: 'center',
@@ -2496,6 +2515,11 @@ const styles = StyleSheet.create({
   sectionCounter: {
     fontSize: 11,
     fontWeight: '600',
+  },
+  sectionActionBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 4,
   },
   linkText: {
     fontSize: 12,
@@ -2718,8 +2742,9 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   closeModalBtn: {
-    minHeight: 34,
-    paddingHorizontal: 12,
+    minWidth: 44,
+    minHeight: 44,
+    paddingHorizontal: 14,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2752,7 +2777,7 @@ const styles = StyleSheet.create({
   },
   shareModalBtn: {
     flex: 1,
-    minHeight: 42,
+    minHeight: 44,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',

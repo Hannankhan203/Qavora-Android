@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, monoFontFamily } from '../../theme/theme';
 import {
   CHECKLIST_CATEGORIES,
@@ -53,6 +54,7 @@ export default function ChecklistFormModal({
   busyMutation,
 }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
     <Modal
@@ -64,7 +66,14 @@ export default function ChecklistFormModal({
       <KeyboardAvoidingView
         accessibilityViewIsModal={true}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+        style={[
+          styles.modalBackdrop,
+          {
+            backgroundColor: colors.overlay,
+            paddingTop: Math.max(16, insets.top),
+            paddingBottom: Math.max(16, insets.bottom + 8),
+          },
+        ]}
       >
         <View
           style={[
@@ -118,6 +127,7 @@ export default function ChecklistFormModal({
                   <Pressable
                     onPress={() => handleSelectStarterTemplate('none')}
                     disabled={Boolean(busyMutation)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                     accessibilityRole="radio"
                     accessibilityState={{
                       selected: formTemplateId === 'none',
@@ -160,6 +170,7 @@ export default function ChecklistFormModal({
                         key={tpl.id}
                         onPress={() => handleSelectStarterTemplate(tpl.id)}
                         disabled={Boolean(busyMutation)}
+                        hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                         accessibilityRole="radio"
                         accessibilityState={{
                           selected: active,
@@ -267,6 +278,7 @@ export default function ChecklistFormModal({
                     key={cat}
                     onPress={() => setFormCategory(cat)}
                     disabled={Boolean(busyMutation)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                     accessibilityRole="radio"
                     accessibilityState={{
                       selected: active,
@@ -315,6 +327,7 @@ export default function ChecklistFormModal({
                     key={prio}
                     onPress={() => setFormPriority(prio)}
                     disabled={Boolean(busyMutation)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                     accessibilityRole="radio"
                     accessibilityState={{
                       selected: active,
@@ -361,6 +374,7 @@ export default function ChecklistFormModal({
                 <Pressable
                   onPress={() => setFormProjectScope('current')}
                   disabled={Boolean(busyMutation)}
+                  hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                   accessibilityRole="radio"
                   accessibilityState={{
                     selected: formProjectScope === 'current',
@@ -403,6 +417,7 @@ export default function ChecklistFormModal({
               <Pressable
                 onPress={() => setFormProjectScope('workspace')}
                 disabled={Boolean(busyMutation)}
+                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                 accessibilityRole="radio"
                 accessibilityState={{
                   selected: formProjectScope === 'workspace',

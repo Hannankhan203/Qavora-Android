@@ -7,7 +7,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 14,
     paddingTop: 12,
-    paddingBottom: 28,
+    paddingBottom: 36,
     maxWidth: 960,
     width: '100%',
     alignSelf: 'center',
@@ -61,7 +61,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   primaryHeaderBtn: {
-    minHeight: 40,
+    minHeight: 44,
     paddingHorizontal: 12,
     borderRadius: 10,
     flexDirection: 'row',
@@ -74,7 +74,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   secondaryHeaderBtn: {
-    minHeight: 40,
+    minHeight: 44,
     paddingHorizontal: 11,
     borderRadius: 10,
     borderWidth: 1,
@@ -94,7 +94,7 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   scopeTab: {
-    minHeight: 38,
+    minHeight: 44,
     paddingHorizontal: 11,
     borderRadius: 10,
     borderWidth: 1,
@@ -126,7 +126,7 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   retryBtn: {
-    minHeight: 38,
+    minHeight: 44,
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
@@ -182,7 +182,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   filterPill: {
-    minHeight: 36,
+    minHeight: 38,
     paddingHorizontal: 12,
     borderRadius: 9,
     borderWidth: 1,
@@ -229,8 +229,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   iconBtn: {
-    width: 36,
-    height: 36,
+    width: 40,
+    height: 40,
     borderRadius: 8,
     borderWidth: 1,
     alignItems: 'center',
@@ -291,7 +291,7 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   templateQuickBtn: {
-    minHeight: 42,
+    minHeight: 44,
     paddingHorizontal: 14,
     borderRadius: 10,
     borderWidth: 1,
@@ -314,7 +314,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   backBtn: {
-    minHeight: 40,
+    minHeight: 44,
     paddingHorizontal: 12,
     borderRadius: 9,
     borderWidth: 1,
@@ -333,7 +333,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   smallActionBtn: {
-    minHeight: 40,
+    minHeight: 44,
     paddingHorizontal: 12,
     borderRadius: 9,
     borderWidth: 1,
@@ -386,7 +386,7 @@ const styles = StyleSheet.create({
   secondaryBtn: {
     flex: 1,
     minWidth: 140,
-    minHeight: 42,
+    minHeight: 44,
     borderRadius: 10,
     borderWidth: 1,
     flexDirection: 'row',
@@ -437,7 +437,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   miniPill: {
-    minHeight: 34,
+    minHeight: 38,
     paddingHorizontal: 10,
     borderRadius: 8,
     borderWidth: 1,
@@ -473,7 +473,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   itemFilterBtn: {
-    minHeight: 34,
+    minHeight: 38,
     paddingHorizontal: 10,
     borderRadius: 8,
     borderWidth: 1,
@@ -500,8 +500,8 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   checkboxHitbox: {
-    width: 28,
-    height: 28,
+    width: 32,
+    height: 32,
     borderRadius: 7,
     borderWidth: 1.5,
     alignItems: 'center',
@@ -629,7 +629,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   promoteCardBtn: {
-    minHeight: 36,
+    minHeight: 38,
     paddingHorizontal: 10,
     borderRadius: 8,
     borderWidth: 1,

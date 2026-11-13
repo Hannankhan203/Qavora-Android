@@ -1,5 +1,6 @@
 import React from 'react';
 import { Text, View, Pressable, Modal, ActivityIndicator } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/theme';
 import styles from './testCasesStyles';
 
@@ -12,6 +13,7 @@ export default function TestCaseDeleteModal({
   onCancelDeleteCase,
 }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const handleClose = () => {
     if (isDeletingCase) return;
     if (typeof onCancelDeleteCase === 'function') {
@@ -32,7 +34,11 @@ export default function TestCaseDeleteModal({
         accessibilityViewIsModal={true}
         style={[
           styles.centeredModalOverlay,
-          { backgroundColor: colors.overlay },
+          {
+            backgroundColor: colors.overlay,
+            paddingTop: Math.max(20, insets.top),
+            paddingBottom: Math.max(20, insets.bottom + 8),
+          },
         ]}
       >
         <View

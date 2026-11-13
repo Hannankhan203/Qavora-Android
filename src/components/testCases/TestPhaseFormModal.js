@@ -9,6 +9,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/theme';
 import styles from './testCasesStyles';
 
@@ -27,6 +28,7 @@ export default function TestPhaseFormModal({
   handleSavePhase,
 }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
     <Modal
@@ -40,7 +42,11 @@ export default function TestPhaseFormModal({
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={[
           styles.centeredModalOverlay,
-          { backgroundColor: colors.overlay },
+          {
+            backgroundColor: colors.overlay,
+            paddingTop: Math.max(20, insets.top),
+            paddingBottom: Math.max(20, insets.bottom + 8),
+          },
         ]}
       >
         <View

@@ -20,7 +20,7 @@
     "react-native-web": "^0.21.4"
   },
   "scripts": {
-    "dev": "expo start --web --port 3000",
+    "dev": "EXPO_PUBLIC_ALLOW_LOCAL_MOCK=true expo start --web --port 3000",
     "start": "expo start --web --port 3000",
     "android": "expo start --android",
     "ios": "expo start --ios",
@@ -30,7 +30,12 @@
     "test": "bun test",
     "test:watch": "bun test --watch",
     "test:coverage": "bun test --coverage",
-    "audit": "npm audit"
+    "audit": "bun audit"
+  },
+  "overrides": {
+    "@expo/fingerprint": {
+      "minimatch": "^11.0.1"
+    }
   },
   "private": true,
   "devDependencies": {

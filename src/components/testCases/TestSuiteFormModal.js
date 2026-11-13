@@ -10,6 +10,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/theme';
 import styles from './testCasesStyles';
 
@@ -39,6 +40,7 @@ export default function TestSuiteFormModal({
   handleSaveSuite,
 }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
     <Modal
@@ -52,7 +54,11 @@ export default function TestSuiteFormModal({
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={[
           styles.centeredModalOverlay,
-          { backgroundColor: colors.overlay },
+          {
+            backgroundColor: colors.overlay,
+            paddingTop: Math.max(20, insets.top),
+            paddingBottom: Math.max(20, insets.bottom + 8),
+          },
         ]}
       >
         <View
@@ -133,6 +139,7 @@ export default function TestSuiteFormModal({
                     <Pressable
                       key={cat}
                       onPress={() => setSuiteCategoryInput(cat)}
+                      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                       accessibilityRole="radio"
                       accessibilityState={{ selected: active, checked: active }}
                       accessibilityLabel={`Suite category: ${cat}`}
@@ -174,6 +181,7 @@ export default function TestSuiteFormModal({
                 >
                   <Pressable
                     onPress={() => setSuitePhaseIdInput('')}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                     accessibilityRole="radio"
                     accessibilityState={{
                       selected: !suitePhaseIdInput,
@@ -211,6 +219,7 @@ export default function TestSuiteFormModal({
                       <Pressable
                         key={ph.id}
                         onPress={() => setSuitePhaseIdInput(ph.id)}
+                        hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                         accessibilityRole="radio"
                         accessibilityState={{
                           selected: active,

@@ -60,6 +60,7 @@ const styles = StyleSheet.create({
   segmentBtn: {
     flex: 1,
     minWidth: 92,
+    minHeight: 38,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -96,6 +97,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   errorBannerBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
@@ -106,6 +109,8 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   errorBannerBtnOutline: {
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
@@ -133,7 +138,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 10,
-    height: 40,
+    height: 44,
     gap: 6,
   },
   searchInput: {
@@ -148,7 +153,7 @@ const styles = StyleSheet.create({
     gap: 5,
     paddingHorizontal: 12,
     borderRadius: 10,
-    height: 40,
+    height: 44,
   },
   addCaseBtnText: {
     color: '#ffffff',
@@ -160,6 +165,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   suiteChip: {
+    minHeight: 36,
+    justifyContent: 'center',
     paddingHorizontal: 11,
     paddingVertical: 6,
     borderRadius: 999,
@@ -175,6 +182,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   miniFilterChip: {
+    minHeight: 34,
+    justifyContent: 'center',
     paddingHorizontal: 9,
     paddingVertical: 4,
     borderRadius: 6,
@@ -194,7 +203,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 14,
-    paddingBottom: 32,
+    paddingBottom: 36,
     gap: 10,
   },
   resultsBar: {
@@ -233,6 +242,8 @@ const styles = StyleSheet.create({
   },
   emptyCta: {
     marginTop: 6,
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 10,
@@ -332,6 +343,8 @@ const styles = StyleSheet.create({
   cardMiniBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 38,
     gap: 4,
     paddingHorizontal: 9,
     paddingVertical: 5,
@@ -364,6 +377,8 @@ const styles = StyleSheet.create({
   primaryActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
     gap: 5,
     paddingHorizontal: 12,
     paddingVertical: 9,
@@ -377,6 +392,8 @@ const styles = StyleSheet.create({
   secondaryActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
     gap: 5,
     paddingHorizontal: 10,
     paddingVertical: 7,
@@ -565,8 +582,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   iconSquareBtn: {
-    width: 30,
-    height: 30,
+    width: 36,
+    height: 36,
     borderRadius: 8,
     borderWidth: 1,
     alignItems: 'center',
@@ -627,9 +644,9 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   closeCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -661,6 +678,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   quickStatusBtn: {
+    minHeight: 40,
+    justifyContent: 'center',
     paddingHorizontal: 11,
     paddingVertical: 6,
     borderRadius: 8,
@@ -729,6 +748,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   footerDangerBtn: {
+    minHeight: 44,
     paddingHorizontal: 14,
     paddingVertical: 11,
     borderRadius: 10,
@@ -743,6 +763,7 @@ const styles = StyleSheet.create({
   footerSecondaryBtn: {
     flex: 1,
     minWidth: 88,
+    minHeight: 44,
     paddingVertical: 11,
     borderRadius: 10,
     borderWidth: 1,
@@ -756,6 +777,7 @@ const styles = StyleSheet.create({
   footerPrimaryBtn: {
     flex: 1,
     minWidth: 88,
+    minHeight: 44,
     paddingVertical: 11,
     borderRadius: 10,
     alignItems: 'center',
@@ -810,6 +832,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   optionChip: {
+    minHeight: 38,
+    justifyContent: 'center',
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 8,
@@ -872,6 +896,7 @@ const styles = StyleSheet.create({
   suiteSelectItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: 44,
     gap: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,

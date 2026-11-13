@@ -10,6 +10,7 @@ import {
   Platform,
   Keyboard,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import VectorIcon from '../VectorIcon';
 import { monoFontFamily } from '../../theme/theme';
 import styles from './testRunsStyles';
@@ -45,6 +46,8 @@ export default function TestRunExecutionModal({
   isSubmittingExec,
   handleSaveExecution,
 }) {
+  const insets = useSafeAreaInsets();
+
   return (
     <Modal
       visible={!!executingCase}
@@ -55,7 +58,13 @@ export default function TestRunExecutionModal({
       <KeyboardAvoidingView
         accessibilityViewIsModal={true}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={[styles.modalOverlay, { backgroundColor: theme.overlay }]}
+        style={[
+          styles.modalOverlay,
+          {
+            backgroundColor: theme.overlay,
+            paddingTop: Math.max(16, insets.top),
+          },
+        ]}
       >
         <View
           style={[
@@ -513,7 +522,10 @@ export default function TestRunExecutionModal({
               <View
                 style={[
                   styles.runnerFooter,
-                  { borderTopColor: theme.border },
+                  {
+                    borderTopColor: theme.border,
+                    paddingBottom: Math.max(12, insets.bottom + 8),
+                  },
                 ]}
               >
                 <Text

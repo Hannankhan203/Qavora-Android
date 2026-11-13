@@ -10,6 +10,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/theme';
 import VectorIcon from '../VectorIcon';
 import styles from './testCasesStyles';
@@ -99,6 +100,7 @@ export default function TestPlanFormModal({
   handleSavePlan,
 }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
     <Modal
@@ -110,7 +112,13 @@ export default function TestPlanFormModal({
       <KeyboardAvoidingView
         accessibilityViewIsModal={true}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}
+        style={[
+          styles.modalOverlay,
+          {
+            backgroundColor: colors.overlay,
+            paddingTop: Math.max(16, insets.top),
+          },
+        ]}
       >
         <View
           style={[
@@ -136,6 +144,7 @@ export default function TestPlanFormModal({
             <Pressable
               onPress={() => !isSubmittingPlan && setIsPlanModalOpen(false)}
               disabled={Boolean(isSubmittingPlan)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
               accessibilityState={{ disabled: Boolean(isSubmittingPlan) }}
               accessibilityLabel="Close test plan editor"
@@ -232,7 +241,13 @@ export default function TestPlanFormModal({
           </ScrollView>
 
           <View
-            style={[styles.modalFooter, { borderTopColor: colors.border }]}
+            style={[
+              styles.modalFooter,
+              {
+                borderTopColor: colors.border,
+                paddingBottom: Math.max(14, insets.bottom + 8),
+              },
+            ]}
           >
             <Pressable
               disabled={isSubmittingPlan}

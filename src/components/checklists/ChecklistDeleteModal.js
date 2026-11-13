@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, Pressable, Modal } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/theme';
 import styles from './checklistsStyles';
 
@@ -12,6 +13,7 @@ export default function ChecklistDeleteModal({
   onCancelDeleteChecklist,
 }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const handleClose = () => {
     if (busyMutation) return;
     if (typeof onCancelDeleteChecklist === 'function') {
@@ -30,7 +32,14 @@ export default function ChecklistDeleteModal({
     >
       <View
         accessibilityViewIsModal={true}
-        style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+        style={[
+          styles.modalBackdrop,
+          {
+            backgroundColor: colors.overlay,
+            paddingTop: Math.max(16, insets.top),
+            paddingBottom: Math.max(16, insets.bottom + 8),
+          },
+        ]}
       >
         <View
           style={[

@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Modal,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import VectorIcon from '../VectorIcon';
 import { monoFontFamily } from '../../theme/theme';
 import { DEFECT_STATUSES } from '../../data/initialData';
@@ -30,6 +31,7 @@ export default function DefectDetailModal({
   onRequestDeleteDefect,
   openEditDefectForm,
 }) {
+  const insets = useSafeAreaInsets();
   const handleClose = () => {
     if (isUpdatingStatus) return;
     closeDetailModal();
@@ -44,7 +46,13 @@ export default function DefectDetailModal({
     >
       <View
         accessibilityViewIsModal={true}
-        style={[styles.modalOverlay, { backgroundColor: theme.overlay }]}
+        style={[
+          styles.modalOverlay,
+          {
+            backgroundColor: theme.overlay,
+            paddingTop: Math.max(16, insets.top),
+          },
+        ]}
       >
         <View
           style={[
@@ -588,7 +596,10 @@ export default function DefectDetailModal({
               <View
                 style={[
                   styles.modalFooter,
-                  { borderTopColor: theme.border },
+                  {
+                    borderTopColor: theme.border,
+                    paddingBottom: Math.max(16, insets.bottom + 8),
+                  },
                 ]}
               >
                 <TouchableOpacity

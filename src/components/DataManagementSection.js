@@ -29,6 +29,7 @@ import {
   Platform,
   Keyboard,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, monoFontFamily } from '../theme/theme.js';
 import { useAuth } from '../context/AuthContext.js';
 import { useProjects } from '../context/ProjectContext.js';
@@ -69,6 +70,7 @@ import VectorIcon from './VectorIcon.js';
 
 export default function DataManagementSection() {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const {
     projects,
@@ -2452,7 +2454,14 @@ export default function DataManagementSection() {
         onRequestClose={() => !isExporting && setExportPreview(null)}
       >
         <View
-          style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+          style={[
+            styles.modalBackdrop,
+            {
+              backgroundColor: colors.overlay,
+              paddingTop: Math.max(16, insets.top),
+              paddingBottom: Math.max(16, insets.bottom + 8),
+            },
+          ]}
           accessibilityViewIsModal={true}
         >
           <View
@@ -2572,7 +2581,14 @@ export default function DataManagementSection() {
         onRequestClose={() => !isImporting && setImportPreview(null)}
       >
         <View
-          style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+          style={[
+            styles.modalBackdrop,
+            {
+              backgroundColor: colors.overlay,
+              paddingTop: Math.max(16, insets.top),
+              paddingBottom: Math.max(16, insets.bottom + 8),
+            },
+          ]}
           accessibilityViewIsModal={true}
         >
           <View
@@ -2882,7 +2898,14 @@ export default function DataManagementSection() {
         }
       >
         <View
-          style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+          style={[
+            styles.modalBackdrop,
+            {
+              backgroundColor: colors.overlay,
+              paddingTop: Math.max(16, insets.top),
+              paddingBottom: Math.max(16, insets.bottom + 8),
+            },
+          ]}
           accessibilityViewIsModal={true}
         >
           <View
@@ -3025,7 +3048,7 @@ const styles = StyleSheet.create({
   },
   screenContent: {
     padding: 14,
-    paddingBottom: 32,
+    paddingBottom: 36,
   },
   sectionStack: {
     gap: 14,
@@ -3196,7 +3219,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   smallActionBtn: {
-    minHeight: 42,
+    minHeight: 44,
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
@@ -3245,8 +3268,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   tinyBtn: {
-    minHeight: 40,
-    paddingHorizontal: 10,
+    minHeight: 44,
+    paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
     alignItems: 'center',

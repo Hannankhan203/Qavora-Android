@@ -20,6 +20,7 @@ import {
   Modal,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useProjects } from '../context/ProjectContext';
 import {
@@ -116,6 +117,7 @@ export default function ProjectDetailsScreen({
   onProjectDeleted,
 }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const {
     selectedProject,
     projectStatuses,
@@ -929,7 +931,14 @@ export default function ProjectDetailsScreen({
       >
         <View
           accessibilityViewIsModal={true}
-          style={[styles.confirmOverlay, { backgroundColor: colors.overlay }]}
+          style={[
+            styles.confirmOverlay,
+            {
+              backgroundColor: colors.overlay,
+              paddingTop: Math.max(20, insets.top),
+              paddingBottom: Math.max(20, insets.bottom + 8),
+            },
+          ]}
         >
           <View
             style={[
@@ -1021,7 +1030,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 14,
     paddingTop: 14,
-    paddingBottom: 28,
+    paddingBottom: 36,
     maxWidth: 920,
     width: '100%',
     alignSelf: 'center',

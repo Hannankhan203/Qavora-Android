@@ -165,6 +165,7 @@ const TestCaseRowCard = React.memo(function TestCaseRowCard({
               e.stopPropagation?.();
               onMoveCase(tc);
             }}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
             accessibilityRole="button"
             accessibilityLabel={`Move ${displayId} to another suite`}
             style={[
@@ -188,6 +189,7 @@ const TestCaseRowCard = React.memo(function TestCaseRowCard({
             e.stopPropagation?.();
             onEditCase(tc);
           }}
+          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
           accessibilityRole="button"
           accessibilityLabel={`Edit ${displayId}`}
           style={[
@@ -208,6 +210,7 @@ const TestCaseRowCard = React.memo(function TestCaseRowCard({
             e.stopPropagation?.();
             onDeleteCase(tc);
           }}
+          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
           accessibilityRole="button"
           accessibilityLabel={`Delete ${displayId}`}
           style={[
@@ -335,6 +338,7 @@ const TestSuiteRowCard = React.memo(function TestSuiteRowCard({
       <View style={[styles.cardActionsBar, { borderTopColor: colors.border }]}>
         <Pressable
           onPress={() => onViewSuiteCases(suite.id)}
+          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
           accessibilityRole="button"
           accessibilityLabel={`View ${stats.total} cases in suite ${suite.name}`}
           style={[
@@ -353,6 +357,7 @@ const TestSuiteRowCard = React.memo(function TestSuiteRowCard({
 
         <Pressable
           onPress={() => onAddCaseToSuite(suite.id)}
+          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
           accessibilityRole="button"
           accessibilityLabel={`Add case to suite ${suite.name}`}
           style={[
@@ -371,6 +376,7 @@ const TestSuiteRowCard = React.memo(function TestSuiteRowCard({
 
         <Pressable
           onPress={() => onEditSuite(suite)}
+          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
           accessibilityRole="button"
           accessibilityLabel={`Edit suite ${suite.name}`}
           style={[
@@ -391,6 +397,7 @@ const TestSuiteRowCard = React.memo(function TestSuiteRowCard({
 
         <Pressable
           onPress={() => onDeleteSuite(suite)}
+          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
           accessibilityRole="button"
           accessibilityLabel={`Delete suite ${suite.name}`}
           style={[
@@ -1580,6 +1587,7 @@ export default function TestCasesScreen({
             ) : (
               <Pressable
                 onPress={reloadProjectDataFromBackend}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 accessibilityRole="button"
                 accessibilityLabel="Sync project test cases"
                 style={({ pressed }) => [
@@ -2006,8 +2014,10 @@ export default function TestCasesScreen({
                       setSelectedType('all');
                       setSearchQuery('');
                     }}
+                    hitSlop={{ top: 12, bottom: 12, left: 10, right: 10 }}
                     accessibilityRole="button"
                     accessibilityLabel="Reset test case filters"
+                    style={{ minHeight: 36, justifyContent: 'center' }}
                   >
                     <Text style={[styles.resetText, { color: colors.primary }]}>
                       Reset Filters

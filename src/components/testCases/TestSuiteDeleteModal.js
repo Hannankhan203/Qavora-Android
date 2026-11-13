@@ -7,6 +7,7 @@ import {
   Modal,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/theme';
 import VectorIcon from '../VectorIcon';
 import styles from './testCasesStyles';
@@ -26,6 +27,7 @@ export default function TestSuiteDeleteModal({
   onCancelDeleteSuite,
 }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const handleClose = () => {
     if (isDeletingSuite) return;
     if (typeof onCancelDeleteSuite === 'function') {
@@ -46,7 +48,11 @@ export default function TestSuiteDeleteModal({
         accessibilityViewIsModal={true}
         style={[
           styles.centeredModalOverlay,
-          { backgroundColor: colors.overlay },
+          {
+            backgroundColor: colors.overlay,
+            paddingTop: Math.max(20, insets.top),
+            paddingBottom: Math.max(20, insets.bottom + 8),
+          },
         ]}
       >
         <View
@@ -172,6 +178,7 @@ export default function TestSuiteDeleteModal({
                             <Pressable
                               key={s.id}
                               onPress={() => setSuiteDeleteTargetId(s.id)}
+                              hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                               accessibilityRole="radio"
                               accessibilityState={{
                                 selected: active,

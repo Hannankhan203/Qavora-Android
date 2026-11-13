@@ -30,6 +30,8 @@ const styles = StyleSheet.create({
   primaryActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
     gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 10,
@@ -94,8 +96,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   iconRefreshBtn: {
-    width: 28,
-    height: 28,
+    width: 32,
+    height: 32,
     borderRadius: 8,
     borderWidth: 1,
     alignItems: 'center',
@@ -129,6 +131,8 @@ const styles = StyleSheet.create({
   alertBannerBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 40,
     gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -140,6 +144,8 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   alertBannerDismiss: {
+    minHeight: 40,
+    justifyContent: 'center',
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 8,
@@ -180,7 +186,9 @@ const styles = StyleSheet.create({
   kpiChip: {
     flex: 1,
     minWidth: 56,
+    minHeight: 44,
     alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: 6,
     paddingHorizontal: 3,
     borderRadius: 9,
@@ -204,7 +212,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    height: 42,
+    height: 44,
     borderRadius: 11,
     borderWidth: 1,
     paddingHorizontal: 12,
@@ -220,7 +228,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 13,
-    height: 42,
+    height: 44,
     borderRadius: 11,
     gap: 5,
   },
@@ -234,6 +242,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   filterChip: {
+    minHeight: 38,
+    justifyContent: 'center',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
@@ -244,6 +254,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   sevChip: {
+    minHeight: 38,
+    justifyContent: 'center',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,
@@ -255,6 +267,7 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     padding: 16,
+    paddingBottom: 36,
   },
   resultsBar: {
     marginBottom: 10,
@@ -344,8 +357,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   cardMiniBtn: {
-    width: 26,
-    height: 26,
+    width: 32,
+    height: 32,
     borderRadius: 7,
     borderWidth: 1,
     alignItems: 'center',
@@ -404,9 +417,9 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   closeBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -423,6 +436,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   statusStepBtn: {
+    minHeight: 38,
+    justifyContent: 'center',
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 9,
@@ -581,6 +596,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   optionChip: {
+    minHeight: 38,
+    justifyContent: 'center',
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 8,
@@ -591,6 +608,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   caseSelectPill: {
+    minHeight: 38,
+    justifyContent: 'center',
     paddingHorizontal: 11,
     paddingVertical: 6,
     borderRadius: 8,
@@ -687,7 +706,7 @@ const styles = StyleSheet.create({
   },
   confirmCancelBtn: {
     flex: 1,
-    height: 42,
+    height: 44,
     borderRadius: 10,
     borderWidth: 1,
     alignItems: 'center',
@@ -700,7 +719,7 @@ const styles = StyleSheet.create({
   confirmDeleteBtn: {
     flex: 1,
     flexDirection: 'row',
-    height: 42,
+    height: 44,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',

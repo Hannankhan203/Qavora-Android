@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Text, View, ScrollView, Pressable, Modal } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, monoFontFamily } from '../../theme/theme';
 import VectorIcon from '../VectorIcon';
 import styles from './testCasesStyles';
@@ -18,6 +19,7 @@ export default function TestCaseDetailModal({
   onMutatingDetailChange,
 }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [localIsMutating, setLocalIsMutating] = useState(false);
   const [detailActionError, setDetailActionError] = useState('');
   const isMutating = Boolean(
@@ -96,7 +98,13 @@ export default function TestCaseDetailModal({
     >
       <View
         accessibilityViewIsModal={true}
-        style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}
+        style={[
+          styles.modalOverlay,
+          {
+            backgroundColor: colors.overlay,
+            paddingTop: Math.max(16, insets.top),
+          },
+        ]}
       >
         <View
           style={[
@@ -217,6 +225,7 @@ export default function TestCaseDetailModal({
                         <Pressable
                           key={st}
                           disabled={isMutating}
+                          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                           onPress={() => handleQuickStatusUpdate(st)}
                           accessibilityRole="radio"
                           accessibilityState={{
@@ -281,6 +290,7 @@ export default function TestCaseDetailModal({
                           <Pressable
                             key={s.id}
                             disabled={isMutating}
+                            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                             onPress={() => {
                               if (!isCurrent) {
                                 handleQuickSuiteMove(s.id);
@@ -583,7 +593,10 @@ export default function TestCaseDetailModal({
               <View
                 style={[
                   styles.modalFooter,
-                  { borderTopColor: colors.border },
+                  {
+                    borderTopColor: colors.border,
+                    paddingBottom: Math.max(14, insets.bottom + 8),
+                  },
                 ]}
               >
                 <Pressable

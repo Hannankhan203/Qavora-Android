@@ -2462,6 +2462,7 @@ export default function ChecklistsScreen({
                       key={prio}
                       disabled={busyMutation}
                       onPress={() => setNewItemPriority(prio)}
+                      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                       accessibilityRole="radio"
                       accessibilityState={{
                         selected: active,
@@ -2510,6 +2511,7 @@ export default function ChecklistsScreen({
                       key={cat}
                       disabled={busyMutation}
                       onPress={() => setNewItemCategory(cat)}
+                      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                       accessibilityRole="radio"
                       accessibilityState={{
                         selected: active,

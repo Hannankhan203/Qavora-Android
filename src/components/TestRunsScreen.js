@@ -241,6 +241,7 @@ const ExecutionCaseRowCard = React.memo(function ExecutionCaseRowCard({
                 borderColor: theme.danger,
               },
             ]}
+            hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
             accessibilityRole="button"
             accessibilityLabel={`Open linked defect ${
               linkedDefect.defectId || linkedDefect.id
@@ -269,6 +270,7 @@ const ExecutionCaseRowCard = React.memo(function ExecutionCaseRowCard({
                   status === 'Passed' ? theme.success : theme.successSoft,
               },
             ]}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
             accessibilityRole="button"
             accessibilityState={{
               selected: status === 'Passed',
@@ -303,6 +305,7 @@ const ExecutionCaseRowCard = React.memo(function ExecutionCaseRowCard({
                   status === 'Failed' ? theme.danger : theme.dangerSoft,
               },
             ]}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
             accessibilityRole="button"
             accessibilityState={{
               selected: status === 'Failed',
@@ -337,6 +340,7 @@ const ExecutionCaseRowCard = React.memo(function ExecutionCaseRowCard({
                   status === 'Blocked' ? theme.warning : theme.warningSoft,
               },
             ]}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
             accessibilityRole="button"
             accessibilityState={{
               selected: status === 'Blocked',
@@ -395,6 +399,7 @@ const ExecutionCaseRowCard = React.memo(function ExecutionCaseRowCard({
                 borderColor: theme.danger,
               },
             ]}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
             accessibilityRole="button"
             accessibilityLabel={`Log defect for ${tc.id}`}
             onPress={() =>
@@ -423,6 +428,7 @@ const ExecutionCaseRowCard = React.memo(function ExecutionCaseRowCard({
                 borderColor: theme.primary,
               },
             ]}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
             accessibilityRole="button"
             accessibilityLabel={`Execute steps for ${tc.id}`}
             onPress={() => onOpenExecution(tc)}
@@ -486,6 +492,7 @@ const ExecutionHistoryRowCard = React.memo(function ExecutionHistoryRowCard({
                   borderColor: theme.border,
                 },
               ]}
+              hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
               accessibilityRole="button"
               accessibilityLabel={`Open test run ${
                 runObj ? `${runObj.id} ${runObj.name}` : exec.runId
@@ -562,6 +569,7 @@ const ExecutionHistoryRowCard = React.memo(function ExecutionHistoryRowCard({
               borderColor: theme.danger,
             },
           ]}
+          hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
           accessibilityRole="button"
           accessibilityLabel={`Open linked defect ${
             linkedDefect.defectId || linkedDefect.id
@@ -1530,6 +1538,7 @@ export default function TestRunsScreen({
                   styles.alertBannerBtn,
                   { backgroundColor: theme.danger },
                 ]}
+                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                 accessibilityRole="button"
                 accessibilityLabel="Reload Latest Project Data"
                 onPress={() => reloadCurrentProject()}
@@ -1545,6 +1554,7 @@ export default function TestRunsScreen({
                 styles.alertBannerDismiss,
                 { borderColor: theme.danger },
               ]}
+              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
               accessibilityRole="button"
               accessibilityLabel="Dismiss workspace error"
               onPress={clearWorkspaceError}
@@ -2286,6 +2296,7 @@ export default function TestRunsScreen({
                     <TouchableOpacity
                       key={outcome}
                       onPress={() => setHistoryOutcomeFilter(outcome)}
+                      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                       accessibilityRole="tab"
                       accessibilityState={{ selected: active }}
                       accessibilityLabel={`Filter execution history: ${outcome}`}

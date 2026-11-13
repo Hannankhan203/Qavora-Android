@@ -10,6 +10,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import VectorIcon from '../VectorIcon';
 import styles from './testRunsStyles';
 
@@ -50,6 +51,8 @@ export default function TestRunFormModal({
   isSubmittingRun,
   handleSaveRunModal,
 }) {
+  const insets = useSafeAreaInsets();
+
   return (
     <Modal
       visible={runModalVisible}
@@ -60,7 +63,13 @@ export default function TestRunFormModal({
       <KeyboardAvoidingView
         accessibilityViewIsModal={true}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={[styles.modalOverlay, { backgroundColor: theme.overlay }]}
+        style={[
+          styles.modalOverlay,
+          {
+            backgroundColor: theme.overlay,
+            paddingTop: Math.max(16, insets.top),
+          },
+        ]}
       >
         <View
           style={[
@@ -88,6 +97,7 @@ export default function TestRunFormModal({
             <TouchableOpacity
               onPress={() => !isSubmittingRun && setRunModalVisible(false)}
               disabled={Boolean(isSubmittingRun)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
               accessibilityState={{ disabled: Boolean(isSubmittingRun) }}
               accessibilityLabel="Close test run form"
@@ -171,6 +181,7 @@ export default function TestRunFormModal({
             >
               <TouchableOpacity
                 onPress={() => handleChangeRunSuiteScope('all')}
+                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                 accessibilityRole="radio"
                 accessibilityState={{
                   selected: runSuiteId === 'all' || runSuiteId === 'ALL',
@@ -214,6 +225,7 @@ export default function TestRunFormModal({
                   <TouchableOpacity
                     key={s.id}
                     onPress={() => handleChangeRunSuiteScope(s.id)}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                     accessibilityRole="radio"
                     accessibilityState={{ selected: active, checked: active }}
                     accessibilityLabel={`Target suite scope: ${s.name} (${count} cases)`}
@@ -257,8 +269,10 @@ export default function TestRunFormModal({
               </Text>
               <View style={styles.caseSelectionQuickBtns}>
                 <TouchableOpacity
+                  hitSlop={{ top: 12, bottom: 12, left: 10, right: 10 }}
                   accessibilityRole="button"
                   accessibilityLabel="Select all candidate test cases"
+                  style={{ minHeight: 36, justifyContent: 'center' }}
                   onPress={() =>
                     setSelectedCaseIds(
                       candidateCasesForModal.map((tc) => tc.id)
@@ -273,8 +287,10 @@ export default function TestRunFormModal({
                 </TouchableOpacity>
                 <Text style={{ color: theme.textMuted }}>•</Text>
                 <TouchableOpacity
+                  hitSlop={{ top: 12, bottom: 12, left: 10, right: 10 }}
                   accessibilityRole="button"
                   accessibilityLabel="Clear selected test cases"
+                  style={{ minHeight: 36, justifyContent: 'center' }}
                   onPress={() => setSelectedCaseIds([])}
                 >
                   <Text
@@ -492,7 +508,10 @@ export default function TestRunFormModal({
           <View
             style={[
               styles.modalFooter,
-              { borderTopColor: theme.border },
+              {
+                borderTopColor: theme.border,
+                paddingBottom: Math.max(16, insets.bottom + 8),
+              },
             ]}
           >
             <TouchableOpacity

@@ -411,6 +411,7 @@ export default function ProjectSelectionScreen({
     hasLoadedInitialProjects,
     isLoading,
     isRefreshing,
+    isMutating,
     projectError,
     selectProject,
     refreshProjects,
@@ -1157,7 +1158,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 14,
     paddingTop: 14,
-    paddingBottom: 28,
+    paddingBottom: 36,
     maxWidth: 920,
     width: '100%',
     alignSelf: 'center',
@@ -1225,8 +1226,8 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   signOutMiniBtn: {
-    minHeight: 34,
-    paddingHorizontal: 10,
+    minHeight: 44,
+    paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
     alignItems: 'center',
@@ -1321,7 +1322,7 @@ const styles = StyleSheet.create({
   activeBannerPrimaryBtn: {
     flex: 1,
     minWidth: 140,
-    minHeight: 42,
+    minHeight: 44,
     borderRadius: 10,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1334,7 +1335,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   activeBannerSecondaryBtn: {
-    minHeight: 42,
+    minHeight: 44,
     borderRadius: 10,
     borderWidth: 1,
     flexDirection: 'row',
@@ -1368,8 +1369,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   clearSearchBtn: {
-    width: 28,
-    height: 28,
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1381,7 +1382,7 @@ const styles = StyleSheet.create({
   filterChip: {
     flex: 1,
     minWidth: 74,
-    minHeight: 36,
+    minHeight: 38,
     borderRadius: 8,
     borderWidth: 1,
     alignItems: 'center',
@@ -1413,7 +1414,7 @@ const styles = StyleSheet.create({
   },
   retryBtn: {
     alignSelf: 'flex-start',
-    minHeight: 40,
+    minHeight: 44,
     paddingHorizontal: 14,
     borderRadius: 10,
     flexDirection: 'row',
@@ -1514,8 +1515,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   iconActionBtn: {
-    width: 36,
-    height: 36,
+    width: 40,
+    height: 40,
     borderRadius: 9,
     borderWidth: 1,
     alignItems: 'center',
@@ -1590,7 +1591,7 @@ const styles = StyleSheet.create({
   selectBtn: {
     flex: 1,
     minWidth: 145,
-    minHeight: 42,
+    minHeight: 44,
     borderRadius: 10,
     borderWidth: 1,
     flexDirection: 'row',
@@ -1604,7 +1605,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   detailsBtn: {
-    minHeight: 42,
+    minHeight: 44,
     paddingHorizontal: 14,
     borderRadius: 10,
     borderWidth: 1,
