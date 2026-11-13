@@ -15,6 +15,7 @@ import React, {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
 } from 'react';
 import { onUnauthorizedResponse } from '../services/apiClient.js';
 import {
@@ -34,10 +35,13 @@ export function AuthProvider({ children }) {
   const [isRestoringSession, setIsRestoringSession] = useState(true);
   const [authError, setAuthError] = useState(null);
   const [authNotice, setAuthNotice] = useState(null);
+  const [authNoticeType, setAuthNoticeType] = useState(null); // 'logout' | 'session_expired' | null
+  const isLoggingOutRef = useRef(false);
 
   const clearAuthFeedback = useCallback(() => {
     setAuthError(null);
     setAuthNotice(null);
+    setAuthNoticeType(null);
   }, []);
 
   /**
@@ -46,17 +50,23 @@ export function AuthProvider({ children }) {
   const restoreSession = useCallback(async (options = {}) => {
     setIsLoading(true);
     setAuthError(null);
+    setAuthNotice(null);
+    setAuthNoticeType(null);
 
     try {
       const result = await restoreAuthenticatedSession(options);
 
       if (result.ok && result.user) {
         setUser(result.user);
+        setAuthError(null);
+        setAuthNotice(null);
+        setAuthNoticeType(null);
         return result;
       }
 
       setUser(null);
       if (result.isExpired) {
+        setAuthNoticeType('session_expired');
         setAuthNotice(
           formatAuthErrorMessage(
             { status: 401, error: result.error },
@@ -86,9 +96,14 @@ export function AuthProvider({ children }) {
   // Listen for 401 Unauthorized responses from any protected API request
   useEffect(() => {
     const unsubscribe = onUnauthorizedResponse((info) => {
+      if (isLoggingOutRef.current) {
+        return;
+      }
       setUser(null);
       setIsLoading(false);
       setIsRestoringSession(false);
+      setAuthError(null);
+      setAuthNoticeType('session_expired');
       setAuthNotice(
         formatAuthErrorMessage(
           { status: 401, message: info && info.message },
@@ -106,14 +121,20 @@ export function AuthProvider({ children }) {
     setIsLoading(true);
     setAuthError(null);
     setAuthNotice(null);
+    setAuthNoticeType(null);
 
     try {
       const result = await loginUser(credentialsOrEmail, optionalPassword);
       if (result.ok && result.user) {
         setUser(result.user);
+        setAuthError(null);
+        setAuthNotice(null);
+        setAuthNoticeType(null);
         return result;
       }
       setUser(null);
+      setAuthNotice(null);
+      setAuthNoticeType(null);
       setAuthError(formatAuthErrorMessage(result, 'login'));
       return result;
     } finally {
@@ -129,6 +150,7 @@ export function AuthProvider({ children }) {
       setIsLoading(true);
       setAuthError(null);
       setAuthNotice(null);
+      setAuthNoticeType(null);
 
       try {
         const result = await registerUser(
@@ -139,9 +161,14 @@ export function AuthProvider({ children }) {
         );
         if (result.ok && result.user) {
           setUser(result.user);
+          setAuthError(null);
+          setAuthNotice(null);
+          setAuthNoticeType(null);
           return result;
         }
         setUser(null);
+        setAuthNotice(null);
+        setAuthNoticeType(null);
         setAuthError(formatAuthErrorMessage(result, 'register'));
         return result;
       } finally {
@@ -155,15 +182,21 @@ export function AuthProvider({ children }) {
    * Logs out the current user via CSRF-protected `POST /api/auth/logout`.
    */
   const logout = useCallback(async () => {
+    isLoggingOutRef.current = true;
     setIsLoading(true);
     setAuthError(null);
+    setAuthNotice(null);
+    setAuthNoticeType(null);
 
     try {
       const result = await logoutUser();
       setUser(null);
+      setAuthError(null);
+      setAuthNoticeType('logout');
       setAuthNotice('You have been signed out.');
       return result;
     } finally {
+      isLoggingOutRef.current = false;
       setIsLoading(false);
     }
   }, []);
@@ -177,8 +210,13 @@ export function AuthProvider({ children }) {
       setUser(result.user);
     } else if (result.isExpired) {
       setUser(null);
+      setAuthError(null);
+      setAuthNoticeType('session_expired');
       setAuthNotice(
-        result.error || 'Your session has expired. Please sign in again.'
+        formatAuthErrorMessage(
+          { status: 401, error: result.error },
+          'session'
+        )
       );
     }
     return result;
@@ -194,6 +232,7 @@ export function AuthProvider({ children }) {
       isRestoringSession,
       authError,
       authNotice,
+      authNoticeType,
       login,
       register,
       logout,
@@ -208,6 +247,7 @@ export function AuthProvider({ children }) {
       isRestoringSession,
       authError,
       authNotice,
+      authNoticeType,
       login,
       register,
       logout,

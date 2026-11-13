@@ -118,6 +118,7 @@ export default function AuthScreen() {
     isLoading,
     authError,
     authNotice,
+    authNoticeType,
     clearAuthFeedback,
   } = useAuth();
 
@@ -361,7 +362,12 @@ export default function AuthScreen() {
     : null;
 
   const safeNotice = authNotice
-    ? formatAuthErrorMessage({ status: 401, message: authNotice }, 'session')
+    ? formatAuthErrorMessage(
+        authNoticeType === 'session_expired'
+          ? { status: 401, message: authNotice }
+          : authNotice,
+        authNoticeType === 'logout' ? 'logout' : 'session'
+      )
     : null;
 
   return (

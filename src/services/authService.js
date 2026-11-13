@@ -390,6 +390,9 @@ export function formatAuthErrorMessage(errOrResult, context = 'login') {
       lower
     )
   ) {
+    if (context === 'logout') {
+      return 'You have been signed out.';
+    }
     if (context === 'session') {
       return 'Your session has expired or is no longer valid. Please sign in again.';
     }
@@ -456,6 +459,9 @@ export function formatAuthErrorMessage(errOrResult, context = 'login') {
   }
 
   // 10. Context-specific safe fallbacks
+  if (context === 'logout') {
+    return 'You have been signed out.';
+  }
   if (context === 'register') {
     return 'Unable to create your account right now. Please check your details and try again.';
   }

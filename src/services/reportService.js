@@ -79,12 +79,46 @@ export const EXPORT_FORMATS = [
 ];
 
 /**
+ * Parses a strict `YYYY-MM-DD` calendar date string in UTC (`00:00:00.000Z` or `23:59:59.999Z`),
+ * rejecting invalid calendar dates such as `2026-02-30` instead of rolling over.
+ */
+function parseUtcDateOnly(dateString, endOfDay = false) {
+  if (!dateString || typeof dateString !== 'string') return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateString.trim());
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+
+  const utcMs = endOfDay
+    ? Date.UTC(year, month - 1, day, 23, 59, 59, 999)
+    : Date.UTC(year, month - 1, day, 0, 0, 0, 0);
+  const candidate = new Date(utcMs);
+
+  if (
+    Number.isNaN(candidate.getTime()) ||
+    candidate.getUTCFullYear() !== year ||
+    candidate.getUTCMonth() !== month - 1 ||
+    candidate.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return candidate;
+}
+
+/**
  * Parses a date string from Qavora Web or Android (`ISO-8601` or `YYYY-MM-DD HH:mm`) into a Date instance.
  */
 export function parseQavoraDate(dateString) {
   if (!dateString || typeof dateString !== 'string') return null;
   const trimmed = dateString.trim();
   if (!trimmed) return null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return parseUtcDateOnly(trimmed, false);
+  }
 
   // Normalize "YYYY-MM-DD HH:mm" to "YYYY-MM-DDTHH:mm:00" for consistent parsing across JS engines
   const normalized = /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}$/.test(trimmed)
@@ -130,18 +164,18 @@ export function isWithinDateRange(
   }
   if (filterType === 'CUSTOM') {
     if (customStart && typeof customStart === 'string' && customStart.trim()) {
-      const start = parseQavoraDate(customStart.trim());
-      if (start) {
-        start.setHours(0, 0, 0, 0);
-        if (d < start) return false;
-      }
+      const trimmedStart = customStart.trim();
+      const start = /^\d{4}-\d{2}-\d{2}$/.test(trimmedStart)
+        ? parseUtcDateOnly(trimmedStart, false)
+        : parseQavoraDate(trimmedStart);
+      if (start && d < start) return false;
     }
     if (customEnd && typeof customEnd === 'string' && customEnd.trim()) {
-      const end = parseQavoraDate(customEnd.trim());
-      if (end) {
-        end.setHours(23, 59, 59, 999);
-        if (d > end) return false;
-      }
+      const trimmedEnd = customEnd.trim();
+      const end = /^\d{4}-\d{2}-\d{2}$/.test(trimmedEnd)
+        ? parseUtcDateOnly(trimmedEnd, true)
+        : parseQavoraDate(trimmedEnd);
+      if (end && d > end) return false;
     }
     return true;
   }

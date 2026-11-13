@@ -152,15 +152,29 @@ export function ProjectProvider({ children }) {
   const [conflictState, setConflictState] = useState(null);
   const [syncStatus, setSyncStatus] = useState(INITIAL_SYNC_STATUS);
 
+  const effectiveSyncUserId =
+    isAuthenticated && activeUserId ? activeUserId : null;
+
   const projectsRef = useRef(projects);
-  projectsRef.current = projects;
-
   const selectedProjectIdRef = useRef(selectedProjectId);
-  selectedProjectIdRef.current = selectedProjectId;
 
-  // Keep offlineSyncService informed of the currently authenticated user synchronously
-  // so User A's queue is never synced while User B is authenticated
-  setActiveSyncUser(isAuthenticated && activeUserId ? activeUserId : null);
+  useEffect(() => {
+    projectsRef.current = projects;
+  }, [projects]);
+
+  useEffect(() => {
+    selectedProjectIdRef.current = selectedProjectId;
+  }, [selectedProjectId]);
+
+  // Keep offlineSyncService informed of the currently authenticated user after commit
+  // (never during render) and clear on user change or unmount so User A's queue is
+  // never synced while User B is authenticated or after logout.
+  useEffect(() => {
+    setActiveSyncUser(effectiveSyncUserId);
+    return () => {
+      setActiveSyncUser(null);
+    };
+  }, [effectiveSyncUserId]);
 
   const clearProjectError = useCallback(() => {
     setProjectError(null);
