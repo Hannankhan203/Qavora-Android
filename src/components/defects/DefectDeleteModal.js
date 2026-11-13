@@ -15,13 +15,24 @@ export default function DefectDeleteModal({
   setDefectPendingDelete,
   isDeletingDefect,
   handleConfirmDeleteDefect,
+  defectDeleteError,
+  onCancelDeleteDefect,
 }) {
+  const handleClose = () => {
+    if (isDeletingDefect) return;
+    if (typeof onCancelDeleteDefect === 'function') {
+      onCancelDeleteDefect();
+    } else if (typeof setDefectPendingDelete === 'function') {
+      setDefectPendingDelete(null);
+    }
+  };
+
   return (
     <Modal
       visible={!!defectPendingDelete}
       animationType="fade"
       transparent
-      onRequestClose={() => setDefectPendingDelete(null)}
+      onRequestClose={handleClose}
     >
       <View
         accessibilityViewIsModal={true}
@@ -64,6 +75,24 @@ export default function DefectDeleteModal({
             ? Any linked test execution records will be safely unlinked.
           </Text>
 
+          {defectDeleteError ? (
+            <View
+              style={[
+                styles.formErrorBox,
+                {
+                  backgroundColor: theme.dangerSoft,
+                  borderColor: theme.danger,
+                  width: '100%',
+                  marginBottom: 10,
+                },
+              ]}
+            >
+              <Text style={[styles.formErrorText, { color: theme.danger }]}>
+                {defectDeleteError}
+              </Text>
+            </View>
+          ) : null}
+
           <View style={styles.confirmBtnRow}>
             <TouchableOpacity
               accessibilityRole="button"
@@ -76,7 +105,7 @@ export default function DefectDeleteModal({
                   borderColor: theme.border,
                 },
               ]}
-              onPress={() => setDefectPendingDelete(null)}
+              onPress={handleClose}
               disabled={isDeletingDefect}
             >
               <Text

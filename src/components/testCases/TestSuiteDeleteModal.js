@@ -22,15 +22,25 @@ export default function TestSuiteDeleteModal({
   suiteDeleteTargetId,
   setSuiteDeleteTargetId,
   handleConfirmDeleteSuite,
+  deleteSuiteError,
+  onCancelDeleteSuite,
 }) {
   const { colors } = useTheme();
+  const handleClose = () => {
+    if (isDeletingSuite) return;
+    if (typeof onCancelDeleteSuite === 'function') {
+      onCancelDeleteSuite();
+    } else if (typeof setDeletingSuite === 'function') {
+      setDeletingSuite(null);
+    }
+  };
 
   return (
     <Modal
       visible={!!deletingSuite}
       animationType="fade"
       transparent
-      onRequestClose={() => !isDeletingSuite && setDeletingSuite(null)}
+      onRequestClose={handleClose}
     >
       <View
         accessibilityViewIsModal={true}
@@ -247,10 +257,27 @@ export default function TestSuiteDeleteModal({
                 );
               })()}
 
+              {deleteSuiteError ? (
+                <View
+                  style={[
+                    styles.formAlertBox,
+                    {
+                      backgroundColor: colors.dangerSoft,
+                      borderColor: colors.danger,
+                      marginTop: 8,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.formAlertText, { color: colors.danger }]}>
+                    {deleteSuiteError}
+                  </Text>
+                </View>
+              ) : null}
+
               <View style={styles.smallModalActions}>
                 <Pressable
                   disabled={isDeletingSuite}
-                  onPress={() => setDeletingSuite(null)}
+                  onPress={handleClose}
                   accessibilityRole="button"
                   accessibilityState={{ disabled: Boolean(isDeletingSuite) }}
                   accessibilityLabel="Cancel deleting test suite"

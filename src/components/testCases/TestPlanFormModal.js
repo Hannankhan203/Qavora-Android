@@ -135,11 +135,16 @@ export default function TestPlanFormModal({
             </Text>
             <Pressable
               onPress={() => !isSubmittingPlan && setIsPlanModalOpen(false)}
+              disabled={Boolean(isSubmittingPlan)}
               accessibilityRole="button"
+              accessibilityState={{ disabled: Boolean(isSubmittingPlan) }}
               accessibilityLabel="Close test plan editor"
               style={[
                 styles.closeCircle,
-                { backgroundColor: colors.surfaceMuted },
+                {
+                  backgroundColor: colors.surfaceMuted,
+                  opacity: isSubmittingPlan ? 0.5 : 1,
+                },
               ]}
             >
               <VectorIcon

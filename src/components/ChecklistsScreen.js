@@ -584,6 +584,13 @@ export default function ChecklistsScreen({
 
   // Destructive Delete Confirmation Modal state
   const [deleteTargetChecklist, setDeleteTargetChecklist] = useState(null);
+  const [deleteChecklistError, setDeleteChecklistError] = useState(null);
+
+  const handleCancelDeleteChecklist = useCallback(() => {
+    if (busyMutation) return;
+    setDeleteChecklistError(null);
+    setDeleteTargetChecklist(null);
+  }, [busyMutation]);
 
   // Promote Checklist to Project Modal state
   const [promoteModalVisible, setPromoteModalVisible] = useState(false);
@@ -599,7 +606,10 @@ export default function ChecklistsScreen({
 
   useWorkspaceBackOverlay(() => {
     if (deleteTargetChecklist) {
-      if (!busyMutation) setDeleteTargetChecklist(null);
+      if (!busyMutation) {
+        setDeleteChecklistError(null);
+        setDeleteTargetChecklist(null);
+      }
       return true;
     }
     if (promoteModalVisible) {
@@ -744,7 +754,7 @@ export default function ChecklistsScreen({
         }
       }
     },
-    [currentUserId, isOfflineMode, syncChecklistsState]
+    [currentUserId, isOfflineMode, syncChecklistsState, setActiveChecklistId]
   );
 
   useEffect(() => {
@@ -1055,33 +1065,42 @@ export default function ChecklistsScreen({
   };
 
   // Open Create Checklist modal
-  const openCreateModal = (presetTemplateId = 'none') => {
-    const preset =
-      CHECKLIST_STARTER_TEMPLATES.find((t) => t.id === presetTemplateId) || null;
-    setFormMode('create');
-    setEditingChecklistId(null);
-    setFormTitle(preset ? preset.name : '');
-    setFormDescription(preset ? preset.description : '');
-    setFormCategory(preset ? preset.category : 'Release Readiness');
-    setFormPriority(preset ? preset.priority : 'High');
-    setFormEnvironment(
-      (selectedProject && selectedProject.environment) || 'Staging'
-    );
-    setFormTargetRelease(
-      (selectedProject && selectedProject.version) || 'v1.0.0'
-    );
-    setFormProjectScope(selectedProjectId ? 'current' : 'workspace');
-    setFormTemplateId(preset ? preset.id : 'none');
-    setFormCustomItemsText('');
-    setFormError(null);
-    setFormModalVisibleState(true);
-    if (typeof onChangeCreateModalOpen === 'function') {
-      onChangeCreateModalOpen(true);
-    }
-    if (typeof setContextCreateModalOpen === 'function') {
-      setContextCreateModalOpen(true);
-    }
-  };
+  const openCreateModal = useCallback(
+    (presetTemplateId = 'none') => {
+      const preset =
+        CHECKLIST_STARTER_TEMPLATES.find((t) => t.id === presetTemplateId) ||
+        null;
+      setFormMode('create');
+      setEditingChecklistId(null);
+      setFormTitle(preset ? preset.name : '');
+      setFormDescription(preset ? preset.description : '');
+      setFormCategory(preset ? preset.category : 'Release Readiness');
+      setFormPriority(preset ? preset.priority : 'High');
+      setFormEnvironment(
+        (selectedProject && selectedProject.environment) || 'Staging'
+      );
+      setFormTargetRelease(
+        (selectedProject && selectedProject.version) || 'v1.0.0'
+      );
+      setFormProjectScope(selectedProjectId ? 'current' : 'workspace');
+      setFormTemplateId(preset ? preset.id : 'none');
+      setFormCustomItemsText('');
+      setFormError(null);
+      setFormModalVisibleState(true);
+      if (typeof onChangeCreateModalOpen === 'function') {
+        onChangeCreateModalOpen(true);
+      }
+      if (typeof setContextCreateModalOpen === 'function') {
+        setContextCreateModalOpen(true);
+      }
+    },
+    [
+      selectedProject,
+      selectedProjectId,
+      onChangeCreateModalOpen,
+      setContextCreateModalOpen,
+    ]
+  );
 
   const resolvedCreateModalRequest =
     controlledCreateModalOpen !== undefined
@@ -1108,7 +1127,15 @@ export default function ChecklistsScreen({
     ) {
       setFormModalVisibleState(false);
     }
-  }, [resolvedCreateModalRequest, resolvedTemplateRequest]);
+  }, [
+    resolvedCreateModalRequest,
+    resolvedTemplateRequest,
+    formModalVisible,
+    formMode,
+    openCreateModal,
+    onResetTemplateId,
+    setContextCreateTemplateId,
+  ]);
 
   // Open Edit Checklist modal
   const openEditModal = (checklist) => {
@@ -1302,6 +1329,7 @@ export default function ChecklistsScreen({
     const targetTitle = deleteTargetChecklist.title;
     mutationLockRef.current = true;
     setBusyMutation(true);
+    setDeleteChecklistError(null);
 
     try {
       const res = await deleteChecklist(targetId, { userId: currentUserId });
@@ -1311,6 +1339,7 @@ export default function ChecklistsScreen({
         if (activeChecklistId === targetId) {
           setActiveChecklistId(null);
         }
+        setDeleteChecklistError(null);
         setDeleteTargetChecklist(null);
         if (showToast) {
           showToast(
@@ -1323,8 +1352,12 @@ export default function ChecklistsScreen({
           );
         }
       } else {
-        setErrorBanner(res.error || 'Failed to delete checklist.');
-        setDeleteTargetChecklist(null);
+        const errMsg = res.error || 'Failed to delete checklist.';
+        setDeleteChecklistError(errMsg);
+        setErrorBanner(errMsg);
+        if (showToast) {
+          showToast(errMsg, 'danger');
+        }
       }
     } finally {
       mutationLockRef.current = false;
@@ -2574,6 +2607,8 @@ export default function ChecklistsScreen({
           editItemTitle={editItemTitle}
           setEditItemTitle={setEditItemTitle}
           editItemNotesRef={editItemNotesRef}
+          editItemCategory={editItemCategory}
+          setEditItemCategory={setEditItemCategory}
           editItemPriority={editItemPriority}
           setEditItemPriority={setEditItemPriority}
           editItemNotes={editItemNotes}
@@ -2635,6 +2670,8 @@ export default function ChecklistsScreen({
           setDeleteTargetChecklist={setDeleteTargetChecklist}
           handleConfirmDeleteChecklist={handleConfirmDeleteChecklist}
           busyMutation={busyMutation}
+          deleteChecklistError={deleteChecklistError}
+          onCancelDeleteChecklist={handleCancelDeleteChecklist}
         />
 
         <ChecklistPromoteModal

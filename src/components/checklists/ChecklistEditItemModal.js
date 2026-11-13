@@ -10,7 +10,10 @@ import {
   Platform,
 } from 'react-native';
 import { useTheme } from '../../theme/theme';
-import { CHECKLIST_PRIORITIES } from '../../services/checklistService';
+import {
+  CHECKLIST_CATEGORIES,
+  CHECKLIST_PRIORITIES,
+} from '../../services/checklistService';
 import styles from './checklistsStyles';
 
 export default function ChecklistEditItemModal({
@@ -20,6 +23,8 @@ export default function ChecklistEditItemModal({
   editItemTitle,
   setEditItemTitle,
   editItemNotesRef,
+  editItemCategory,
+  setEditItemCategory,
   editItemPriority,
   setEditItemPriority,
   editItemNotes,
@@ -34,7 +39,7 @@ export default function ChecklistEditItemModal({
       visible={Boolean(editingItem)}
       transparent
       animationType="fade"
-      onRequestClose={() => setEditingItem(null)}
+      onRequestClose={() => !busyMutation && setEditingItem(null)}
     >
       <KeyboardAvoidingView
         accessibilityViewIsModal={true}
@@ -65,6 +70,7 @@ export default function ChecklistEditItemModal({
               ref={editItemTitleRef}
               value={editItemTitle}
               onChangeText={setEditItemTitle}
+              editable={!busyMutation}
               accessibilityLabel="Step Title, required"
               returnKeyType="next"
               blurOnSubmit={false}
@@ -80,6 +86,63 @@ export default function ChecklistEditItemModal({
             />
 
             <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+              Category
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={[
+                styles.horizontalPillsRow,
+                { marginBottom: 12 },
+              ]}
+              accessibilityRole="radiogroup"
+            >
+              {CHECKLIST_CATEGORIES.map((cat) => {
+                const active = editItemCategory === cat;
+                return (
+                  <Pressable
+                    key={cat}
+                    onPress={() =>
+                      typeof setEditItemCategory === 'function' &&
+                      setEditItemCategory(cat)
+                    }
+                    disabled={busyMutation}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                    accessibilityRole="radio"
+                    accessibilityState={{
+                      selected: active,
+                      checked: active,
+                      disabled: Boolean(busyMutation),
+                    }}
+                    accessibilityLabel={`Step category: ${cat}`}
+                    style={[
+                      styles.miniPill,
+                      {
+                        backgroundColor: active
+                          ? colors.primary
+                          : colors.background,
+                        borderColor: active ? colors.primary : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.miniPillText,
+                        {
+                          color: active
+                            ? colors.textOnPrimary
+                            : colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      {cat}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
+            <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
               Priority
             </Text>
             <View
@@ -92,9 +155,14 @@ export default function ChecklistEditItemModal({
                   <Pressable
                     key={prio}
                     onPress={() => setEditItemPriority(prio)}
+                    disabled={busyMutation}
                     hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                     accessibilityRole="radio"
-                    accessibilityState={{ selected: active, checked: active }}
+                    accessibilityState={{
+                      selected: active,
+                      checked: active,
+                      disabled: Boolean(busyMutation),
+                    }}
                     accessibilityLabel={`Step priority: ${prio}`}
                     style={[
                       styles.miniPill,
@@ -130,6 +198,7 @@ export default function ChecklistEditItemModal({
               ref={editItemNotesRef}
               value={editItemNotes}
               onChangeText={setEditItemNotes}
+              editable={!busyMutation}
               multiline
               accessibilityLabel="Notes or Expected Outcome"
               style={[
@@ -153,8 +222,10 @@ export default function ChecklistEditItemModal({
             ]}
           >
             <Pressable
-              onPress={() => setEditingItem(null)}
+              onPress={() => !busyMutation && setEditingItem(null)}
+              disabled={busyMutation}
               accessibilityRole="button"
+              accessibilityState={{ disabled: Boolean(busyMutation) }}
               accessibilityLabel="Cancel editing step"
               style={[
                 styles.modalCancelBtn,

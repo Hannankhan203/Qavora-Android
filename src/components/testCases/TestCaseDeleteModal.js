@@ -8,15 +8,25 @@ export default function TestCaseDeleteModal({
   setDeletingCase,
   isDeletingCase,
   handleConfirmDeleteCase,
+  deleteCaseError,
+  onCancelDeleteCase,
 }) {
   const { colors } = useTheme();
+  const handleClose = () => {
+    if (isDeletingCase) return;
+    if (typeof onCancelDeleteCase === 'function') {
+      onCancelDeleteCase();
+    } else if (typeof setDeletingCase === 'function') {
+      setDeletingCase(null);
+    }
+  };
 
   return (
     <Modal
       visible={!!deletingCase}
       animationType="fade"
       transparent
-      onRequestClose={() => !isDeletingCase && setDeletingCase(null)}
+      onRequestClose={handleClose}
     >
       <View
         accessibilityViewIsModal={true}
@@ -59,10 +69,27 @@ export default function TestCaseDeleteModal({
                 from suite &quot;{deletingCase.suiteName}&quot;?
               </Text>
 
+              {deleteCaseError ? (
+                <View
+                  style={[
+                    styles.formAlertBox,
+                    {
+                      backgroundColor: colors.dangerSoft,
+                      borderColor: colors.danger,
+                      marginTop: 8,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.formAlertText, { color: colors.danger }]}>
+                    {deleteCaseError}
+                  </Text>
+                </View>
+              ) : null}
+
               <View style={styles.smallModalActions}>
                 <Pressable
                   disabled={isDeletingCase}
-                  onPress={() => setDeletingCase(null)}
+                  onPress={handleClose}
                   accessibilityRole="button"
                   accessibilityState={{ disabled: Boolean(isDeletingCase) }}
                   accessibilityLabel="Cancel deleting test case"

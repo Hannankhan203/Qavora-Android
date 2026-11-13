@@ -39,10 +39,11 @@ export function buildChecklistOperationIdempotencyKey({
 
 /**
  * Sorts queued operations by dependency rank and monotonic sequence number:
- * 1. Project / Checklist CREATE
- * 2. Project / Checklist UPDATE / STATUS_CHANGE
- * 3. Child data updates (`data`, `testPlan`, `testSuites`, `testCases`, `testRuns`, `executions`, `defects`)
- * 4. Project / Checklist DELETE
+ * 1. Project CREATE (remaps temporary projectId before dependents run)
+ * 2. Checklist CREATE
+ * 3. Project / Checklist UPDATE / STATUS_CHANGE
+ * 4. Child data updates (`data`, `testPlan`, `testSuites`, `testCases`, `testRuns`, `executions`, `defects`)
+ * 5. Project / Checklist DELETE
  *
  * @param {Array<object>} ops
  * @returns {Array<object>}
@@ -51,19 +52,19 @@ export function sortProjectOperations(ops = []) {
   const getRank = (op) => {
     if (!op) return 99;
     if (op.entityType === 'project' && op.operationType === 'CREATE') return 1;
-    if (op.entityType === 'checklist' && op.operationType === 'CREATE') return 1;
+    if (op.entityType === 'checklist' && op.operationType === 'CREATE') return 2;
     if (
       op.entityType === 'project' &&
       (op.operationType === 'UPDATE' || op.operationType === 'STATUS_CHANGE')
     ) {
-      return 2;
+      return 3;
     }
     if (op.entityType === 'checklist' && op.operationType === 'UPDATE') {
-      return 2;
+      return 3;
     }
-    if (op.entityType === 'project' && op.operationType === 'DELETE') return 4;
-    if (op.entityType === 'checklist' && op.operationType === 'DELETE') return 4;
-    return 3;
+    if (op.entityType === 'project' && op.operationType === 'DELETE') return 5;
+    if (op.entityType === 'checklist' && op.operationType === 'DELETE') return 5;
+    return 4;
   };
 
   return [...(Array.isArray(ops) ? ops : [])].sort((a, b) => {

@@ -942,8 +942,56 @@ export function WorkspaceProvider({ children }) {
       }
 
       if (
+        evt.type === 'project_id_remapped' &&
+        evt.oldProjectId &&
+        evt.newProjectId &&
+        evt.oldProjectId !== evt.newProjectId
+      ) {
+        const oldScopedKey = getScopedProjectKey(
+          evt.oldProjectId,
+          resolvedUserId
+        );
+        const newScopedKey = getScopedProjectKey(
+          evt.newProjectId,
+          resolvedUserId
+        );
+        if (oldScopedKey && newScopedKey) {
+          if (dirtyProjectsRef.current[oldScopedKey]) {
+            dirtyProjectsRef.current[newScopedKey] = true;
+            delete dirtyProjectsRef.current[oldScopedKey];
+          }
+          if (queuedDirtyGenRef.current[oldScopedKey] !== undefined) {
+            queuedDirtyGenRef.current[newScopedKey] =
+              queuedDirtyGenRef.current[oldScopedKey];
+            delete queuedDirtyGenRef.current[oldScopedKey];
+          }
+          if (editGenRef.current[oldScopedKey] !== undefined) {
+            editGenRef.current[newScopedKey] =
+              editGenRef.current[oldScopedKey];
+            delete editGenRef.current[oldScopedKey];
+          }
+          if (appliedServerStateRef.current[oldScopedKey] !== undefined) {
+            appliedServerStateRef.current[newScopedKey] =
+              appliedServerStateRef.current[oldScopedKey];
+            delete appliedServerStateRef.current[oldScopedKey];
+          }
+          if (defectSeqRef.current[oldScopedKey] !== undefined) {
+            defectSeqRef.current[newScopedKey] = Math.max(
+              defectSeqRef.current[newScopedKey] || 0,
+              defectSeqRef.current[oldScopedKey] || 0
+            );
+            delete defectSeqRef.current[oldScopedKey];
+          }
+        }
+        setHydratedProjectId((prev) =>
+          prev === evt.oldProjectId ? evt.newProjectId : prev
+        );
+      }
+
+      if (
         evt.entityType === 'checklist' ||
         evt.type === 'offline_import_completed' ||
+        evt.type === 'project_id_remapped' ||
         evt.type === 'sync_completed' ||
         evt.type === 'conflict_resolved' ||
         evt.type === 'operation_discarded'
@@ -1351,23 +1399,20 @@ export function WorkspaceProvider({ children }) {
     }
     applyProfileMetadataOnly();
     setAppliedServerSnapshot(selectedProject, resolvedUserId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    selectedProject,
     selectedProjectId,
     resolvedUserId,
     isStorageHydrated,
     hydratedProjectId,
-    selectedProject && selectedProject.updatedAt,
-    selectedProject && selectedProject.name,
-    selectedProject && selectedProject.version,
-    selectedProject && selectedProject.environment,
-    selectedProject && selectedProject.testCaseCount,
-    selectedProject && selectedProject.promotedAt,
-    selectedProject && selectedProject.sourceChecklistId,
-    selectedProject &&
-      Array.isArray(selectedProject.testSuites) &&
-      selectedProject.testSuites.length,
+    getScopedProjectKey,
+    isCurrentProjectDirty,
+    setAppliedServerSnapshot,
+    user,
   ]);
+
+  const selectedProjectUpdatedAt =
+    (selectedProject && selectedProject.updatedAt) || null;
 
   // Persist project-scoped workspace data to AsyncStorage
   useEffect(() => {
@@ -1384,7 +1429,7 @@ export function WorkspaceProvider({ children }) {
       projectId: selectedProjectId,
       userId: resolvedUserId,
       isDirty: isCurrentProjectDirty(selectedProjectId, resolvedUserId),
-      serverUpdatedAt: (selectedProject && selectedProject.updatedAt) || null,
+      serverUpdatedAt: selectedProjectUpdatedAt,
       profile,
       testPlan,
       suites,
@@ -1409,7 +1454,7 @@ export function WorkspaceProvider({ children }) {
     hydratedProjectId,
     resolvedUserId,
     isCurrentProjectDirty,
-    selectedProject && selectedProject.updatedAt,
+    selectedProjectUpdatedAt,
     profile,
     testPlan,
     suites,
@@ -1498,6 +1543,7 @@ export function WorkspaceProvider({ children }) {
     user,
     showToast,
     clearProjectDirty,
+    getScopedProjectKey,
     setAppliedServerSnapshot,
   ]);
 
@@ -2197,6 +2243,7 @@ export function WorkspaceProvider({ children }) {
     },
     [
       selectedTestCaseId,
+      setSelectedTestCaseId,
       persistProjectDataToBackend,
       appendActivity,
       showToast,
@@ -2602,6 +2649,7 @@ export function WorkspaceProvider({ children }) {
     },
     [
       selectedTestCaseId,
+      setSelectedTestCaseId,
       persistProjectDataToBackend,
       appendActivity,
       showToast,
@@ -2770,6 +2818,7 @@ export function WorkspaceProvider({ children }) {
       selectedProject,
       profile,
       user,
+      setSelectedTestRunId,
       persistProjectDataToBackend,
       appendActivity,
       showToast,
@@ -3294,6 +3343,7 @@ export function WorkspaceProvider({ children }) {
     },
     [
       selectedTestRunId,
+      setSelectedTestRunId,
       persistProjectDataToBackend,
       appendActivity,
       showToast,
@@ -3917,7 +3967,7 @@ export function WorkspaceProvider({ children }) {
       setProjectViewMode('workspace');
       setActiveTab('defects');
     },
-    [profile]
+    [profile, setActiveTab]
   );
 
   // Profile & Storage Management (Phase 3D hardened)
@@ -4245,7 +4295,16 @@ export function WorkspaceProvider({ children }) {
         setIsRestoringSampleData(false);
       }
     },
-    [selectedProject, selectedProjectId, persistProjectDataToBackend, showToast]
+    [
+      selectedProject,
+      selectedProjectId,
+      resolvedUserId,
+      getScopedProjectKey,
+      setSelectedTestCaseId,
+      setSelectedTestRunId,
+      persistProjectDataToBackend,
+      showToast,
+    ]
   );
 
   const clearAllWorkspaceData = useCallback(
@@ -4445,7 +4504,16 @@ export function WorkspaceProvider({ children }) {
         setIsClearingWorkspaceData(false);
       }
     },
-    [selectedProject, selectedProjectId, persistProjectDataToBackend, showToast]
+    [
+      selectedProject,
+      selectedProjectId,
+      resolvedUserId,
+      getScopedProjectKey,
+      setSelectedTestCaseId,
+      setSelectedTestRunId,
+      persistProjectDataToBackend,
+      showToast,
+    ]
   );
 
   // --- Genuine Dynamic QA Metrics (Phase 2E parity with Qavora Web) ---

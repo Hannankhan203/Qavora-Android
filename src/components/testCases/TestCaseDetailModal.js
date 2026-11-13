@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Text, View, ScrollView, Pressable, Modal } from 'react-native';
 import { useTheme, monoFontFamily } from '../../theme/theme';
 import VectorIcon from '../VectorIcon';
@@ -14,15 +14,85 @@ export default function TestCaseDetailModal({
   moveTestCaseToSuite,
   setDeletingCase,
   openEditCaseModal,
+  isMutatingDetail: controlledIsMutatingDetail,
+  onMutatingDetailChange,
 }) {
   const { colors } = useTheme();
+  const [localIsMutating, setLocalIsMutating] = useState(false);
+  const [detailActionError, setDetailActionError] = useState('');
+  const isMutating = Boolean(
+    controlledIsMutatingDetail !== undefined
+      ? controlledIsMutatingDetail
+      : localIsMutating
+  );
+
+  const setMutating = (nextVal) => {
+    setLocalIsMutating(Boolean(nextVal));
+    if (typeof onMutatingDetailChange === 'function') {
+      onMutatingDetailChange(Boolean(nextVal));
+    }
+  };
+
+  const selectedCaseId = selectedTestCase?.id || null;
+  useEffect(() => {
+    setDetailActionError('');
+  }, [selectedCaseId]);
+
+  const handleClose = () => {
+    if (isMutating) return;
+    setDetailActionError('');
+    setSelectedTestCaseId(null);
+  };
+
+  const handleQuickStatusUpdate = async (nextStatus) => {
+    if (!selectedTestCase || isMutating) return;
+    setDetailActionError('');
+    setMutating(true);
+    try {
+      const res = await updateTestCase(selectedTestCase.id, {
+        lastStatus: nextStatus,
+      });
+      if (res && res.ok === false) {
+        setDetailActionError(
+          res.error || 'Failed to update execution status.'
+        );
+      }
+    } catch (err) {
+      setDetailActionError(
+        (err && err.message) || 'Failed to update execution status.'
+      );
+    } finally {
+      setMutating(false);
+    }
+  };
+
+  const handleQuickSuiteMove = async (targetSuiteId) => {
+    if (!selectedTestCase || isMutating) return;
+    setDetailActionError('');
+    setMutating(true);
+    try {
+      const res = await moveTestCaseToSuite(
+        selectedTestCase.id,
+        targetSuiteId
+      );
+      if (res && res.ok === false) {
+        setDetailActionError(res.error || 'Failed to move test case.');
+      }
+    } catch (err) {
+      setDetailActionError(
+        (err && err.message) || 'Failed to move test case.'
+      );
+    } finally {
+      setMutating(false);
+    }
+  };
 
   return (
     <Modal
       visible={!!selectedTestCase}
       animationType="slide"
       transparent
-      onRequestClose={() => setSelectedTestCaseId(null)}
+      onRequestClose={handleClose}
     >
       <View
         accessibilityViewIsModal={true}
@@ -78,13 +148,18 @@ export default function TestCaseDetailModal({
                   </Text>
                 </View>
                 <Pressable
-                  onPress={() => setSelectedTestCaseId(null)}
+                  onPress={handleClose}
+                  disabled={isMutating}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   accessibilityRole="button"
+                  accessibilityState={{ disabled: isMutating }}
                   accessibilityLabel="Close test case details"
                   style={[
                     styles.closeCircle,
-                    { backgroundColor: colors.surfaceMuted },
+                    {
+                      backgroundColor: colors.surfaceMuted,
+                      opacity: isMutating ? 0.5 : 1,
+                    },
                   ]}
                 >
                   <VectorIcon
@@ -100,6 +175,22 @@ export default function TestCaseDetailModal({
                 contentContainerStyle={styles.modalBodyContent}
                 showsVerticalScrollIndicator={false}
               >
+                {detailActionError ? (
+                  <View
+                    style={[
+                      styles.formAlertBox,
+                      {
+                        backgroundColor: colors.dangerSoft,
+                        borderColor: colors.danger,
+                        marginBottom: 10,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.formAlertText, { color: colors.danger }]}>
+                      {detailActionError}
+                    </Text>
+                  </View>
+                ) : null}
                 {/* Quick Status Selector */}
                 <View
                   style={[
@@ -125,15 +216,13 @@ export default function TestCaseDetailModal({
                       return (
                         <Pressable
                           key={st}
-                          onPress={() =>
-                            updateTestCase(selectedTestCase.id, {
-                              lastStatus: st,
-                            })
-                          }
+                          disabled={isMutating}
+                          onPress={() => handleQuickStatusUpdate(st)}
                           accessibilityRole="radio"
                           accessibilityState={{
                             selected: active,
                             checked: active,
+                            disabled: isMutating,
                           }}
                           accessibilityLabel={`Set execution status: ${st}`}
                           style={[
@@ -191,18 +280,17 @@ export default function TestCaseDetailModal({
                         return (
                           <Pressable
                             key={s.id}
+                            disabled={isMutating}
                             onPress={() => {
                               if (!isCurrent) {
-                                moveTestCaseToSuite(
-                                  selectedTestCase.id,
-                                  s.id
-                                );
+                                handleQuickSuiteMove(s.id);
                               }
                             }}
                             accessibilityRole="radio"
                             accessibilityState={{
                               selected: isCurrent,
                               checked: isCurrent,
+                              disabled: isMutating,
                             }}
                             accessibilityLabel={`Assign test case to suite ${s.name}`}
                             style={[
@@ -499,12 +587,15 @@ export default function TestCaseDetailModal({
                 ]}
               >
                 <Pressable
+                  disabled={isMutating}
                   onPress={() => {
+                    if (isMutating) return;
                     const target = selectedTestCase;
                     setSelectedTestCaseId(null);
                     setDeletingCase(target);
                   }}
                   accessibilityRole="button"
+                  accessibilityState={{ disabled: isMutating }}
                   accessibilityLabel={`Delete test case ${
                     selectedTestCase.testCaseId || selectedTestCase.id
                   }`}
@@ -513,6 +604,7 @@ export default function TestCaseDetailModal({
                     {
                       backgroundColor: colors.dangerSoft,
                       borderColor: colors.danger,
+                      opacity: isMutating ? 0.55 : 1,
                     },
                   ]}
                 >
@@ -523,12 +615,15 @@ export default function TestCaseDetailModal({
                   </Text>
                 </Pressable>
                 <Pressable
+                  disabled={isMutating}
                   onPress={() => {
+                    if (isMutating) return;
                     const tc = selectedTestCase;
                     setSelectedTestCaseId(null);
                     openEditCaseModal(tc);
                   }}
                   accessibilityRole="button"
+                  accessibilityState={{ disabled: isMutating }}
                   accessibilityLabel={`Edit test case ${
                     selectedTestCase.testCaseId || selectedTestCase.id
                   }`}
@@ -537,6 +632,7 @@ export default function TestCaseDetailModal({
                     {
                       backgroundColor: colors.surfaceMuted,
                       borderColor: colors.border,
+                      opacity: isMutating ? 0.55 : 1,
                     },
                   ]}
                 >
@@ -550,12 +646,17 @@ export default function TestCaseDetailModal({
                   </Text>
                 </Pressable>
                 <Pressable
-                  onPress={() => setSelectedTestCaseId(null)}
+                  disabled={isMutating}
+                  onPress={handleClose}
                   accessibilityRole="button"
+                  accessibilityState={{ disabled: isMutating }}
                   accessibilityLabel="Done inspecting test case"
                   style={[
                     styles.footerPrimaryBtn,
-                    { backgroundColor: colors.primary },
+                    {
+                      backgroundColor: colors.primary,
+                      opacity: isMutating ? 0.55 : 1,
+                    },
                   ]}
                 >
                   <Text style={styles.footerPrimaryText}>Done</Text>

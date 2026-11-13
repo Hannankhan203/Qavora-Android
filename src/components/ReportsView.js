@@ -530,7 +530,7 @@ export default function ReportsView({ topHeaderNode = null }) {
 
   useWorkspaceBackOverlay(() => {
     if (previewModalVisible) {
-      setPreviewModalVisible(false);
+      if (!isExporting) setPreviewModalVisible(false);
       return true;
     }
     return false;
@@ -2035,7 +2035,7 @@ export default function ReportsView({ topHeaderNode = null }) {
         visible={previewModalVisible}
         transparent
         animationType="slide"
-        onRequestClose={() => setPreviewModalVisible(false)}
+        onRequestClose={() => !isExporting && setPreviewModalVisible(false)}
       >
         <View
           style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
@@ -2073,9 +2073,11 @@ export default function ReportsView({ topHeaderNode = null }) {
                 </Text>
               </View>
               <Pressable
-                onPress={() => setPreviewModalVisible(false)}
+                onPress={() => !isExporting && setPreviewModalVisible(false)}
+                disabled={isExporting}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isExporting) }}
                 accessibilityLabel="Close report export preview"
                 style={[
                   styles.closeModalBtn,

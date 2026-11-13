@@ -68,7 +68,7 @@ export default function DefectFormModal({
       visible={formModalVisible}
       animationType="slide"
       transparent
-      onRequestClose={() => setFormModalVisible(false)}
+      onRequestClose={() => !isSubmittingDefect && setFormModalVisible(false)}
     >
       <KeyboardAvoidingView
         accessibilityViewIsModal={true}
@@ -99,13 +99,18 @@ export default function DefectFormModal({
                 : 'Report New Defect'}
             </Text>
             <TouchableOpacity
-              onPress={() => setFormModalVisible(false)}
+              onPress={() => !isSubmittingDefect && setFormModalVisible(false)}
+              disabled={Boolean(isSubmittingDefect)}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
+              accessibilityState={{ disabled: Boolean(isSubmittingDefect) }}
               accessibilityLabel="Close defect form"
               style={[
                 styles.closeBtn,
-                { backgroundColor: theme.surfaceMuted },
+                {
+                  backgroundColor: theme.surfaceMuted,
+                  opacity: isSubmittingDefect ? 0.5 : 1,
+                },
               ]}
             >
               <VectorIcon

@@ -15,13 +15,24 @@ export default function TestRunDeleteModal({
   setRunPendingDelete,
   isDeletingRun,
   handleConfirmDeleteRun,
+  runDeleteError,
+  onCancelDeleteRun,
 }) {
+  const handleClose = () => {
+    if (isDeletingRun) return;
+    if (typeof onCancelDeleteRun === 'function') {
+      onCancelDeleteRun();
+    } else if (typeof setRunPendingDelete === 'function') {
+      setRunPendingDelete(null);
+    }
+  };
+
   return (
     <Modal
       visible={!!runPendingDelete}
       animationType="fade"
       transparent
-      onRequestClose={() => setRunPendingDelete(null)}
+      onRequestClose={handleClose}
     >
       <View
         accessibilityViewIsModal={true}
@@ -66,6 +77,24 @@ export default function TestRunDeleteModal({
             ? Its execution history will be removed and any linked defects will be safely unlinked.
           </Text>
 
+          {runDeleteError ? (
+            <View
+              style={[
+                styles.formErrorBox,
+                {
+                  backgroundColor: theme.dangerSoft,
+                  borderColor: theme.danger,
+                  width: '100%',
+                  marginBottom: 10,
+                },
+              ]}
+            >
+              <Text style={[styles.formErrorText, { color: theme.danger }]}>
+                {runDeleteError}
+              </Text>
+            </View>
+          ) : null}
+
           <View style={styles.confirmBtnRow}>
             <TouchableOpacity
               style={[
@@ -78,7 +107,7 @@ export default function TestRunDeleteModal({
               accessibilityRole="button"
               accessibilityState={{ disabled: Boolean(isDeletingRun) }}
               accessibilityLabel="Cancel deleting test run"
-              onPress={() => setRunPendingDelete(null)}
+              onPress={handleClose}
               disabled={isDeletingRun}
             >
               <Text

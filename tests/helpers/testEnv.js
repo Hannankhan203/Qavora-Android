@@ -360,6 +360,31 @@ mock.module('expo-sharing', () => ({
   shareAsync: async () => {},
 }));
 
+export const splashScreenController = {
+  preventCalls: 0,
+  hideCalls: 0,
+  setOptionsCalls: [],
+  reset() {
+    this.preventCalls = 0;
+    this.hideCalls = 0;
+    this.setOptionsCalls = [];
+  },
+};
+
+mock.module('expo-splash-screen', () => ({
+  preventAutoHideAsync: async () => {
+    splashScreenController.preventCalls += 1;
+    return true;
+  },
+  hideAsync: async () => {
+    splashScreenController.hideCalls += 1;
+    return true;
+  },
+  setOptions: (opts) => {
+    splashScreenController.setOptionsCalls.push(opts);
+  },
+}));
+
 mock.module('expo-status-bar', () => ({
   StatusBar: () => null,
 }));

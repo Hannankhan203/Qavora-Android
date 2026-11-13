@@ -574,14 +574,19 @@ export default function TestCasesScreen({
   const [isSubmittingCase, setIsSubmittingCase] = useState(false);
   const caseSubmitLockRef = useRef(false);
 
+  // --- Detail Modal Mutation State ---
+  const [isMutatingCaseDetail, setIsMutatingCaseDetail] = useState(false);
+
   // --- Move Test Case Between Suites Modal State ---
   const [movingCase, setMovingCase] = useState(null);
   const [moveTargetSuiteId, setMoveTargetSuiteId] = useState('');
   const [isMovingCase, setIsMovingCase] = useState(false);
+  const [caseMoveError, setCaseMoveError] = useState('');
 
   // --- Delete Test Case Confirmation Modal State ---
   const [deletingCase, setDeletingCase] = useState(null);
   const [isDeletingCase, setIsDeletingCase] = useState(false);
+  const [caseDeleteError, setCaseDeleteError] = useState('');
 
   // --- Test Suite Create / Edit Modal State ---
   const [isSuiteModalOpen, setIsSuiteModalOpen] = useState(false);
@@ -600,6 +605,7 @@ export default function TestCasesScreen({
   const [suiteDeleteMode, setSuiteDeleteMode] = useState('move'); // 'move' | 'delete'
   const [suiteDeleteTargetId, setSuiteDeleteTargetId] = useState('');
   const [isDeletingSuite, setIsDeletingSuite] = useState(false);
+  const [suiteDeleteError, setSuiteDeleteError] = useState('');
 
   // --- Test Plan Edit Modal State ---
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
@@ -633,22 +639,36 @@ export default function TestCasesScreen({
   const [isSubmittingPhase, setIsSubmittingPhase] = useState(false);
   const [deletingPhase, setDeletingPhase] = useState(null);
   const [isDeletingPhase, setIsDeletingPhase] = useState(false);
+  const [phaseDeleteError, setPhaseDeleteError] = useState('');
 
   useWorkspaceBackOverlay(() => {
     if (deletingCase) {
-      if (!isDeletingCase) setDeletingCase(null);
+      if (!isDeletingCase) {
+        setCaseDeleteError('');
+        setDeletingCase(null);
+      }
       return true;
     }
     if (movingCase) {
-      if (!isMovingCase) setMovingCase(null);
+      if (!isMovingCase) {
+        setCaseMoveError('');
+        setMovingCase(null);
+      }
       return true;
     }
     if (isFormModalOpen) {
       if (!isSubmittingCase) setIsFormModalOpen(false);
       return true;
     }
+    if (selectedTestCaseId) {
+      if (!isMutatingCaseDetail) setSelectedTestCaseId(null);
+      return true;
+    }
     if (deletingSuite) {
-      if (!isDeletingSuite) setDeletingSuite(null);
+      if (!isDeletingSuite) {
+        setSuiteDeleteError('');
+        setDeletingSuite(null);
+      }
       return true;
     }
     if (isSuiteModalOpen) {
@@ -656,7 +676,10 @@ export default function TestCasesScreen({
       return true;
     }
     if (deletingPhase) {
-      if (!isDeletingPhase) setDeletingPhase(null);
+      if (!isDeletingPhase) {
+        setPhaseDeleteError('');
+        setDeletingPhase(null);
+      }
       return true;
     }
     if (isPhaseModalOpen) {
@@ -979,36 +1002,63 @@ export default function TestCasesScreen({
   const openMoveCaseModal = useCallback(
     (tc) => {
       const otherSuite = suites.find((s) => s.id !== tc.suiteId) || suites[0];
+      setCaseMoveError('');
       setMovingCase(tc);
       setMoveTargetSuiteId(otherSuite ? otherSuite.id : tc.suiteId);
     },
     [suites]
   );
 
+  const handleCancelMoveCase = useCallback(() => {
+    if (isMovingCase) return;
+    setCaseMoveError('');
+    setMovingCase(null);
+  }, [isMovingCase]);
+
   const handleConfirmMoveCase = async () => {
     if (!movingCase || !moveTargetSuiteId || isMovingCase) return;
     if (moveTargetSuiteId === movingCase.suiteId) {
+      setCaseMoveError('');
       setMovingCase(null);
       return;
     }
+    setCaseMoveError('');
     setIsMovingCase(true);
     try {
       const res = await moveTestCaseToSuite(movingCase.id, moveTargetSuiteId);
       if (res && res.ok) {
+        setCaseMoveError('');
         setMovingCase(null);
+      } else {
+        setCaseMoveError((res && res.error) || 'Failed to move test case.');
       }
     } finally {
       setIsMovingCase(false);
     }
   };
 
+  const openDeleteCaseConfirm = useCallback((tc) => {
+    setCaseDeleteError('');
+    setDeletingCase(tc);
+  }, []);
+
+  const handleCancelDeleteCase = useCallback(() => {
+    if (isDeletingCase) return;
+    setCaseDeleteError('');
+    setDeletingCase(null);
+  }, [isDeletingCase]);
+
   const handleConfirmDeleteCase = async () => {
     if (!deletingCase || isDeletingCase) return;
+    setCaseDeleteError('');
     setIsDeletingCase(true);
     try {
       const res = await deleteTestCase(deletingCase.id);
       if (res && res.ok) {
+        setCaseDeleteError('');
         setDeletingCase(null);
+      } else {
+        setCaseDeleteError((res && res.error) || 'Failed to delete test case.');
       }
     } finally {
       setIsDeletingCase(false);
@@ -1100,6 +1150,7 @@ export default function TestCasesScreen({
     (suite) => {
       const otherSuites = suites.filter((s) => s.id !== suite.id);
       const caseCount = suiteStatsMap[suite.id]?.total || 0;
+      setSuiteDeleteError('');
       setDeletingSuite(suite);
       if (caseCount > 0 && otherSuites.length > 0) {
         setSuiteDeleteMode('move');
@@ -1112,8 +1163,15 @@ export default function TestCasesScreen({
     [suites, suiteStatsMap]
   );
 
+  const handleCancelDeleteSuite = useCallback(() => {
+    if (isDeletingSuite) return;
+    setSuiteDeleteError('');
+    setDeletingSuite(null);
+  }, [isDeletingSuite]);
+
   const handleConfirmDeleteSuite = async () => {
     if (!deletingSuite || isDeletingSuite) return;
+    setSuiteDeleteError('');
     setIsDeletingSuite(true);
     try {
       const targetId = deletingSuite.id;
@@ -1126,7 +1184,12 @@ export default function TestCasesScreen({
         if (selectedSuiteId === targetId) {
           setSelectedSuiteId(moveCasesToSuiteId || 'all');
         }
+        setSuiteDeleteError('');
         setDeletingSuite(null);
+      } else {
+        setSuiteDeleteError(
+          (res && res.error) || 'Failed to delete test suite.'
+        );
       }
     } finally {
       setIsDeletingSuite(false);
@@ -1242,13 +1305,30 @@ export default function TestCasesScreen({
     }
   };
 
+  const openDeletePhaseConfirm = useCallback((phase) => {
+    setPhaseDeleteError('');
+    setDeletingPhase(phase);
+  }, []);
+
+  const handleCancelDeletePhase = useCallback(() => {
+    if (isDeletingPhase) return;
+    setPhaseDeleteError('');
+    setDeletingPhase(null);
+  }, [isDeletingPhase]);
+
   const handleConfirmDeletePhase = async () => {
     if (!deletingPhase || isDeletingPhase) return;
+    setPhaseDeleteError('');
     setIsDeletingPhase(true);
     try {
       const res = await deleteTestPlanPhase(deletingPhase.id);
       if (res && res.ok) {
+        setPhaseDeleteError('');
         setDeletingPhase(null);
+      } else {
+        setPhaseDeleteError(
+          (res && res.error) || 'Failed to delete testing phase.'
+        );
       }
     } finally {
       setIsDeletingPhase(false);
@@ -1345,7 +1425,7 @@ export default function TestCasesScreen({
         onOpenCase={setSelectedTestCaseId}
         onMoveCase={openMoveCaseModal}
         onEditCase={openEditCaseModal}
-        onDeleteCase={setDeletingCase}
+        onDeleteCase={openDeleteCaseConfirm}
       />
     ),
     [
@@ -1356,6 +1436,7 @@ export default function TestCasesScreen({
       setSelectedTestCaseId,
       openMoveCaseModal,
       openEditCaseModal,
+      openDeleteCaseConfirm,
     ]
   );
 
@@ -1416,11 +1497,11 @@ export default function TestCasesScreen({
           caseCount={metrics.caseCount}
           colors={colors}
           onEditPhase={openEditPhaseModal}
-          onDeletePhase={setDeletingPhase}
+          onDeletePhase={openDeletePhaseConfirm}
         />
       );
     },
-    [phaseMetricsById, colors]
+    [phaseMetricsById, colors, openDeletePhaseConfirm]
   );
 
   return (
@@ -2344,8 +2425,10 @@ export default function TestCasesScreen({
         updateTestCase={updateTestCase}
         suites={suites}
         moveTestCaseToSuite={moveTestCaseToSuite}
-        setDeletingCase={setDeletingCase}
+        setDeletingCase={openDeleteCaseConfirm}
         openEditCaseModal={openEditCaseModal}
+        isMutatingDetail={isMutatingCaseDetail}
+        onMutatingDetailChange={setIsMutatingCaseDetail}
       />
 
       <TestCaseFormModal
@@ -2391,6 +2474,8 @@ export default function TestCasesScreen({
         movingCase={movingCase}
         setMovingCase={setMovingCase}
         isMovingCase={isMovingCase}
+        moveCaseError={caseMoveError}
+        onCancelMoveCase={handleCancelMoveCase}
         suites={suites}
         moveTargetSuiteId={moveTargetSuiteId}
         setMoveTargetSuiteId={setMoveTargetSuiteId}
@@ -2401,6 +2486,8 @@ export default function TestCasesScreen({
         deletingCase={deletingCase}
         setDeletingCase={setDeletingCase}
         isDeletingCase={isDeletingCase}
+        deleteCaseError={caseDeleteError}
+        onCancelDeleteCase={handleCancelDeleteCase}
         handleConfirmDeleteCase={handleConfirmDeleteCase}
       />
 
@@ -2434,6 +2521,8 @@ export default function TestCasesScreen({
         deletingSuite={deletingSuite}
         setDeletingSuite={setDeletingSuite}
         isDeletingSuite={isDeletingSuite}
+        deleteSuiteError={suiteDeleteError}
+        onCancelDeleteSuite={handleCancelDeleteSuite}
         suiteStatsMap={suiteStatsMap}
         suites={suites}
         suiteDeleteMode={suiteDeleteMode}
@@ -2474,6 +2563,8 @@ export default function TestCasesScreen({
         deletingPhase={deletingPhase}
         setDeletingPhase={setDeletingPhase}
         isDeletingPhase={isDeletingPhase}
+        deletePhaseError={phaseDeleteError}
+        onCancelDeletePhase={handleCancelDeletePhase}
         handleConfirmDeletePhase={handleConfirmDeletePhase}
       />
     </View>

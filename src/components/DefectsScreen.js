@@ -313,21 +313,64 @@ export default function DefectsScreen() {
   // Delete confirmation modal state
   const [defectPendingDelete, setDefectPendingDelete] = useState(null);
   const [isDeletingDefect, setIsDeletingDefect] = useState(false);
+  const [defectDeleteError, setDefectDeleteError] = useState('');
+  const detailReturnDefectIdRef = useRef(null);
+
+  // Status update in detail modal
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+
+  const closeDetailModal = useCallback(() => {
+    if (isUpdatingStatus) return;
+    setViewingDefectId(null);
+    setSelectedDefectId(null);
+  }, [isUpdatingStatus, setSelectedDefectId]);
+
+  const handleRequestDeleteFromCard = useCallback((defect) => {
+    if (!defect) return;
+    detailReturnDefectIdRef.current = null;
+    setDefectDeleteError('');
+    setDefectPendingDelete(defect);
+  }, []);
+
+  const handleRequestDeleteFromDetail = useCallback(
+    (defect) => {
+      if (!defect || isUpdatingStatus) return;
+      detailReturnDefectIdRef.current = defect.id || defect.defectId || null;
+      setViewingDefectId(null);
+      setSelectedDefectId(null);
+      setDefectDeleteError('');
+      setDefectPendingDelete(defect);
+    },
+    [isUpdatingStatus, setSelectedDefectId]
+  );
+
+  const handleCancelDeleteDefect = useCallback(() => {
+    if (isDeletingDefect) return;
+    const returnId = detailReturnDefectIdRef.current;
+    detailReturnDefectIdRef.current = null;
+    setDefectDeleteError('');
+    setDefectPendingDelete(null);
+    if (returnId) {
+      setViewingDefectId(returnId);
+      setSelectedDefectId(returnId);
+    }
+  }, [isDeletingDefect, setSelectedDefectId]);
 
   useWorkspaceBackOverlay(() => {
     if (defectPendingDelete) {
-      if (!isDeletingDefect) setDefectPendingDelete(null);
+      handleCancelDeleteDefect();
       return true;
     }
     if (formModalVisible) {
       if (!isSubmittingDefect) setFormModalVisible(false);
       return true;
     }
+    if (viewingDefectId) {
+      if (!isUpdatingStatus) closeDetailModal();
+      return true;
+    }
     return false;
   });
-
-  // Status update in detail modal
-  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
 
   // Feedback banner
   const [feedbackBanner, setFeedbackBanner] = useState(null);
@@ -462,11 +505,6 @@ export default function DefectsScreen() {
       null
     );
   }, [viewingDefectId, defects]);
-
-  const closeDetailModal = () => {
-    setViewingDefectId(null);
-    setSelectedDefectId(null);
-  };
 
   const openNewDefectForm = () => {
     setEditingDefectId(null);
@@ -635,6 +673,7 @@ export default function DefectsScreen() {
 
   const handleConfirmDeleteDefect = async () => {
     if (!defectPendingDelete || isDeletingDefect) return;
+    setDefectDeleteError('');
     setIsDeletingDefect(true);
     try {
       const targetId = defectPendingDelete.id;
@@ -642,11 +681,14 @@ export default function DefectsScreen() {
         defectPendingDelete.defectId || defectPendingDelete.id;
       const res = await deleteDefect(targetId);
       if (!res?.ok) {
-        showFeedback('error', res?.error || 'Failed to delete defect.');
+        const errMsg = res?.error || 'Failed to delete defect.';
+        setDefectDeleteError(errMsg);
+        showFeedback('error', errMsg);
       } else {
-        if (viewingDefectId === targetId) {
-          closeDetailModal();
-        }
+        detailReturnDefectIdRef.current = null;
+        setDefectDeleteError('');
+        setViewingDefectId(null);
+        setSelectedDefectId(null);
         setDefectPendingDelete(null);
         showFeedback('success', `Deleted defect ${targetDisplay}.`);
       }
@@ -741,7 +783,7 @@ export default function DefectsScreen() {
         onPressDefect={handleOpenDefectDetail}
         onOpenExternalUrl={handleOpenExternalUrl}
         onEditDefect={openEditDefectForm}
-        onRequestDeleteDefect={setDefectPendingDelete}
+        onRequestDeleteDefect={handleRequestDeleteFromCard}
       />
     ),
     [
@@ -754,6 +796,7 @@ export default function DefectsScreen() {
       handleOpenDefectDetail,
       handleOpenExternalUrl,
       openEditDefectForm,
+      handleRequestDeleteFromCard,
     ]
   );
 
@@ -1253,6 +1296,7 @@ export default function DefectsScreen() {
         setSelectedTestRunId={setSelectedTestRunId}
         setActiveTab={setActiveTab}
         setDefectPendingDelete={setDefectPendingDelete}
+        onRequestDeleteDefect={handleRequestDeleteFromDetail}
         openEditDefectForm={openEditDefectForm}
       />
 
@@ -1307,6 +1351,8 @@ export default function DefectsScreen() {
         defectPendingDelete={defectPendingDelete}
         setDefectPendingDelete={setDefectPendingDelete}
         isDeletingDefect={isDeletingDefect}
+        defectDeleteError={defectDeleteError}
+        onCancelDeleteDefect={handleCancelDeleteDefect}
         handleConfirmDeleteDefect={handleConfirmDeleteDefect}
       />
     </View>

@@ -697,17 +697,31 @@ export default function TestRunsScreen({
   // Delete Run confirmation modal state
   const [runPendingDelete, setRunPendingDelete] = useState(null);
   const [isDeletingRun, setIsDeletingRun] = useState(false);
+  const [runDeleteError, setRunDeleteError] = useState('');
+
+  const handleCancelDeleteRun = useCallback(() => {
+    if (isDeletingRun) return;
+    setRunDeleteError('');
+    setRunPendingDelete(null);
+  }, [isDeletingRun]);
 
   // Run status mutation state
   const [isTogglingRunStatus, setIsTogglingRunStatus] = useState(false);
 
   useWorkspaceBackOverlay(() => {
     if (runPendingDelete) {
-      if (!isDeletingRun) setRunPendingDelete(null);
+      if (!isDeletingRun) {
+        setRunDeleteError('');
+        setRunPendingDelete(null);
+      }
       return true;
     }
     if (runModalVisible) {
       if (!isSubmittingRun) setRunModalVisible(false);
+      return true;
+    }
+    if (executingCaseId) {
+      if (!isSubmittingExec) setExecutingCaseId(null);
       return true;
     }
     return false;
@@ -719,6 +733,8 @@ export default function TestRunsScreen({
   const execNotesRef = useRef(null);
   const execTesterRef = useRef(null);
   const execEnvironmentRef = useRef(null);
+  const execDeviceRef = useRef(null);
+  const execBuildVersionRef = useRef(null);
 
   const runFormScrollRef = useRef(null);
   const runNameRef = useRef(null);
@@ -1148,12 +1164,16 @@ export default function TestRunsScreen({
   const handleConfirmDeleteRun = async () => {
     if (!runPendingDelete || isDeletingRun) return;
     setIsDeletingRun(true);
+    setRunDeleteError('');
     try {
       const targetName = runPendingDelete.name;
       const res = await deleteTestRun(runPendingDelete.id);
       if (!res?.ok) {
-        showFeedback('error', res?.error || 'Failed to delete test run.');
+        const errMsg = res?.error || 'Failed to delete test run.';
+        setRunDeleteError(errMsg);
+        showFeedback('error', errMsg);
       } else {
+        setRunDeleteError('');
         setRunPendingDelete(null);
         showFeedback('success', `Deleted test run "${targetName}".`);
       }
@@ -1893,7 +1913,10 @@ export default function TestRunsScreen({
                         ]}
                         accessibilityRole="button"
                         accessibilityLabel={`Delete test run ${activeRun.name}`}
-                        onPress={() => setRunPendingDelete(activeRun)}
+                        onPress={() => {
+                          setRunDeleteError('');
+                          setRunPendingDelete(activeRun);
+                        }}
                       >
                         <VectorIcon
                           name="trash"
@@ -2304,6 +2327,8 @@ export default function TestRunsScreen({
         execNotesRef={execNotesRef}
         execTesterRef={execTesterRef}
         execEnvironmentRef={execEnvironmentRef}
+        execDeviceRef={execDeviceRef}
+        execBuildVersionRef={execBuildVersionRef}
         scrollRunModalTo={scrollRunModalTo}
         stepStatuses={stepStatuses}
         markAllStepsPassed={markAllStepsPassed}
@@ -2316,6 +2341,10 @@ export default function TestRunsScreen({
         setExecTester={setExecTester}
         execEnvironment={execEnvironment}
         setExecEnvironment={setExecEnvironment}
+        execDevice={execDevice}
+        setExecDevice={setExecDevice}
+        execBuildVersion={execBuildVersion}
+        setExecBuildVersion={setExecBuildVersion}
         isSubmittingExec={isSubmittingExec}
         handleSaveExecution={handleSaveExecution}
       />
@@ -2364,6 +2393,8 @@ export default function TestRunsScreen({
         setRunPendingDelete={setRunPendingDelete}
         isDeletingRun={isDeletingRun}
         handleConfirmDeleteRun={handleConfirmDeleteRun}
+        runDeleteError={runDeleteError}
+        onCancelDeleteRun={handleCancelDeleteRun}
       />
     </View>
   );

@@ -144,7 +144,9 @@ export default function ProjectDetailsScreen({
       return true;
     }
     if (isEditModalOpen) {
-      setIsEditModalOpen(false);
+      if (!isMutating) {
+        setIsEditModalOpen(false);
+      }
       return true;
     }
     return false;

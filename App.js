@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { StatusBar } from 'expo-status-bar';
+import * as SplashScreen from 'expo-splash-screen';
 import {
   StyleSheet,
   View,
@@ -36,6 +37,10 @@ import DataManagementSection from './src/components/DataManagementSection';
 import VectorIcon from './src/components/VectorIcon';
 import { startConnectivityMonitoring } from './src/services/offlineSyncService';
 import { isLocalMockBackendActive } from './src/services/apiClient';
+
+if (typeof SplashScreen?.preventAutoHideAsync === 'function') {
+  SplashScreen.preventAutoHideAsync().catch(() => {});
+}
 
 export { NAVIGATION_DESTINATIONS };
 
@@ -762,6 +767,28 @@ function QavoraQAShell() {
     setActiveTab,
   ]);
 
+  const handleResetChecklistTemplateId = useCallback(() => {
+    setChecklistCreateTemplateId('none');
+  }, [setChecklistCreateTemplateId]);
+
+  const handleBackFromChecklists = useCallback(() => {
+    setChecklistCreateModalOpen(false);
+    setActiveChecklistId(null);
+    if (selectedProject) {
+      setProjectViewMode('workspace');
+      setDashboardSubTab('overview');
+    } else {
+      setProjectViewMode('selection');
+      setDashboardSubTab('overview');
+    }
+  }, [
+    selectedProject,
+    setChecklistCreateModalOpen,
+    setActiveChecklistId,
+    setProjectViewMode,
+    setDashboardSubTab,
+  ]);
+
   // Global Navigation Drawer Sections & All 11 Canonical Destinations
   const drawerSections = useMemo(
     () => [
@@ -1197,18 +1224,8 @@ function QavoraQAShell() {
               createModalOpen={checklistCreateModalOpen}
               onChangeCreateModalOpen={setChecklistCreateModalOpen}
               initialTemplateId={checklistCreateTemplateId}
-              onResetTemplateId={() => setChecklistCreateTemplateId('none')}
-              onBackToOverview={() => {
-                setChecklistCreateModalOpen(false);
-                setActiveChecklistId(null);
-                if (selectedProject) {
-                  setProjectViewMode('workspace');
-                  setDashboardSubTab('overview');
-                } else {
-                  setProjectViewMode('selection');
-                  setDashboardSubTab('overview');
-                }
-              }}
+              onResetTemplateId={handleResetChecklistTemplateId}
+              onBackToOverview={handleBackFromChecklists}
             />
           ) : (
             <>
@@ -1262,10 +1279,7 @@ function QavoraQAShell() {
                 (profileSubView === 'data' ? (
                   <DataManagementSection />
                 ) : (
-                  <ProfileSettingsScreen
-                    activeSection={profileSubView}
-                    onChangeSection={setProfileSubView}
-                  />
+                  <ProfileSettingsScreen />
                 ))}
             </>
           )}
@@ -1639,8 +1653,19 @@ function QavoraQAShell() {
 }
 
 function AuthRootGate() {
-  const { colors } = useTheme();
+  const { colors, isThemeLoaded } = useTheme();
   const { isAuthenticated, isRestoringSession } = useAuth();
+  const hasHiddenSplashRef = useRef(false);
+
+  useEffect(() => {
+    if (hasHiddenSplashRef.current) return;
+    if (isThemeLoaded && !isRestoringSession) {
+      hasHiddenSplashRef.current = true;
+      if (typeof SplashScreen?.hideAsync === 'function') {
+        SplashScreen.hideAsync().catch(() => {});
+      }
+    }
+  }, [isThemeLoaded, isRestoringSession]);
 
   if (isRestoringSession) {
     return (

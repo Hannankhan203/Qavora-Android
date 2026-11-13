@@ -24,6 +24,8 @@ export default function TestRunExecutionModal({
   execNotesRef,
   execTesterRef,
   execEnvironmentRef,
+  execDeviceRef,
+  execBuildVersionRef,
   scrollRunModalTo,
   stepStatuses,
   markAllStepsPassed,
@@ -36,6 +38,10 @@ export default function TestRunExecutionModal({
   setExecTester,
   execEnvironment,
   setExecEnvironment,
+  execDevice,
+  setExecDevice,
+  execBuildVersion,
+  setExecBuildVersion,
   isSubmittingExec,
   handleSaveExecution,
 }) {
@@ -44,7 +50,7 @@ export default function TestRunExecutionModal({
       visible={!!executingCase}
       animationType="slide"
       transparent
-      onRequestClose={() => setExecutingCaseId(null)}
+      onRequestClose={() => !isSubmittingExec && setExecutingCaseId(null)}
     >
       <KeyboardAvoidingView
         accessibilityViewIsModal={true}
@@ -86,13 +92,18 @@ export default function TestRunExecutionModal({
                   </Text>
                 </View>
                 <TouchableOpacity
-                  onPress={() => setExecutingCaseId(null)}
+                  onPress={() => !isSubmittingExec && setExecutingCaseId(null)}
+                  disabled={Boolean(isSubmittingExec)}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   accessibilityRole="button"
+                  accessibilityState={{ disabled: Boolean(isSubmittingExec) }}
                   accessibilityLabel="Close execution runner"
                   style={[
                     styles.closeBtn,
-                    { backgroundColor: theme.surfaceMuted },
+                    {
+                      backgroundColor: theme.surfaceMuted,
+                      opacity: isSubmittingExec ? 0.5 : 1,
+                    },
                   ]}
                 >
                   <VectorIcon
@@ -418,9 +429,80 @@ export default function TestRunExecutionModal({
                       placeholder="Android 14 / Staging"
                       placeholderTextColor={theme.textMuted}
                       accessibilityLabel="Execution Environment"
-                      returnKeyType="done"
+                      returnKeyType="next"
+                      blurOnSubmit={false}
                       onFocus={() =>
                         scrollRunModalTo(execRunnerScrollRef, 440)
+                      }
+                      onSubmitEditing={() =>
+                        execDeviceRef?.current?.focus()
+                      }
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.execMetaInputsGrid}>
+                  <View style={styles.execMetaInputCol}>
+                    <Text
+                      style={[
+                        styles.inputLabel,
+                        { color: theme.textSecondary, marginTop: 10 },
+                      ]}
+                    >
+                      Device / OS
+                    </Text>
+                    <TextInput
+                      ref={execDeviceRef}
+                      style={[
+                        styles.inputField,
+                        {
+                          backgroundColor: theme.surfaceMuted,
+                          borderColor: theme.border,
+                          color: theme.text,
+                        },
+                      ]}
+                      value={execDevice}
+                      onChangeText={setExecDevice}
+                      placeholder="Pixel 8 Pro • Android 14"
+                      placeholderTextColor={theme.textMuted}
+                      accessibilityLabel="Execution Device"
+                      returnKeyType="next"
+                      blurOnSubmit={false}
+                      onFocus={() =>
+                        scrollRunModalTo(execRunnerScrollRef, 510)
+                      }
+                      onSubmitEditing={() =>
+                        execBuildVersionRef?.current?.focus()
+                      }
+                    />
+                  </View>
+                  <View style={styles.execMetaInputCol}>
+                    <Text
+                      style={[
+                        styles.inputLabel,
+                        { color: theme.textSecondary, marginTop: 10 },
+                      ]}
+                    >
+                      Build Version
+                    </Text>
+                    <TextInput
+                      ref={execBuildVersionRef}
+                      style={[
+                        styles.inputField,
+                        {
+                          backgroundColor: theme.surfaceMuted,
+                          borderColor: theme.border,
+                          color: theme.text,
+                        },
+                      ]}
+                      value={execBuildVersion}
+                      onChangeText={setExecBuildVersion}
+                      placeholder="2.4.0-rc3"
+                      placeholderTextColor={theme.textMuted}
+                      accessibilityLabel="Execution Build Version"
+                      returnKeyType="done"
+                      onFocus={() =>
+                        scrollRunModalTo(execRunnerScrollRef, 510)
                       }
                       onSubmitEditing={() => Keyboard.dismiss()}
                     />

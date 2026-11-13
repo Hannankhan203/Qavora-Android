@@ -8,15 +8,25 @@ export default function ChecklistDeleteModal({
   setDeleteTargetChecklist,
   handleConfirmDeleteChecklist,
   busyMutation,
+  deleteChecklistError,
+  onCancelDeleteChecklist,
 }) {
   const { colors } = useTheme();
+  const handleClose = () => {
+    if (busyMutation) return;
+    if (typeof onCancelDeleteChecklist === 'function') {
+      onCancelDeleteChecklist();
+    } else if (typeof setDeleteTargetChecklist === 'function') {
+      setDeleteTargetChecklist(null);
+    }
+  };
 
   return (
     <Modal
       visible={Boolean(deleteTargetChecklist)}
       transparent
       animationType="fade"
-      onRequestClose={() => setDeleteTargetChecklist(null)}
+      onRequestClose={handleClose}
     >
       <View
         accessibilityViewIsModal={true}
@@ -48,9 +58,26 @@ export default function ChecklistDeleteModal({
             items? This action cannot be undone.
           </Text>
 
+          {deleteChecklistError ? (
+            <View
+              style={[
+                styles.errorAlert,
+                {
+                  backgroundColor: colors.dangerSoft,
+                  borderColor: colors.danger,
+                  marginBottom: 12,
+                },
+              ]}
+            >
+              <Text style={[styles.errorAlertText, { color: colors.danger }]}>
+                {deleteChecklistError}
+              </Text>
+            </View>
+          ) : null}
+
           <View style={styles.modalActionsRow}>
             <Pressable
-              onPress={() => setDeleteTargetChecklist(null)}
+              onPress={handleClose}
               disabled={busyMutation}
               accessibilityRole="button"
               accessibilityState={{ disabled: Boolean(busyMutation) }}

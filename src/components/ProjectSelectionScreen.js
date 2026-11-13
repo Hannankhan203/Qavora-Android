@@ -425,7 +425,9 @@ export default function ProjectSelectionScreen({
 
   useWorkspaceBackOverlay(() => {
     if (isFormModalOpen) {
-      setIsFormModalOpen(false);
+      if (!isMutating) {
+        setIsFormModalOpen(false);
+      }
       return true;
     }
     return false;

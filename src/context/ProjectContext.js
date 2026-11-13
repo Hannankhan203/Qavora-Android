@@ -471,7 +471,34 @@ export function ProjectProvider({ children }) {
     setActiveSyncUser(activeUserId);
     refreshSyncStatus();
 
-    const unsubscribeSyncEvents = subscribeToSyncEvents(() => {
+    const unsubscribeSyncEvents = subscribeToSyncEvents((evt) => {
+      if (evt && evt.type === 'project_id_remapped') {
+        if (!evt.userId || String(evt.userId).trim() === activeUserId) {
+          const { oldProjectId, newProjectId, project: remappedProject } = evt;
+          if (oldProjectId && newProjectId && oldProjectId !== newProjectId) {
+            setProjects((prev) => {
+              const withoutOld = prev.filter(
+                (p) => p && p.id !== oldProjectId && p._id !== oldProjectId
+              );
+              if (!remappedProject) return withoutOld;
+              const existingIdx = withoutOld.findIndex(
+                (p) => p && (p.id === newProjectId || p._id === newProjectId)
+              );
+              if (existingIdx !== -1) {
+                const next = [...withoutOld];
+                next[existingIdx] = remappedProject;
+                return next;
+              }
+              return [remappedProject, ...withoutOld];
+            });
+            if (selectedProjectIdRef.current === oldProjectId) {
+              selectedProjectIdRef.current = newProjectId;
+              setSelectedProjectIdState(newProjectId);
+              persistSelectedProjectId(newProjectId);
+            }
+          }
+        }
+      }
       refreshSyncStatus();
     });
 
@@ -492,7 +519,13 @@ export function ProjectProvider({ children }) {
       unsubscribeReconnectResults();
       stopMonitoring();
     };
-  }, [isAuthenticated, activeUserId, refreshSyncStatus, refreshProjects]);
+  }, [
+    isAuthenticated,
+    activeUserId,
+    refreshSyncStatus,
+    refreshProjects,
+    persistSelectedProjectId,
+  ]);
 
   // Automatically load user projects when authenticated user session becomes active;
   // clear in-memory project state when logged out (preserving offline cache & queue on disk).

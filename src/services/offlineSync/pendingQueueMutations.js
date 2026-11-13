@@ -6,17 +6,27 @@
  */
 
 import { normalizeProjectRecord } from '../projectService.js';
-import { normalizeChecklistRecord } from '../checklists/checklistNormalization.js';
+import {
+  normalizeChecklistRecord,
+  getChecklistCacheKey,
+} from '../checklists/checklistNormalization.js';
 import {
   cacheChecklistOffline,
   removeCachedChecklistOffline,
   getCachedChecklistById,
 } from '../checklists/checklistCache.js';
+import { getProjectWorkspaceStorageKey } from '../../context/workspace/workspaceConstants.js';
+import { getDefectSequenceStorageKey } from '../../context/workspace/defectIdUtils.js';
 import {
   BASE_BACKOFF_MS,
   DEFAULT_MAX_RETRIES,
   nextMonotonicSeq,
   notifySyncListeners,
+  getStorage,
+  getOfflineProjectsCacheKey,
+  readJsonFromStorage,
+  writeJsonToStorage,
+  removeKeyFromStorage,
 } from './syncState.js';
 import {
   buildOperationIdempotencyKey,
@@ -33,6 +43,7 @@ import {
 import {
   createEmptyDeletionTombstones,
   extractActiveIdsFromProjectDataPayload,
+  getAllDeletionTombstonesForUser,
   getProjectDeletionTombstones,
   hasAnyDeletionTombstones,
   mergeDeletionTombstones,
@@ -40,6 +51,8 @@ import {
   subtractDeletionTombstones,
   clearProjectDeletionTombstones,
 } from './deletionTombstones.js';
+
+const SELECTED_PROJECT_ID_STORAGE_PREFIX = '@qavora_selected_project_id_v1:';
 
 /**
  * Applies a queued mutation optimistically to the user's offline project cache
@@ -690,4 +703,290 @@ export async function queueProjectMutation({
   });
 
   return record;
+}
+
+/**
+ * Remaps all local offline state referencing a temporary client-generated
+ * `oldProjectId` (queued operations, project cache, checklist cache, deletion
+ * tombstones, selected project ID, workspace snapshot, and defect sequence)
+ * to the canonical server-assigned `syncedProject.id`.
+ */
+export async function remapTemporaryProjectIdState(
+  userId,
+  oldProjectId,
+  syncedProject
+) {
+  const targetUserId = String(userId || '').trim();
+  const oldId = String(oldProjectId || '').trim();
+  const newId = String(
+    (syncedProject && (syncedProject.id || syncedProject._id)) || ''
+  ).trim();
+
+  if (!targetUserId || !oldId || !newId || oldId === newId) {
+    return {
+      remapped: false,
+      oldProjectId: oldId,
+      newProjectId: newId || oldId,
+      remappedOpsCount: 0,
+    };
+  }
+
+  let remappedOpsCount = 0;
+
+  // 1. Remap remaining queued project & checklist operations referencing oldId
+  const existingOps = await getPendingProjectOperations(targetUserId);
+  let remainingNonChecklistForNewId = false;
+  let queueChanged = false;
+
+  const updatedOps = existingOps.map((op) => {
+    if (!op || typeof op !== 'object') return op;
+
+    if (op.entityType === 'checklist') {
+      const topMatches = op.projectId === oldId;
+      const payloadMatches =
+        op.payload &&
+        typeof op.payload === 'object' &&
+        (op.payload.projectId === oldId ||
+          (op.payload.snapshot && op.payload.snapshot.projectId === oldId));
+      if (!topMatches && !payloadMatches) {
+        return op;
+      }
+
+      queueChanged = true;
+      remappedOpsCount += 1;
+
+      const nextPayload =
+        op.payload && typeof op.payload === 'object' && !Array.isArray(op.payload)
+          ? { ...op.payload }
+          : op.payload;
+      if (nextPayload && typeof nextPayload === 'object') {
+        if (nextPayload.projectId === oldId || topMatches) {
+          nextPayload.projectId = newId;
+        }
+        if (syncedProject && syncedProject.name && nextPayload.projectName !== undefined) {
+          nextPayload.projectName = syncedProject.name;
+        }
+        if (
+          nextPayload.snapshot &&
+          typeof nextPayload.snapshot === 'object' &&
+          nextPayload.snapshot.projectId === oldId
+        ) {
+          nextPayload.snapshot = {
+            ...nextPayload.snapshot,
+            projectId: newId,
+            ...(syncedProject && syncedProject.name
+              ? { projectName: syncedProject.name }
+              : {}),
+          };
+        }
+      }
+
+      return {
+        ...op,
+        projectId: op.projectId === oldId || topMatches ? newId : op.projectId,
+        payload: nextPayload,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    if (op.projectId !== oldId) {
+      if (op.projectId === newId && op.status !== 'completed') {
+        remainingNonChecklistForNewId = true;
+      }
+      return op;
+    }
+
+    queueChanged = true;
+    remappedOpsCount += 1;
+    if (op.status !== 'completed') {
+      remainingNonChecklistForNewId = true;
+    }
+
+    const effectiveEntityKey =
+      op.entityType === 'project' ? 'project' : 'data';
+    const nextPayload =
+      op.payload && typeof op.payload === 'object' && !Array.isArray(op.payload)
+        ? { ...op.payload }
+        : op.payload;
+    if (nextPayload && typeof nextPayload === 'object') {
+      if (nextPayload.projectId === oldId) {
+        nextPayload.projectId = newId;
+      }
+      if (nextPayload.id === oldId) {
+        nextPayload.id = newId;
+      }
+    }
+
+    return {
+      ...op,
+      projectId: newId,
+      idempotencyKey: buildOperationIdempotencyKey({
+        userId: targetUserId,
+        projectId: newId,
+        entityType: effectiveEntityKey,
+        entityId: op.entityType === 'project' ? op.entityId : 'workspace_data',
+        operationType: op.operationType,
+      }),
+      expectedUpdatedAt:
+        op.operationType !== 'CREATE' && syncedProject && syncedProject.updatedAt
+          ? syncedProject.updatedAt
+          : op.expectedUpdatedAt || null,
+      payload: nextPayload,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+
+  if (queueChanged) {
+    await savePendingProjectOperations(
+      targetUserId,
+      sortProjectOperations(updatedOps)
+    );
+  }
+
+  // 2. Replace oldId cache entry with canonical syncedProject entry
+  const projectCacheKey = getOfflineProjectsCacheKey(targetUserId);
+  if (projectCacheKey) {
+    const projectMap = await readJsonFromStorage(projectCacheKey, {});
+    const safeProjectMap =
+      projectMap && typeof projectMap === 'object' && !Array.isArray(projectMap)
+        ? { ...projectMap }
+        : {};
+    const hadOldCache = Boolean(safeProjectMap[oldId]);
+    const oldCachedEntry = safeProjectMap[oldId] || {};
+    if (hadOldCache) {
+      delete safeProjectMap[oldId];
+      await writeJsonToStorage(projectCacheKey, safeProjectMap);
+    }
+
+    const mergedProjectRecord = normalizeProjectRecord({
+      ...oldCachedEntry,
+      ...(syncedProject || {}),
+      id: newId,
+      userId: targetUserId,
+    });
+    if (mergedProjectRecord) {
+      await cacheProjectOffline(mergedProjectRecord, targetUserId, {
+        pendingSync: remainingNonChecklistForNewId,
+        pendingCreation: false,
+      });
+    }
+  }
+
+  // 3. Remap cached checklists linked to oldId
+  const checklistCacheKey = getChecklistCacheKey(targetUserId);
+  if (checklistCacheKey) {
+    const rawChecklistCache = await readJsonFromStorage(checklistCacheKey, null);
+    if (rawChecklistCache) {
+      const list = Array.isArray(rawChecklistCache)
+        ? rawChecklistCache
+        : Array.isArray(rawChecklistCache.checklists)
+        ? rawChecklistCache.checklists
+        : [];
+      let checklistChanged = false;
+      const nextChecklistList = list
+        .map((item) => {
+          if (!item || typeof item !== 'object') return item;
+          if (item.projectId !== oldId) return item;
+          checklistChanged = true;
+          return normalizeChecklistRecord({
+            ...item,
+            projectId: newId,
+            projectName:
+              (syncedProject && syncedProject.name) || item.projectName || '',
+          });
+        })
+        .filter(Boolean);
+
+      if (checklistChanged) {
+        await writeJsonToStorage(checklistCacheKey, {
+          userId: targetUserId,
+          updatedAt: new Date().toISOString(),
+          checklists: nextChecklistList,
+        });
+      }
+    }
+  }
+
+  // 4. Remap deletion tombstones for oldId -> newId
+  const allTombstones = await getAllDeletionTombstonesForUser(targetUserId);
+  if (allTombstones && allTombstones[oldId]) {
+    const existingNewTombstones = await getProjectDeletionTombstones(
+      targetUserId,
+      newId
+    );
+    const mergedTombstones = mergeDeletionTombstones(
+      allTombstones[oldId],
+      existingNewTombstones
+    );
+    await saveProjectDeletionTombstones(targetUserId, newId, mergedTombstones);
+    await clearProjectDeletionTombstones(targetUserId, oldId);
+  }
+
+  // 5. Remap selected project ID in storage
+  const storage = getStorage();
+  if (storage && typeof storage.getItem === 'function') {
+    const selectedKey = `${SELECTED_PROJECT_ID_STORAGE_PREFIX}${targetUserId}`;
+    try {
+      const currentSelected = await storage.getItem(selectedKey);
+      if (
+        typeof currentSelected === 'string' &&
+        currentSelected.trim() === oldId &&
+        typeof storage.setItem === 'function'
+      ) {
+        await storage.setItem(selectedKey, newId);
+      }
+    } catch {
+      // Ignore storage error
+    }
+  }
+
+  // 6. Migrate project workspace snapshot key & defect sequence key
+  const oldWorkspaceKey = getProjectWorkspaceStorageKey(oldId, targetUserId);
+  const newWorkspaceKey = getProjectWorkspaceStorageKey(newId, targetUserId);
+  const oldWorkspaceData = await readJsonFromStorage(oldWorkspaceKey, null);
+  if (oldWorkspaceData && typeof oldWorkspaceData === 'object') {
+    const existingNewWorkspace = await readJsonFromStorage(
+      newWorkspaceKey,
+      null
+    );
+    if (!existingNewWorkspace) {
+      await writeJsonToStorage(newWorkspaceKey, {
+        ...oldWorkspaceData,
+        projectId: newId,
+      });
+    }
+    await removeKeyFromStorage(oldWorkspaceKey);
+  }
+
+  if (storage && typeof storage.getItem === 'function') {
+    const oldSeqKey = getDefectSequenceStorageKey(oldId, targetUserId);
+    const newSeqKey = getDefectSequenceStorageKey(newId, targetUserId);
+    try {
+      const oldSeqRaw = await storage.getItem(oldSeqKey);
+      if (oldSeqRaw !== null && oldSeqRaw !== undefined) {
+        const oldSeqNum = parseInt(String(oldSeqRaw), 10);
+        const newSeqRaw = await storage.getItem(newSeqKey);
+        const newSeqNum = parseInt(String(newSeqRaw || '0'), 10);
+        const mergedSeq = Math.max(
+          Number.isFinite(oldSeqNum) ? oldSeqNum : 0,
+          Number.isFinite(newSeqNum) ? newSeqNum : 0
+        );
+        if (mergedSeq > 0 && typeof storage.setItem === 'function') {
+          await storage.setItem(newSeqKey, String(mergedSeq));
+        }
+        if (typeof storage.removeItem === 'function') {
+          await storage.removeItem(oldSeqKey);
+        }
+      }
+    } catch {
+      // Ignore storage error
+    }
+  }
+
+  return {
+    remapped: true,
+    oldProjectId: oldId,
+    newProjectId: newId,
+    remappedOpsCount,
+  };
 }

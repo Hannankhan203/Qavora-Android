@@ -8,15 +8,25 @@ export default function TestPhaseDeleteModal({
   setDeletingPhase,
   isDeletingPhase,
   handleConfirmDeletePhase,
+  deletePhaseError,
+  onCancelDeletePhase,
 }) {
   const { colors } = useTheme();
+  const handleClose = () => {
+    if (isDeletingPhase) return;
+    if (typeof onCancelDeletePhase === 'function') {
+      onCancelDeletePhase();
+    } else if (typeof setDeletingPhase === 'function') {
+      setDeletingPhase(null);
+    }
+  };
 
   return (
     <Modal
       visible={!!deletingPhase}
       animationType="fade"
       transparent
-      onRequestClose={() => !isDeletingPhase && setDeletingPhase(null)}
+      onRequestClose={handleClose}
     >
       <View
         accessibilityViewIsModal={true}
@@ -56,10 +66,27 @@ export default function TestPhaseDeleteModal({
                 and test cases in the project.
               </Text>
 
+              {deletePhaseError ? (
+                <View
+                  style={[
+                    styles.formAlertBox,
+                    {
+                      backgroundColor: colors.dangerSoft,
+                      borderColor: colors.danger,
+                      marginTop: 8,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.formAlertText, { color: colors.danger }]}>
+                    {deletePhaseError}
+                  </Text>
+                </View>
+              ) : null}
+
               <View style={styles.smallModalActions}>
                 <Pressable
                   disabled={isDeletingPhase}
-                  onPress={() => setDeletingPhase(null)}
+                  onPress={handleClose}
                   accessibilityRole="button"
                   accessibilityState={{ disabled: Boolean(isDeletingPhase) }}
                   accessibilityLabel="Cancel deleting phase"

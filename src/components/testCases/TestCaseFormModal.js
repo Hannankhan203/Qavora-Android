@@ -91,12 +91,17 @@ export default function TestCaseFormModal({
             </Text>
             <Pressable
               onPress={() => !isSubmittingCase && setIsFormModalOpen(false)}
+              disabled={Boolean(isSubmittingCase)}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
+              accessibilityState={{ disabled: Boolean(isSubmittingCase) }}
               accessibilityLabel="Close test case form"
               style={[
                 styles.closeCircle,
-                { backgroundColor: colors.surfaceMuted },
+                {
+                  backgroundColor: colors.surfaceMuted,
+                  opacity: isSubmittingCase ? 0.5 : 1,
+                },
               ]}
             >
               <VectorIcon

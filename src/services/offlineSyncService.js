@@ -107,6 +107,7 @@ import {
   applyChecklistMutationToOfflineCache,
   queueChecklistMutation,
   queueProjectMutation,
+  remapTemporaryProjectIdState,
 } from './offlineSync/pendingQueueMutations.js';
 
 export {
@@ -146,6 +147,7 @@ export {
   getPendingChecklistOperations,
   queueChecklistMutation,
   queueProjectMutation,
+  remapTemporaryProjectIdState,
   dequeueProjectOperation,
   acquireSyncLock,
   verifySyncLockOwnership,
@@ -523,6 +525,111 @@ export async function processProjectSyncQueue(userId, options = {}) {
     const latestUpdatedAtByProject = new Map();
     const latestUpdatedAtByChecklist = new Map();
 
+    const applyProjectIdRemapInSyncPass = async (oldId, syncedProject) => {
+      const newId = String(
+        (syncedProject && (syncedProject.id || syncedProject._id)) || ''
+      ).trim();
+      if (!oldId || !newId || oldId === newId) return;
+
+      await remapTemporaryProjectIdState(targetUserId, oldId, syncedProject);
+
+      for (let idx = 0; idx < eligibleOps.length; idx += 1) {
+        const queuedOp = eligibleOps[idx];
+        if (!queuedOp || typeof queuedOp !== 'object') continue;
+
+        if (queuedOp.entityType === 'checklist') {
+          const matchesTop = queuedOp.projectId === oldId;
+          const matchesPayload =
+            queuedOp.payload &&
+            typeof queuedOp.payload === 'object' &&
+            (queuedOp.payload.projectId === oldId ||
+              (queuedOp.payload.snapshot &&
+                queuedOp.payload.snapshot.projectId === oldId));
+          if (!matchesTop && !matchesPayload) continue;
+
+          if (matchesTop) {
+            queuedOp.projectId = newId;
+          }
+          if (queuedOp.payload && typeof queuedOp.payload === 'object') {
+            queuedOp.payload = {
+              ...queuedOp.payload,
+              ...(matchesTop || queuedOp.payload.projectId === oldId
+                ? { projectId: newId }
+                : {}),
+              ...(syncedProject.name && queuedOp.payload.projectName !== undefined
+                ? { projectName: syncedProject.name }
+                : {}),
+              ...(queuedOp.payload.snapshot &&
+              queuedOp.payload.snapshot.projectId === oldId
+                ? {
+                    snapshot: {
+                      ...queuedOp.payload.snapshot,
+                      projectId: newId,
+                      ...(syncedProject.name
+                        ? { projectName: syncedProject.name }
+                        : {}),
+                    },
+                  }
+                : {}),
+            };
+          }
+          continue;
+        }
+
+        if (queuedOp.projectId !== oldId) continue;
+
+        const effectiveEntityKey =
+          queuedOp.entityType === 'project' ? 'project' : 'data';
+        queuedOp.projectId = newId;
+        queuedOp.idempotencyKey = buildOperationIdempotencyKey({
+          userId: targetUserId,
+          projectId: newId,
+          entityType: effectiveEntityKey,
+          entityId:
+            queuedOp.entityType === 'project'
+              ? queuedOp.entityId
+              : 'workspace_data',
+          operationType: queuedOp.operationType,
+        });
+        if (queuedOp.operationType !== 'CREATE' && syncedProject.updatedAt) {
+          queuedOp.expectedUpdatedAt = syncedProject.updatedAt;
+        }
+        if (
+          queuedOp.payload &&
+          typeof queuedOp.payload === 'object' &&
+          !Array.isArray(queuedOp.payload)
+        ) {
+          queuedOp.payload = {
+            ...queuedOp.payload,
+            ...(queuedOp.payload.projectId === oldId
+              ? { projectId: newId }
+              : {}),
+            ...(queuedOp.payload.id === oldId ? { id: newId } : {}),
+          };
+        }
+      }
+
+      if (latestUpdatedAtByProject.has(oldId)) {
+        const prevUpdatedAt = latestUpdatedAtByProject.get(oldId);
+        latestUpdatedAtByProject.delete(oldId);
+        if (!latestUpdatedAtByProject.has(newId) && prevUpdatedAt) {
+          latestUpdatedAtByProject.set(newId, prevUpdatedAt);
+        }
+      }
+      if (haltedProjectIds.has(oldId)) {
+        haltedProjectIds.delete(oldId);
+        haltedProjectIds.add(newId);
+      }
+
+      notifySyncListeners({
+        type: 'project_id_remapped',
+        userId: targetUserId,
+        oldProjectId: oldId,
+        newProjectId: newId,
+        project: syncedProject,
+      });
+    };
+
     for (const op of eligibleOps) {
       if (isClientOffline() && !options.ignoreOfflineCheck) {
         break;
@@ -829,13 +936,27 @@ export async function processProjectSyncQueue(userId, options = {}) {
           }
           if (result.project) {
             const syncedProject = result.project;
-            if (syncedProject.updatedAt) {
-              latestUpdatedAtByProject.set(op.projectId, syncedProject.updatedAt);
+            const resolvedProjectId = syncedProject.id || op.projectId;
+            if (
+              op.entityType === 'project' &&
+              op.operationType === 'CREATE' &&
+              syncedProject.id &&
+              op.projectId &&
+              syncedProject.id !== op.projectId
+            ) {
+              await applyProjectIdRemapInSyncPass(op.projectId, syncedProject);
+            } else {
+              await cacheProjectOffline(syncedProject, targetUserId, {
+                pendingSync: false,
+                pendingCreation: false,
+              });
             }
-            await cacheProjectOffline(syncedProject, targetUserId, {
-              pendingSync: false,
-              pendingCreation: false,
-            });
+            if (syncedProject.updatedAt) {
+              latestUpdatedAtByProject.set(
+                resolvedProjectId,
+                syncedProject.updatedAt
+              );
+            }
             updatedProjectsMap.set(syncedProject.id, syncedProject);
           }
         }
@@ -865,19 +986,32 @@ export async function processProjectSyncQueue(userId, options = {}) {
           op.projectId,
           options.apiOptions || {}
         );
-        if (fetched.ok && fetched.project) {
+        const recoveredProject =
+          fetched.ok && fetched.project
+            ? fetched.project
+            : result.project || null;
+        if (recoveredProject) {
           await dequeueProjectOperationIfLockValid(op.id, targetUserId, lock);
-          await cacheProjectOffline(fetched.project, targetUserId, {
-            pendingSync: false,
-            pendingCreation: false,
-          });
-          if (fetched.project.updatedAt) {
+          const resolvedProjectId = recoveredProject.id || op.projectId;
+          if (
+            recoveredProject.id &&
+            op.projectId &&
+            recoveredProject.id !== op.projectId
+          ) {
+            await applyProjectIdRemapInSyncPass(op.projectId, recoveredProject);
+          } else {
+            await cacheProjectOffline(recoveredProject, targetUserId, {
+              pendingSync: false,
+              pendingCreation: false,
+            });
+          }
+          if (recoveredProject.updatedAt) {
             latestUpdatedAtByProject.set(
-              op.projectId,
-              fetched.project.updatedAt
+              resolvedProjectId,
+              recoveredProject.updatedAt
             );
           }
-          updatedProjectsMap.set(fetched.project.id, fetched.project);
+          updatedProjectsMap.set(recoveredProject.id, recoveredProject);
           synced += 1;
           continue;
         }

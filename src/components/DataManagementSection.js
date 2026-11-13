@@ -161,7 +161,7 @@ export default function DataManagementSection() {
       return true;
     }
     if (exportPreview) {
-      setExportPreview(null);
+      if (!isExporting) setExportPreview(null);
       return true;
     }
     return false;
@@ -2443,7 +2443,7 @@ export default function DataManagementSection() {
         visible={Boolean(exportPreview)}
         transparent
         animationType="fade"
-        onRequestClose={() => setExportPreview(null)}
+        onRequestClose={() => !isExporting && setExportPreview(null)}
       >
         <View
           style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
@@ -2483,9 +2483,11 @@ export default function DataManagementSection() {
                 </Text>
               </View>
               <Pressable
-                onPress={() => setExportPreview(null)}
+                onPress={() => !isExporting && setExportPreview(null)}
+                disabled={isExporting}
                 hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                 accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isExporting) }}
                 accessibilityLabel="Close export preview"
                 style={[
                   styles.tinyBtn,
@@ -2560,7 +2562,7 @@ export default function DataManagementSection() {
         visible={Boolean(importPreview)}
         transparent
         animationType="fade"
-        onRequestClose={() => setImportPreview(null)}
+        onRequestClose={() => !isImporting && setImportPreview(null)}
       >
         <View
           style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
@@ -2862,7 +2864,9 @@ export default function DataManagementSection() {
         visible={Boolean(confirmActionModal)}
         transparent
         animationType="fade"
-        onRequestClose={() => setConfirmActionModal(null)}
+        onRequestClose={() =>
+          !isExecutingConfirmAction && setConfirmActionModal(null)
+        }
       >
         <View
           style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}

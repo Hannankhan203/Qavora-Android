@@ -28,14 +28,20 @@ export default function DefectDetailModal({
   setSelectedTestRunId,
   setActiveTab,
   setDefectPendingDelete,
+  onRequestDeleteDefect,
   openEditDefectForm,
 }) {
+  const handleClose = () => {
+    if (isUpdatingStatus) return;
+    closeDetailModal();
+  };
+
   return (
     <Modal
       visible={!!viewingDefect}
       animationType="slide"
       transparent
-      onRequestClose={closeDetailModal}
+      onRequestClose={handleClose}
     >
       <View
         accessibilityViewIsModal={true}
@@ -130,13 +136,18 @@ export default function DefectDetailModal({
                   </Text>
                 </View>
                 <TouchableOpacity
-                  onPress={closeDetailModal}
+                  onPress={handleClose}
+                  disabled={Boolean(isUpdatingStatus)}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   accessibilityRole="button"
+                  accessibilityState={{ disabled: Boolean(isUpdatingStatus) }}
                   accessibilityLabel="Close defect details"
                   style={[
                     styles.closeBtn,
-                    { backgroundColor: theme.surfaceMuted },
+                    {
+                      backgroundColor: theme.surfaceMuted,
+                      opacity: isUpdatingStatus ? 0.5 : 1,
+                    },
                   ]}
                 >
                   <VectorIcon
@@ -583,6 +594,8 @@ export default function DefectDetailModal({
               >
                 <TouchableOpacity
                   accessibilityRole="button"
+                  disabled={Boolean(isUpdatingStatus)}
+                  accessibilityState={{ disabled: Boolean(isUpdatingStatus) }}
                   accessibilityLabel={`Delete defect ${
                     viewingDefect.defectId || viewingDefect.id
                   }`}
@@ -591,9 +604,18 @@ export default function DefectDetailModal({
                     {
                       backgroundColor: theme.dangerSoft,
                       borderColor: theme.danger,
+                      opacity: isUpdatingStatus ? 0.55 : 1,
                     },
                   ]}
-                  onPress={() => setDefectPendingDelete(viewingDefect)}
+                  onPress={() => {
+                    if (isUpdatingStatus) return;
+                    if (typeof onRequestDeleteDefect === 'function') {
+                      onRequestDeleteDefect(viewingDefect);
+                    } else if (typeof setDefectPendingDelete === 'function') {
+                      closeDetailModal();
+                      setDefectPendingDelete(viewingDefect);
+                    }
+                  }}
                 >
                   <VectorIcon name="trash" size={15} color={theme.danger} />
                   <Text
@@ -608,14 +630,21 @@ export default function DefectDetailModal({
 
                 <TouchableOpacity
                   accessibilityRole="button"
+                  disabled={Boolean(isUpdatingStatus)}
+                  accessibilityState={{ disabled: Boolean(isUpdatingStatus) }}
                   accessibilityLabel={`Edit defect ${
                     viewingDefect.defectId || viewingDefect.id
                   }`}
                   style={[
                     styles.saveBtn,
-                    { backgroundColor: theme.primary },
+                    {
+                      backgroundColor: theme.primary,
+                      opacity: isUpdatingStatus ? 0.55 : 1,
+                    },
                   ]}
-                  onPress={() => openEditDefectForm(viewingDefect)}
+                  onPress={() => {
+                    if (!isUpdatingStatus) openEditDefectForm(viewingDefect);
+                  }}
                 >
                   <VectorIcon name="edit" size={15} color="#FFFFFF" />
                   <Text style={styles.saveBtnText}>Edit Defect Details</Text>

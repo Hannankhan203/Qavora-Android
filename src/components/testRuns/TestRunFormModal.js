@@ -55,7 +55,7 @@ export default function TestRunFormModal({
       visible={runModalVisible}
       animationType="slide"
       transparent
-      onRequestClose={() => setRunModalVisible(false)}
+      onRequestClose={() => !isSubmittingRun && setRunModalVisible(false)}
     >
       <KeyboardAvoidingView
         accessibilityViewIsModal={true}
@@ -86,12 +86,17 @@ export default function TestRunFormModal({
                 : 'Create New Test Run'}
             </Text>
             <TouchableOpacity
-              onPress={() => setRunModalVisible(false)}
+              onPress={() => !isSubmittingRun && setRunModalVisible(false)}
+              disabled={Boolean(isSubmittingRun)}
               accessibilityRole="button"
+              accessibilityState={{ disabled: Boolean(isSubmittingRun) }}
               accessibilityLabel="Close test run form"
               style={[
                 styles.closeBtn,
-                { backgroundColor: theme.surfaceMuted },
+                {
+                  backgroundColor: theme.surfaceMuted,
+                  opacity: isSubmittingRun ? 0.5 : 1,
+                },
               ]}
             >
               <VectorIcon

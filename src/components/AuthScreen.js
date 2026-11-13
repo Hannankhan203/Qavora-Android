@@ -698,34 +698,14 @@ export default function AuthScreen() {
                     onLayout={(e) => recordFieldLayout('loginPassword', e)}
                     style={styles.fieldGroup}
                   >
-                    <View style={styles.passwordHeaderRow}>
-                      <Text
-                        style={[
-                          styles.fieldLabel,
-                          { color: colors.textSecondary },
-                        ]}
-                      >
-                        Password
-                      </Text>
-                      <Pressable
-                        onPress={() => setShowLoginPassword((prev) => !prev)}
-                        hitSlop={10}
-                        accessibilityRole="button"
-                        accessibilityLabel={
-                          showLoginPassword ? 'Hide password' : 'Show password'
-                        }
-                        style={styles.headerTogglePassBtn}
-                      >
-                        <Text
-                          style={[
-                            styles.togglePassText,
-                            { color: colors.primary, fontFamily: monoFontFamily },
-                          ]}
-                        >
-                          {showLoginPassword ? 'Hide' : 'Show'}
-                        </Text>
-                      </Pressable>
-                    </View>
+                    <Text
+                      style={[
+                        styles.fieldLabel,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Password
+                    </Text>
 
                     <View
                       style={[
@@ -1054,40 +1034,14 @@ export default function AuthScreen() {
                     onLayout={(e) => recordFieldLayout('registerPassword', e)}
                     style={styles.fieldGroup}
                   >
-                    <View style={styles.passwordHeaderRow}>
-                      <Text
-                        style={[
-                          styles.fieldLabel,
-                          { color: colors.textSecondary },
-                        ]}
-                      >
-                        Password (minimum 8 characters)
-                      </Text>
-                      <Pressable
-                        onPress={() => {
-                          setShowRegisterPassword((prev) => {
-                            const next = !prev;
-                            setShowRegisterConfirmPassword(next);
-                            return next;
-                          });
-                        }}
-                        hitSlop={10}
-                        accessibilityRole="button"
-                        accessibilityLabel={
-                          showRegisterPassword ? 'Hide password' : 'Show password'
-                        }
-                        style={styles.headerTogglePassBtn}
-                      >
-                        <Text
-                          style={[
-                            styles.togglePassText,
-                            { color: colors.primary, fontFamily: monoFontFamily },
-                          ]}
-                        >
-                          {showRegisterPassword ? 'Hide' : 'Show'}
-                        </Text>
-                      </Pressable>
-                    </View>
+                    <Text
+                      style={[
+                        styles.fieldLabel,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Password (minimum 8 characters)
+                    </Text>
 
                     <View
                       style={[
@@ -1170,38 +1124,14 @@ export default function AuthScreen() {
                     }
                     style={styles.fieldGroup}
                   >
-                    <View style={styles.passwordHeaderRow}>
-                      <Text
-                        style={[
-                          styles.fieldLabel,
-                          { color: colors.textSecondary },
-                        ]}
-                      >
-                        Confirm Password
-                      </Text>
-                      <Pressable
-                        onPress={() =>
-                          setShowRegisterConfirmPassword((prev) => !prev)
-                        }
-                        hitSlop={10}
-                        accessibilityRole="button"
-                        accessibilityLabel={
-                          showRegisterConfirmPassword
-                            ? 'Hide confirm password'
-                            : 'Show confirm password'
-                        }
-                        style={styles.headerTogglePassBtn}
-                      >
-                        <Text
-                          style={[
-                            styles.togglePassText,
-                            { color: colors.primary, fontFamily: monoFontFamily },
-                          ]}
-                        >
-                          {showRegisterConfirmPassword ? 'Hide' : 'Show'}
-                        </Text>
-                      </Pressable>
-                    </View>
+                    <Text
+                      style={[
+                        styles.fieldLabel,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Confirm Password
+                    </Text>
 
                     <View
                       style={[

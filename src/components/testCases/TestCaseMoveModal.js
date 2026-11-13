@@ -19,15 +19,25 @@ export default function TestCaseMoveModal({
   moveTargetSuiteId,
   setMoveTargetSuiteId,
   handleConfirmMoveCase,
+  moveCaseError,
+  onCancelMoveCase,
 }) {
   const { colors } = useTheme();
+  const handleClose = () => {
+    if (isMovingCase) return;
+    if (typeof onCancelMoveCase === 'function') {
+      onCancelMoveCase();
+    } else if (typeof setMovingCase === 'function') {
+      setMovingCase(null);
+    }
+  };
 
   return (
     <Modal
       visible={!!movingCase}
       animationType="fade"
       transparent
-      onRequestClose={() => !isMovingCase && setMovingCase(null)}
+      onRequestClose={handleClose}
     >
       <View
         accessibilityViewIsModal={true}
@@ -112,10 +122,27 @@ export default function TestCaseMoveModal({
                 })}
               </ScrollView>
 
+              {moveCaseError ? (
+                <View
+                  style={[
+                    styles.formAlertBox,
+                    {
+                      backgroundColor: colors.dangerSoft,
+                      borderColor: colors.danger,
+                      marginTop: 8,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.formAlertText, { color: colors.danger }]}>
+                    {moveCaseError}
+                  </Text>
+                </View>
+              ) : null}
+
               <View style={styles.smallModalActions}>
                 <Pressable
                   disabled={isMovingCase}
-                  onPress={() => setMovingCase(null)}
+                  onPress={handleClose}
                   accessibilityRole="button"
                   accessibilityState={{ disabled: Boolean(isMovingCase) }}
                   accessibilityLabel="Cancel moving test case"

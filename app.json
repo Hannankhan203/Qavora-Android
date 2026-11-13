@@ -15,7 +15,7 @@
       "softwareKeyboardLayoutMode": "resize",
       "allowBackup": false,
       "adaptiveIcon": {
-        "backgroundColor": "#0E1424",
+        "backgroundColor": "#0B1120",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -36,9 +36,13 @@
         "expo-splash-screen",
         {
           "image": "./assets/qavora-icon-512.png",
-          "backgroundColor": "#181C28",
+          "backgroundColor": "#F8FAFC",
           "resizeMode": "contain",
-          "imageWidth": 200
+          "imageWidth": 200,
+          "dark": {
+            "image": "./assets/qavora-icon-512.png",
+            "backgroundColor": "#0B1120"
+          }
         }
       ]
     ],

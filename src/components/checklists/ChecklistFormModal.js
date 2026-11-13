@@ -59,7 +59,7 @@ export default function ChecklistFormModal({
       visible={formModalVisible}
       transparent
       animationType="fade"
-      onRequestClose={() => setFormModalVisible(false)}
+      onRequestClose={() => !busyMutation && setFormModalVisible(false)}
     >
       <KeyboardAvoidingView
         accessibilityViewIsModal={true}
