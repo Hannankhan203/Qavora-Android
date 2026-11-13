@@ -8,7 +8,8 @@
     "backgroundColor": "#F8FAFC",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "icon": "./assets/qavora-icon-512.png"
     },
     "android": {
       "package": "com.qavora.android",
@@ -23,6 +24,10 @@
       }
     },
     "web": {
+      "name": "Qavora",
+      "shortName": "Qavora",
+      "themeColor": "#0B1120",
+      "backgroundColor": "#F8FAFC",
       "favicon": "./assets/favicon.png"
     },
     "plugins": [

@@ -461,21 +461,34 @@ describe('Phase 6 — LOW Issues Remediation (LOW-01..LOW-04)', () => {
   // =========================================================================
   // LOW-02 — Project Cleanup & Documentation
   // =========================================================================
-  it('LOW-02: removes unused qavora-icon.ico, fixes package.json audit script, updates AGENTS.md, and provides accurate README.md', () => {
-    expect(fs.existsSync(path.join(PROJECT_ROOT, 'assets', 'qavora-icon.ico'))).toBe(false);
-
-    const allRepoTextFiles = [
-      path.join(PROJECT_ROOT, 'app.json'),
-      path.join(PROJECT_ROOT, 'eas.json'),
-      path.join(PROJECT_ROOT, 'package.json'),
-      path.join(PROJECT_ROOT, 'AGENTS.md'),
-      path.join(PROJECT_ROOT, 'README.md'),
-      ...walkFiles(path.join(PROJECT_ROOT, 'src'), ['.js']),
-      ...walkFiles(path.join(PROJECT_ROOT, 'plugins'), ['.js']),
+  it('LOW-02: preserves official Qavora brand assets, integrates web favicon/PWA/touch icons, fixes package.json audit script, updates AGENTS.md, and provides accurate README.md', () => {
+    const requiredAssets = [
+      'qavora-icon.ico',
+      'qavora-icon-512.png',
+      'icon-192.png',
+      'apple-touch-icon.png',
+      'android-icon-foreground.png',
+      'android-icon-background.png',
+      'android-icon-monochrome.png',
     ];
-    for (const filePath of allRepoTextFiles) {
-      expect(fs.readFileSync(filePath, 'utf8')).not.toContain('qavora-icon.ico');
+    for (const assetName of requiredAssets) {
+      expect(fs.existsSync(path.join(PROJECT_ROOT, 'assets', assetName))).toBe(true);
     }
+
+    const publicIndexHtml = fs.readFileSync(path.join(PROJECT_ROOT, 'public', 'index.html'), 'utf8');
+    expect(publicIndexHtml).toContain('href="/favicon.ico"');
+    expect(publicIndexHtml).toContain('href="/apple-touch-icon.png"');
+    expect(publicIndexHtml).toContain('href="/icon-192.png"');
+    expect(publicIndexHtml).toContain('href="/qavora-icon-512.png"');
+    expect(publicIndexHtml).toContain('href="/manifest.json"');
+
+    const publicManifest = JSON.parse(
+      fs.readFileSync(path.join(PROJECT_ROOT, 'public', 'manifest.json'), 'utf8')
+    );
+    expect(publicManifest.icons.map((icon) => icon.src)).toEqual([
+      '/icon-192.png',
+      '/qavora-icon-512.png',
+    ]);
 
     const pkg = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'package.json'), 'utf8'));
     expect(pkg.scripts.audit).toBe('bun audit');

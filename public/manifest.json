@@ -1,0 +1,22 @@
+{
+  "name": "Qavora",
+  "short_name": "Qavora",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#0B1120",
+  "background_color": "#F8FAFC",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "/qavora-icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    }
+  ]
+}
