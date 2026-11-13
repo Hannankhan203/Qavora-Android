@@ -308,6 +308,21 @@ export function normalizeProject(rawProject) {
 
 export const normalizeProjectRecord = normalizeProject;
 
+function unwrapProjectPayload(data) {
+  if (
+    data &&
+    typeof data === 'object' &&
+    !Array.isArray(data) &&
+    !data.id &&
+    !data._id &&
+    data.project &&
+    typeof data.project === 'object'
+  ) {
+    return data.project;
+  }
+  return data;
+}
+
 /**
  * Formats an error thrown by `apiClient` into a structured service response,
  * including HTTP 409 optimistic concurrency conflict metadata (`currentUpdatedAt`, `expectedUpdatedAt`).
@@ -394,7 +409,7 @@ export async function fetchProjectById(projectId, options = {}) {
       `/api/projects/${encodeURIComponent(cleanId)}`,
       options
     );
-    const project = normalizeProject(response.data);
+    const project = normalizeProject(unwrapProjectPayload(response.data));
     if (!project) {
       return {
         ok: false,
@@ -1042,7 +1057,7 @@ export async function updateProjectData(projectId, dataUpdates, options = {}) {
       payload,
       requestOptions
     );
-    const project = normalizeProject(response.data);
+    const project = normalizeProject(unwrapProjectPayload(response.data));
     return {
       ok: true,
       status: response.status,

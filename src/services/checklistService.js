@@ -1578,6 +1578,14 @@ export async function promoteChecklistToProject(
       });
       if (fetchedRes.ok && fetchedRes.project) {
         targetProject = fetchedRes.project;
+      } else if (!targetProject && userId && (fetchedRes.isNetworkError || fetchedRes.status === 0)) {
+        const cachedProjects = await getCachedProjectsForUser(userId);
+        const foundCached = cachedProjects.find(
+          (p) => p && String(p.id) === cleanProjectId
+        );
+        if (foundCached) {
+          targetProject = normalizeProject(foundCached) || foundCached;
+        }
       } else if (!targetProject) {
         return {
           ok: false,
@@ -1688,28 +1696,36 @@ export async function promoteChecklistToProject(
       };
     }
 
+    const baselineUpdatedAt =
+      targetProject._serverUpdatedAt || targetProject.updatedAt || null;
+
     // Direct service call (supports both online backend persistence and offline queueing)
     if (isClientOffline()) {
       const optimisticProject = normalizeProject({
         ...targetProject,
         ...preview.patchData,
-        updatedAt: new Date().toISOString(),
+        userId: userId || targetProject.userId,
+        _serverUpdatedAt: baselineUpdatedAt,
+        updatedAt: baselineUpdatedAt || new Date().toISOString(),
         _pendingSync: true,
         _syncStatus: 'pending',
       });
 
+      let queuedOp = null;
       if (userId) {
-        await queueProjectMutation({
+        queuedOp = await queueProjectMutation({
           userId,
           projectId: cleanProjectId,
-          action: 'UPDATE_PROJECT_DATA',
-          endpoint: `/api/projects/${encodeURIComponent(cleanProjectId)}/data`,
-          method: 'PATCH',
+          entityType: 'data',
+          operationType: 'UPDATE',
           payload: preview.patchData,
-          expectedUpdatedAt:
-            targetProject._serverUpdatedAt || targetProject.updatedAt || null,
+          expectedUpdatedAt: baselineUpdatedAt,
+          description: `Promote checklist "${sourceChecklist.title}"`,
         });
-        await cacheProjectOffline(userId, optimisticProject);
+        await cacheProjectOffline(optimisticProject, userId, {
+          pendingSync: true,
+          pendingCreation: Boolean(targetProject._pendingCreation),
+        });
       }
 
       return {
@@ -1720,6 +1736,7 @@ export async function promoteChecklistToProject(
         preview,
         summary: preview.stats,
         queuedOffline: true,
+        operation: queuedOp,
         error: null,
       };
     }
@@ -1729,8 +1746,7 @@ export async function promoteChecklistToProject(
       preview.patchData,
       {
         currentUserId: userId,
-        expectedUpdatedAt:
-          targetProject._serverUpdatedAt || targetProject.updatedAt || undefined,
+        expectedUpdatedAt: baselineUpdatedAt || undefined,
       }
     );
 
@@ -1743,22 +1759,26 @@ export async function promoteChecklistToProject(
         const optimisticProject = normalizeProject({
           ...targetProject,
           ...preview.patchData,
-          updatedAt: new Date().toISOString(),
+          userId: userId || targetProject.userId,
+          _serverUpdatedAt: baselineUpdatedAt,
+          updatedAt: baselineUpdatedAt || new Date().toISOString(),
           _pendingSync: true,
           _syncStatus: 'pending',
         });
 
-        await queueProjectMutation({
+        const queuedOp = await queueProjectMutation({
           userId,
           projectId: cleanProjectId,
-          action: 'UPDATE_PROJECT_DATA',
-          endpoint: `/api/projects/${encodeURIComponent(cleanProjectId)}/data`,
-          method: 'PATCH',
+          entityType: 'data',
+          operationType: 'UPDATE',
           payload: preview.patchData,
-          expectedUpdatedAt:
-            targetProject._serverUpdatedAt || targetProject.updatedAt || null,
+          expectedUpdatedAt: baselineUpdatedAt,
+          description: `Promote checklist "${sourceChecklist.title}"`,
         });
-        await cacheProjectOffline(userId, optimisticProject);
+        await cacheProjectOffline(optimisticProject, userId, {
+          pendingSync: true,
+          pendingCreation: Boolean(targetProject._pendingCreation),
+        });
 
         return {
           ok: true,
@@ -1768,6 +1788,7 @@ export async function promoteChecklistToProject(
           preview,
           summary: preview.stats,
           queuedOffline: true,
+          operation: queuedOp,
           error: null,
         };
       }
@@ -1786,7 +1807,10 @@ export async function promoteChecklistToProject(
     }
 
     if (userId && updateRes.project) {
-      await cacheProjectOffline(userId, updateRes.project);
+      await cacheProjectOffline(updateRes.project, userId, {
+        pendingSync: false,
+        pendingCreation: false,
+      });
     }
 
     return {

@@ -408,12 +408,15 @@ export function buildBackendDefectsPayload(defects = []) {
  * @param {object | null} selectedProject
  * @param {object | null} [persistedSnapshot]
  * @param {object | null} [currentUser]
+ * @param {object | null} [options]
  */
 export function buildProjectWorkspaceState(
   selectedProject,
   persistedSnapshot = null,
-  currentUser = null
+  currentUser = null,
+  options = {}
 ) {
+  const { preferSnapshot = false } = options || {};
   const baseTesterName =
     (currentUser && currentUser.name) || INITIAL_PROFILE.testerName;
   const baseRole = (currentUser && currentUser.role) || INITIAL_PROFILE.role;
@@ -744,9 +747,14 @@ export function buildProjectWorkspaceState(
     typeof persistedSnapshot === 'object' &&
     persistedSnapshot.projectId === projectId;
 
-  // Authoritative backend data takes precedence whenever `selectedProject.updatedAt` is present
+  // Authoritative backend data takes precedence whenever `selectedProject.updatedAt`
+  // is present UNLESS the persisted local snapshot holds unsaved/dirty edits or is
+  // explicitly preferred (e.g., queued offline mutations awaiting sync).
   const useLocalFallbackOnly =
-    hasValidSnapshot && !selectedProject.updatedAt;
+    hasValidSnapshot &&
+    (!selectedProject.updatedAt ||
+      Boolean(persistedSnapshot.isDirty) ||
+      Boolean(preferSnapshot));
 
   const syncedProfile = {
     ...(hasValidSnapshot && persistedSnapshot.profile

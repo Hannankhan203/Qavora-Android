@@ -12,6 +12,7 @@ import NetInfo from '@react-native-community/netinfo';
 export const OFFLINE_PROJECTS_CACHE_PREFIX = '@qavora_offline_projects_cache_v1:';
 export const PENDING_PROJECT_OPS_PREFIX = '@qavora_pending_project_ops_v1:';
 export const SYNC_LOCK_STORAGE_PREFIX = '@qavora_sync_locks_v1:';
+export const DELETION_TOMBSTONES_STORAGE_PREFIX = '@qavora_deletion_tombstones_v1:';
 
 export const BASE_BACKOFF_MS = 1000;
 export const MAX_BACKOFF_MS = 30000;
@@ -298,6 +299,12 @@ export function getSyncLockKey(userId) {
   const cleanUser = userId ? String(userId).trim() : '';
   if (!cleanUser) return null;
   return `${SYNC_LOCK_STORAGE_PREFIX}${cleanUser}`;
+}
+
+export function getDeletionTombstonesKey(userId) {
+  const cleanUser = userId ? String(userId).trim() : '';
+  if (!cleanUser) return null;
+  return `${DELETION_TOMBSTONES_STORAGE_PREFIX}${cleanUser}`;
 }
 
 export async function readJsonFromStorage(key, fallbackValue) {

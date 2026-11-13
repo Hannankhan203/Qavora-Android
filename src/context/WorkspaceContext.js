@@ -29,6 +29,7 @@ import {
 import {
   subscribeToSyncEvents,
   subscribeToReconnectSyncResults,
+  getPendingProjectOperations,
 } from '../services/offlineSyncService.js';
 import {
   INITIAL_SUITES,
@@ -108,8 +109,29 @@ export function WorkspaceProvider({ children }) {
   const profileSaveLockRef = useRef(false);
   const datasetResetLockRef = useRef(false);
 
+  const resolvedUserId =
+    user && (user.userId || user.id || user._id)
+      ? String(user.userId || user.id || user._id).trim()
+      : '';
+  const resolvedUserIdRef = useRef(resolvedUserId);
+  resolvedUserIdRef.current = resolvedUserId;
+
+  const getScopedProjectKey = useCallback((projectId, userId) => {
+    const cleanProjectId = projectId ? String(projectId).trim() : '';
+    if (!cleanProjectId) return '';
+    const cleanUserId = userId ? String(userId).trim() : '__anon__';
+    return `${cleanUserId}::${cleanProjectId}`;
+  }, []);
+
+  const dirtyProjectsRef = useRef({});
+  const queuedDirtyGenRef = useRef({});
+  const editGenRef = useRef({});
+  const appliedServerStateRef = useRef({});
+  const prevResolvedUserIdRef = useRef(resolvedUserId);
+
   const initialWorkspace = useMemo(
     () => buildProjectWorkspaceState(selectedProject, null, user),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
 
@@ -121,6 +143,9 @@ export function WorkspaceProvider({ children }) {
   const [executions, setExecutions] = useState(initialWorkspace.executions);
   const [defects, setDefects] = useState(initialWorkspace.defects);
   const [activityLog, setActivityLog] = useState(initialWorkspace.activityLog);
+
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
 
   const testPlanRef = useRef(testPlan);
   testPlanRef.current = testPlan;
@@ -139,6 +164,9 @@ export function WorkspaceProvider({ children }) {
 
   const defectsRef = useRef(defects);
   defectsRef.current = defects;
+
+  const activityLogRef = useRef(activityLog);
+  activityLogRef.current = activityLog;
 
   // Navigation & Active Selection State (Centralized across all 11 destinations)
   const [activeTab, setActiveTabState] = useState('dashboard'); // 'dashboard' | 'testcases' | 'testruns' | 'defects' | 'profile'
@@ -762,16 +790,114 @@ export function WorkspaceProvider({ children }) {
     ]
   );
 
-  // Hydrate user-owned checklists on login and clear on logout/user switch
+  const isCurrentProjectDirty = useCallback(
+    (
+      projectId = selectedProjectIdRef.current,
+      userId = resolvedUserIdRef.current
+    ) => {
+      const key = getScopedProjectKey(projectId, userId);
+      return Boolean(key && dirtyProjectsRef.current[key]);
+    },
+    [getScopedProjectKey]
+  );
+
+  const markProjectDirty = useCallback(
+    (
+      projectId = selectedProjectIdRef.current,
+      userId = resolvedUserIdRef.current,
+      bumpGen = true
+    ) => {
+      const key = getScopedProjectKey(projectId, userId);
+      if (!key) return 0;
+      dirtyProjectsRef.current[key] = true;
+      if (bumpGen) {
+        editGenRef.current[key] = (editGenRef.current[key] || 0) + 1;
+      }
+      return editGenRef.current[key] || 0;
+    },
+    [getScopedProjectKey]
+  );
+
+  const clearProjectDirty = useCallback(
+    (
+      projectId = selectedProjectIdRef.current,
+      userId = resolvedUserIdRef.current
+    ) => {
+      const key = getScopedProjectKey(projectId, userId);
+      if (!key) return;
+      delete dirtyProjectsRef.current[key];
+      delete queuedDirtyGenRef.current[key];
+    },
+    [getScopedProjectKey]
+  );
+
+  const setAppliedServerSnapshot = useCallback(
+    (project, userId = resolvedUserIdRef.current) => {
+      const pid = project && (project.id || project._id);
+      const key = getScopedProjectKey(pid, userId);
+      if (!key || !project) return;
+      appliedServerStateRef.current[key] = {
+        updatedAt: project.updatedAt || null,
+        promotedAt: project.promotedAt || null,
+        sourceChecklistId: project.sourceChecklistId || null,
+        testCaseCount:
+          typeof project.testCaseCount === 'number'
+            ? project.testCaseCount
+            : null,
+        suiteCount: Array.isArray(project.testSuites)
+          ? project.testSuites.length
+          : typeof project.suiteCount === 'number'
+          ? project.suiteCount
+          : null,
+        testSuitesLen: Array.isArray(project.testSuites)
+          ? project.testSuites.length
+          : null,
+      };
+    },
+    [getScopedProjectKey]
+  );
+
+  const applyWorkspaceStateSnapshot = useCallback((workspaceState) => {
+    if (!workspaceState) return;
+    profileRef.current = workspaceState.profile;
+    testPlanRef.current = workspaceState.testPlan;
+    suitesRef.current = workspaceState.suites;
+    testCasesRef.current = workspaceState.testCases;
+    testRunsRef.current = workspaceState.testRuns;
+    executionsRef.current = workspaceState.executions;
+    defectsRef.current = workspaceState.defects;
+    activityLogRef.current = workspaceState.activityLog;
+    setProfile(workspaceState.profile);
+    setTestPlan(workspaceState.testPlan);
+    setSuites(workspaceState.suites);
+    setTestCases(workspaceState.testCases);
+    setTestRuns(workspaceState.testRuns);
+    setExecutions(workspaceState.executions);
+    setDefects(workspaceState.defects);
+    setActivityLog(workspaceState.activityLog);
+  }, []);
+
+  // Hydrate user-owned checklists on login, isolate across user switches, and reconcile sync completion
   useEffect(() => {
     let mounted = true;
-    const resolvedUserId =
-      user && (user.userId || user.id || user._id)
-        ? String(user.userId || user.id || user._id).trim()
-        : '';
+    const prevUserId = prevResolvedUserIdRef.current;
+    prevResolvedUserIdRef.current = resolvedUserId;
+
+    if (prevUserId !== resolvedUserId) {
+      dirtyProjectsRef.current = {};
+      queuedDirtyGenRef.current = {};
+      editGenRef.current = {};
+      appliedServerStateRef.current = {};
+      setProjectDataError(null);
+      setProjectDataConflict(null);
+    }
 
     if (!resolvedUserId) {
       setChecklists([]);
+      applyWorkspaceStateSnapshot(buildProjectWorkspaceState(null, null, null));
+      setHydratedProjectId(null);
+      setLastPersistedAt(null);
+      setIsStorageHydrated(true);
       return () => {
         mounted = false;
       };
@@ -794,18 +920,71 @@ export function WorkspaceProvider({ children }) {
       .catch(() => {});
 
     const unsubSyncEvents = subscribeToSyncEvents((evt) => {
-      if (!mounted) return;
+      if (!mounted || !evt) return;
+      if (evt.userId && String(evt.userId).trim() !== resolvedUserId) {
+        return;
+      }
+
       if (
-        evt &&
-        (evt.entityType === 'checklist' ||
-          evt.type === 'sync_completed' ||
-          evt.type === 'conflict_resolved' ||
-          evt.type === 'operation_discarded')
+        evt.entityType === 'checklist' ||
+        evt.type === 'sync_completed' ||
+        evt.type === 'conflict_resolved' ||
+        evt.type === 'operation_discarded'
       ) {
         getCachedChecklistsForUser(resolvedUserId)
           .then((cached) => {
             if (mounted && Array.isArray(cached)) {
               setChecklists(cached);
+            }
+          })
+          .catch(() => {});
+      }
+
+      const activePid = selectedProjectIdRef.current;
+      if (!activePid) return;
+      const scopedKey = getScopedProjectKey(activePid, resolvedUserId);
+
+      const shouldCheckProjectDirtyClear =
+        (evt.type === 'conflict_resolved' &&
+          evt.entityType !== 'checklist' &&
+          (!evt.projectId || evt.projectId === activePid)) ||
+        (evt.type === 'operation_discarded' &&
+          evt.entityType !== 'checklist' &&
+          (!evt.projectId || evt.projectId === activePid)) ||
+        (evt.type === 'sync_completed' &&
+          evt.failed === 0 &&
+          evt.conflicts === 0 &&
+          evt.synced > 0 &&
+          queuedDirtyGenRef.current[scopedKey] != null);
+
+      if (shouldCheckProjectDirtyClear) {
+        const genAtEvent = editGenRef.current[scopedKey] || 0;
+        const expectedQueuedGen = queuedDirtyGenRef.current[scopedKey];
+        getPendingProjectOperations(resolvedUserId)
+          .then((ops) => {
+            if (!mounted) return;
+            const remainingForProject = (Array.isArray(ops) ? ops : []).filter(
+              (op) =>
+                op.projectId === activePid &&
+                op.entityType !== 'checklist' &&
+                op.status !== 'completed'
+            );
+            const currentGen = editGenRef.current[scopedKey] || 0;
+            const genUnchanged =
+              currentGen === genAtEvent &&
+              (evt.type !== 'sync_completed' ||
+                expectedQueuedGen == null ||
+                currentGen === expectedQueuedGen);
+
+            if (remainingForProject.length === 0 && genUnchanged) {
+              clearProjectDirty(activePid, resolvedUserId);
+              if (
+                evt.type === 'conflict_resolved' &&
+                (evt.resolution === 'keep_server' ||
+                  evt.resolution === 'discard_local')
+              ) {
+                setProjectDataConflict(null);
+              }
             }
           })
           .catch(() => {});
@@ -828,9 +1007,14 @@ export function WorkspaceProvider({ children }) {
       unsubSyncEvents();
       unsubReconnect();
     };
-  }, [user && (user.userId || user.id || user._id)]);
+  }, [
+    resolvedUserId,
+    getScopedProjectKey,
+    clearProjectDirty,
+    applyWorkspaceStateSnapshot,
+  ]);
 
-  // Switch workspace data cleanly whenever the selected project changes
+  // Switch workspace data cleanly whenever the selected project or authenticated user changes
   useEffect(() => {
     let mounted = true;
 
@@ -845,14 +1029,7 @@ export function WorkspaceProvider({ children }) {
     if (!selectedProjectId || !selectedProject) {
       prevSelectedProjectIdRef.current = null;
       const emptyState = buildProjectWorkspaceState(null, null, user);
-      setProfile(emptyState.profile);
-      setTestPlan(emptyState.testPlan);
-      setSuites(emptyState.suites);
-      setTestCases(emptyState.testCases);
-      setTestRuns(emptyState.testRuns);
-      setExecutions(emptyState.executions);
-      setDefects(emptyState.defects);
-      setActivityLog(emptyState.activityLog);
+      applyWorkspaceStateSnapshot(emptyState);
       setHydratedProjectId(null);
       setLastPersistedAt(null);
       setIsStorageHydrated(true);
@@ -888,21 +1065,21 @@ export function WorkspaceProvider({ children }) {
       null,
       user
     );
-    setProfile(immediateState.profile);
-    setTestPlan(immediateState.testPlan);
-    setSuites(immediateState.suites);
-    setTestCases(immediateState.testCases);
-    setTestRuns(immediateState.testRuns);
-    setExecutions(immediateState.executions);
-    setDefects(immediateState.defects);
-    setActivityLog(immediateState.activityLog);
+    applyWorkspaceStateSnapshot(immediateState);
 
     const storageKey = getProjectWorkspaceStorageKey(
       selectedProjectId,
-      user && user.userId
+      resolvedUserId
     );
-    AsyncStorage.getItem(storageKey)
-      .then((raw) => {
+    const scopedKey = getScopedProjectKey(selectedProjectId, resolvedUserId);
+
+    Promise.all([
+      AsyncStorage.getItem(storageKey).catch(() => null),
+      resolvedUserId
+        ? getPendingProjectOperations(resolvedUserId).catch(() => [])
+        : Promise.resolve([]),
+    ])
+      .then(([raw, pendingOps]) => {
         if (!mounted) return;
         let snapshot = null;
         if (raw) {
@@ -912,19 +1089,36 @@ export function WorkspaceProvider({ children }) {
             snapshot = null;
           }
         }
+
+        const projectPendingOps = (Array.isArray(pendingOps) ? pendingOps : [])
+          .filter(
+            (op) =>
+              op.projectId === selectedProjectId &&
+              op.entityType !== 'checklist' &&
+              op.status !== 'completed'
+          );
+        const hasPendingOps = projectPendingOps.length > 0;
+        const snapshotHasUnsaved = Boolean(snapshot && snapshot.isDirty);
+        const preferSnapshot = snapshotHasUnsaved || hasPendingOps;
+
+        if (preferSnapshot && scopedKey) {
+          dirtyProjectsRef.current[scopedKey] = true;
+          if (hasPendingOps) {
+            queuedDirtyGenRef.current[scopedKey] =
+              editGenRef.current[scopedKey] || 0;
+          }
+        } else {
+          clearProjectDirty(selectedProjectId, resolvedUserId);
+          setAppliedServerSnapshot(selectedProject, resolvedUserId);
+        }
+
         const resolved = buildProjectWorkspaceState(
           selectedProject,
           snapshot,
-          user
+          user,
+          { preferSnapshot }
         );
-        setProfile(resolved.profile);
-        setTestPlan(resolved.testPlan);
-        setSuites(resolved.suites);
-        setTestCases(resolved.testCases);
-        setTestRuns(resolved.testRuns);
-        setExecutions(resolved.executions);
-        setDefects(resolved.defects);
-        setActivityLog(resolved.activityLog);
+        applyWorkspaceStateSnapshot(resolved);
         setLastPersistedAt(
           (snapshot && snapshot.savedAt) || formatTimestamp()
         );
@@ -940,27 +1134,117 @@ export function WorkspaceProvider({ children }) {
     return () => {
       mounted = false;
     };
-  }, [selectedProjectId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProjectId, resolvedUserId]);
 
-  // Synchronize workspace state whenever selectedProject is refreshed from the server or updated via promotion
+  // Synchronize workspace state whenever selectedProject is refreshed from server,
+  // while guarding against overwriting hydrated local state, dirty edits, and stale metadata.
   useEffect(() => {
     if (!selectedProject || !selectedProjectId) return;
+    if (!isStorageHydrated || hydratedProjectId !== selectedProjectId) return;
+    if (syncLockRef.current || datasetResetLockRef.current) return;
+
+    const scopedKey = getScopedProjectKey(selectedProjectId, resolvedUserId);
+    const applyProfileMetadataOnly = () => {
+      setProfile((prev) => {
+        const nextName = selectedProject.name || prev.projectName;
+        const nextVersion =
+          selectedProject.version || prev.targetVersion || 'v1.0.0';
+        const nextEnv =
+          selectedProject.environment || prev.defaultEnvironment || 'Staging';
+        if (
+          prev.projectName === nextName &&
+          prev.targetVersion === nextVersion &&
+          prev.defaultEnvironment === nextEnv
+        ) {
+          return prev;
+        }
+        const nextProfile = {
+          ...prev,
+          projectName: nextName,
+          targetVersion: nextVersion,
+          defaultEnvironment: nextEnv,
+        };
+        profileRef.current = nextProfile;
+        return nextProfile;
+      });
+    };
+
+    // Never clobber local dirty/queued QA data during background sync or metadata refresh
+    if (isCurrentProjectDirty(selectedProjectId, resolvedUserId)) {
+      applyProfileMetadataOnly();
+      return;
+    }
+
+    const lastApplied = scopedKey ? appliedServerStateRef.current[scopedKey] : null;
+    if (lastApplied && lastApplied.updatedAt && selectedProject.updatedAt) {
+      const incomingMs = Date.parse(selectedProject.updatedAt);
+      const lastMs = Date.parse(lastApplied.updatedAt);
+      if (Number.isFinite(incomingMs) && Number.isFinite(lastMs) && incomingMs < lastMs) {
+        return;
+      }
+    }
+
+    const incomingSuites = Array.isArray(selectedProject.testSuites)
+      ? selectedProject.testSuites
+      : [];
+    if (
+      incomingSuites.length === 0 &&
+      (selectedProject.testCaseCount || 0) > 0 &&
+      suitesRef.current.length > 0
+    ) {
+      applyProfileMetadataOnly();
+      return;
+    }
+
+    const incomingTestCaseCount =
+      typeof selectedProject.testCaseCount === 'number'
+        ? selectedProject.testCaseCount
+        : null;
+    const incomingSuiteCount = Array.isArray(selectedProject.testSuites)
+      ? selectedProject.testSuites.length
+      : typeof selectedProject.suiteCount === 'number'
+      ? selectedProject.suiteCount
+      : null;
+    const incomingTestSuitesLen = Array.isArray(selectedProject.testSuites)
+      ? selectedProject.testSuites.length
+      : null;
+
+    if (
+      lastApplied &&
+      lastApplied.updatedAt === (selectedProject.updatedAt || null) &&
+      lastApplied.promotedAt === (selectedProject.promotedAt || null) &&
+      lastApplied.sourceChecklistId ===
+        (selectedProject.sourceChecklistId || null) &&
+      lastApplied.testCaseCount === incomingTestCaseCount &&
+      lastApplied.suiteCount === incomingSuiteCount &&
+      lastApplied.testSuitesLen === incomingTestSuitesLen
+    ) {
+      applyProfileMetadataOnly();
+      return;
+    }
+
     const synced = buildProjectWorkspaceState(selectedProject, null, user);
+    testPlanRef.current = synced.testPlan;
+    suitesRef.current = synced.suites;
+    testCasesRef.current = synced.testCases;
+    testRunsRef.current = synced.testRuns;
+    executionsRef.current = synced.executions;
+    defectsRef.current = synced.defects;
     setTestPlan(synced.testPlan);
     setSuites(synced.suites);
     setTestCases(synced.testCases);
     setTestRuns(synced.testRuns);
     setExecutions(synced.executions);
     setDefects(synced.defects);
-    setProfile((prev) => ({
-      ...prev,
-      projectName: selectedProject.name || prev.projectName,
-      targetVersion: selectedProject.version || prev.targetVersion || 'v1.0.0',
-      defaultEnvironment:
-        selectedProject.environment || prev.defaultEnvironment || 'Staging',
-    }));
+    applyProfileMetadataOnly();
+    setAppliedServerSnapshot(selectedProject, resolvedUserId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     selectedProjectId,
+    resolvedUserId,
+    isStorageHydrated,
+    hydratedProjectId,
     selectedProject && selectedProject.updatedAt,
     selectedProject && selectedProject.name,
     selectedProject && selectedProject.version,
@@ -978,13 +1262,16 @@ export function WorkspaceProvider({ children }) {
     if (
       !isStorageHydrated ||
       !selectedProjectId ||
-      hydratedProjectId !== selectedProjectId
+      hydratedProjectId !== selectedProjectId ||
+      !resolvedUserId
     ) {
       return;
     }
     const savedAt = formatTimestamp();
     const payload = JSON.stringify({
       projectId: selectedProjectId,
+      userId: resolvedUserId,
+      isDirty: isCurrentProjectDirty(selectedProjectId, resolvedUserId),
       serverUpdatedAt: (selectedProject && selectedProject.updatedAt) || null,
       profile,
       testPlan,
@@ -997,7 +1284,7 @@ export function WorkspaceProvider({ children }) {
       savedAt,
     });
     AsyncStorage.setItem(
-      getProjectWorkspaceStorageKey(selectedProjectId, user && user.userId),
+      getProjectWorkspaceStorageKey(selectedProjectId, resolvedUserId),
       payload
     )
       .then(() => {
@@ -1008,6 +1295,8 @@ export function WorkspaceProvider({ children }) {
     isStorageHydrated,
     selectedProjectId,
     hydratedProjectId,
+    resolvedUserId,
+    isCurrentProjectDirty,
     selectedProject && selectedProject.updatedAt,
     profile,
     testPlan,
@@ -1027,7 +1316,11 @@ export function WorkspaceProvider({ children }) {
       detail,
       timestamp: formatTimestamp(),
     };
-    setActivityLog((prev) => [entry, ...prev.slice(0, 29)]);
+    setActivityLog((prev) => {
+      const next = [entry, ...prev.slice(0, 29)];
+      activityLogRef.current = next;
+      return next;
+    });
   }, []);
 
   /**
@@ -1044,17 +1337,25 @@ export function WorkspaceProvider({ children }) {
     try {
       const result = await getProject(selectedProjectId);
       if (result.ok && result.project) {
+        clearProjectDirty(selectedProjectId, resolvedUserId);
         const refreshed = buildProjectWorkspaceState(
           result.project,
           null,
           user
         );
+        testPlanRef.current = refreshed.testPlan;
+        suitesRef.current = refreshed.suites;
+        testCasesRef.current = refreshed.testCases;
+        testRunsRef.current = refreshed.testRuns;
+        executionsRef.current = refreshed.executions;
+        defectsRef.current = refreshed.defects;
         setTestPlan(refreshed.testPlan);
         setSuites(refreshed.suites);
         setTestCases(refreshed.testCases);
         setTestRuns(refreshed.testRuns);
         setExecutions(refreshed.executions);
         setDefects(refreshed.defects);
+        setAppliedServerSnapshot(result.project, resolvedUserId);
         showToast('Reloaded latest project data from server', 'info');
       } else if (!result.ok) {
         setProjectDataError(result.error || 'Failed to reload project data.');
@@ -1063,11 +1364,19 @@ export function WorkspaceProvider({ children }) {
     } finally {
       setIsSyncingProjectData(false);
     }
-  }, [selectedProjectId, getProject, user, showToast]);
+  }, [
+    selectedProjectId,
+    resolvedUserId,
+    getProject,
+    user,
+    showToast,
+    clearProjectDirty,
+    setAppliedServerSnapshot,
+  ]);
 
   /**
    * Internal helper to persist `dataUpdates` via `PATCH /api/projects/:id/data`
-   * with duplicate-submission protection and HTTP 409 conflict handling.
+   * with duplicate-submission protection, dirty-state tracking, and HTTP 409 handling.
    */
   const persistProjectDataToBackend = useCallback(
     async (dataUpdates, options = {}) => {
@@ -1095,18 +1404,32 @@ export function WorkspaceProvider({ children }) {
       setProjectDataError(null);
       setProjectDataConflict(null);
 
+      const targetPid = selectedProjectId;
+      const targetUid = resolvedUserIdRef.current;
+      const scopedKey = getScopedProjectKey(targetPid, targetUid);
+      const wasDirty = isCurrentProjectDirty(targetPid, targetUid);
+      const genAtStart = markProjectDirty(targetPid, targetUid, true);
+
       try {
         const result = await updateProjectData(
-          selectedProjectId,
+          targetPid,
           dataUpdates,
           options
         );
 
         if (!result.ok) {
+          if (
+            !wasDirty &&
+            scopedKey &&
+            (editGenRef.current[scopedKey] || 0) === genAtStart &&
+            queuedDirtyGenRef.current[scopedKey] == null
+          ) {
+            clearProjectDirty(targetPid, targetUid);
+          }
           if (result.isConflict) {
             setProjectDataConflict({
               isConflict: true,
-              projectId: selectedProjectId,
+              projectId: targetPid,
               currentUpdatedAt: result.currentUpdatedAt || null,
               expectedUpdatedAt: result.expectedUpdatedAt || null,
               message:
@@ -1120,13 +1443,39 @@ export function WorkspaceProvider({ children }) {
           return result;
         }
 
+        if (result.queuedOffline) {
+          if (scopedKey) {
+            dirtyProjectsRef.current[scopedKey] = true;
+            queuedDirtyGenRef.current[scopedKey] = genAtStart;
+          }
+        } else {
+          if (result.project) {
+            setAppliedServerSnapshot(result.project, targetUid);
+          }
+          if (
+            scopedKey &&
+            (editGenRef.current[scopedKey] || 0) === genAtStart &&
+            queuedDirtyGenRef.current[scopedKey] == null
+          ) {
+            clearProjectDirty(targetPid, targetUid);
+          }
+        }
+
         return result;
       } finally {
         syncLockRef.current = false;
         setIsSyncingProjectData(false);
       }
     },
-    [selectedProjectId, updateProjectData]
+    [
+      selectedProjectId,
+      updateProjectData,
+      getScopedProjectKey,
+      isCurrentProjectDirty,
+      markProjectDirty,
+      clearProjectDirty,
+      setAppliedServerSnapshot,
+    ]
   );
 
   // =========================================================================
@@ -1390,7 +1739,12 @@ export function WorkspaceProvider({ children }) {
           testSuites,
           ...summaryCounts,
         },
-        options
+        {
+          ...options,
+          deletionTombstones: {
+            phases: [cleanPhaseId],
+          },
+        }
       );
 
       if (!result.ok) {
@@ -1666,6 +2020,16 @@ export function WorkspaceProvider({ children }) {
       const { defects: serializedDefects, defectSummaryCounts } =
         buildBackendDefectsPayload(nextDefects);
 
+      const removedCaseIdsForTombstones = !destinationSuite
+        ? prevCases.filter((tc) => tc.suiteId === cleanId).map((tc) => tc.id)
+        : [];
+      const deletionTombstones = {
+        suites: [cleanId],
+        ...(removedCaseIdsForTombstones.length > 0
+          ? { testCases: removedCaseIdsForTombstones }
+          : {}),
+      };
+
       const result = await persistProjectDataToBackend(
         {
           testSuites,
@@ -1675,7 +2039,10 @@ export function WorkspaceProvider({ children }) {
           ...summaryCounts,
           ...defectSummaryCounts,
         },
-        requestOptions
+        {
+          ...requestOptions,
+          deletionTombstones,
+        }
       );
 
       if (!result.ok) {
@@ -2079,7 +2446,12 @@ export function WorkspaceProvider({ children }) {
           ...summaryCounts,
           ...defectSummaryCounts,
         },
-        options
+        {
+          ...options,
+          deletionTombstones: {
+            testCases: [cleanCaseId],
+          },
+        }
       );
 
       if (!result.ok) {
@@ -2768,7 +3140,12 @@ export function WorkspaceProvider({ children }) {
           defects: serializedDefects,
           ...defectSummaryCounts,
         },
-        options
+        {
+          ...options,
+          deletionTombstones: {
+            testRuns: [cleanRunId],
+          },
+        }
       );
 
       if (!result.ok) {
@@ -3242,6 +3619,7 @@ export function WorkspaceProvider({ children }) {
         executions: serializedExecs,
       } = buildBackendExecutionsAndRunsPayload(nextRuns, nextExecs);
 
+      const defectTombstoneIds = [target.id, target.defectId].filter(Boolean);
       const result = await persistProjectDataToBackend(
         {
           defects: serializedDefects,
@@ -3250,7 +3628,12 @@ export function WorkspaceProvider({ children }) {
           executions: serializedExecs,
           ...defectSummaryCounts,
         },
-        options
+        {
+          ...options,
+          deletionTombstones: {
+            defects: defectTombstoneIds,
+          },
+        }
       );
 
       if (!result.ok) {
@@ -3480,26 +3863,60 @@ export function WorkspaceProvider({ children }) {
       datasetResetLockRef.current = true;
       setIsRestoringSampleData(true);
 
+      const prevProfile = profileRef.current;
+      const prevSuites = suitesRef.current;
+      const prevCases = testCasesRef.current;
+      const prevRuns = testRunsRef.current;
+      const prevExecutions = executionsRef.current;
+      const prevDefects = defectsRef.current;
+      const prevActivity = activityLogRef.current;
+
       const replacedCounts = {
-        suites: suitesRef.current.length,
-        testCases: testCasesRef.current.length,
-        testRuns: testRunsRef.current.length,
-        executions: executionsRef.current.length,
-        defects: defectsRef.current.length,
+        suites: prevSuites.length,
+        testCases: prevCases.length,
+        testRuns: prevRuns.length,
+        executions: prevExecutions.length,
+        defects: prevDefects.length,
+      };
+
+      const rollbackState = () => {
+        profileRef.current = prevProfile;
+        suitesRef.current = prevSuites;
+        testCasesRef.current = prevCases;
+        testRunsRef.current = prevRuns;
+        executionsRef.current = prevExecutions;
+        defectsRef.current = prevDefects;
+        activityLogRef.current = prevActivity;
+        setProfile(prevProfile);
+        setSuites(prevSuites);
+        setTestCases(prevCases);
+        setTestRuns(prevRuns);
+        setExecutions(prevExecutions);
+        setDefects(prevDefects);
+        setActivityLog(prevActivity);
       };
 
       try {
-        setProfile((prev) => ({
+        const nextProfile = {
           ...INITIAL_PROFILE,
           projectName:
             (selectedProject && selectedProject.name) ||
-            prev.projectName ||
+            prevProfile.projectName ||
             INITIAL_PROFILE.projectName,
           targetVersion:
             (selectedProject && selectedProject.version) ||
-            prev.targetVersion ||
+            prevProfile.targetVersion ||
             INITIAL_PROFILE.targetVersion,
-        }));
+        };
+        profileRef.current = nextProfile;
+        suitesRef.current = INITIAL_SUITES;
+        testCasesRef.current = INITIAL_TEST_CASES;
+        testRunsRef.current = INITIAL_TEST_RUNS;
+        executionsRef.current = [];
+        defectsRef.current = INITIAL_DEFECTS;
+        activityLogRef.current = INITIAL_ACTIVITY;
+
+        setProfile(nextProfile);
         setSuites(INITIAL_SUITES);
         setTestCases(INITIAL_TEST_CASES);
         setTestRuns(INITIAL_TEST_RUNS);
@@ -3512,6 +3929,23 @@ export function WorkspaceProvider({ children }) {
 
         let backendRes = null;
         if (selectedProjectId) {
+          const nextSuiteIdSet = new Set(INITIAL_SUITES.map((s) => s.id));
+          const nextCaseIdSet = new Set(INITIAL_TEST_CASES.map((c) => c.id));
+          const nextRunIdSet = new Set(INITIAL_TEST_RUNS.map((r) => r.id));
+          const nextDefectIdSet = new Set(
+            INITIAL_DEFECTS.flatMap((d) => [d.id, d.defectId].filter(Boolean))
+          );
+
+          const deletionTombstones = {
+            suites: prevSuites.map((s) => s.id).filter((id) => !nextSuiteIdSet.has(id)),
+            testCases: prevCases.map((c) => c.id).filter((id) => !nextCaseIdSet.has(id)),
+            testRuns: prevRuns.map((r) => r.id).filter((id) => !nextRunIdSet.has(id)),
+            executions: prevExecutions.map((ex) => ex.id).filter(Boolean),
+            defects: prevDefects
+              .flatMap((d) => [d.id, d.defectId].filter(Boolean))
+              .filter((id) => !nextDefectIdSet.has(id)),
+          };
+
           const { testSuites, summaryCounts } = buildBackendTestSuitesPayload(
             INITIAL_SUITES,
             INITIAL_TEST_CASES
@@ -3524,25 +3958,33 @@ export function WorkspaceProvider({ children }) {
           const { defects: serializedDefects, defectSummaryCounts } =
             buildBackendDefectsPayload(INITIAL_DEFECTS);
 
-          backendRes = await persistProjectDataToBackend({
-            testSuites,
-            executionRuns,
-            activeRun,
-            executions: serializedExecs,
-            defects: serializedDefects,
-            ...summaryCounts,
-            ...defectSummaryCounts,
-          });
+          backendRes = await persistProjectDataToBackend(
+            {
+              testSuites,
+              executionRuns,
+              activeRun,
+              executions: serializedExecs,
+              defects: serializedDefects,
+              ...summaryCounts,
+              ...defectSummaryCounts,
+            },
+            { deletionTombstones }
+          );
 
           if (backendRes && !backendRes.ok) {
+            rollbackState();
+            const errMsg =
+              backendRes.error ||
+              'Failed to persist sample QA dataset to active project.';
+            if (!options.silentToast) {
+              showToast(errMsg, 'danger');
+            }
             return {
               ok: false,
               status: backendRes.status || 0,
               isConflict: Boolean(backendRes.isConflict),
               replacedCounts,
-              error:
-                backendRes.error ||
-                'Failed to persist sample QA dataset to active project.',
+              error: errMsg,
             };
           }
         }
@@ -3565,6 +4007,21 @@ export function WorkspaceProvider({ children }) {
             defects: INITIAL_DEFECTS.length,
           },
           error: null,
+        };
+      } catch (err) {
+        rollbackState();
+        const errMsg =
+          (err && err.message) ||
+          'Failed to restore sample QA dataset for active project.';
+        if (!options.silentToast) {
+          showToast(errMsg, 'danger');
+        }
+        return {
+          ok: false,
+          status: 0,
+          isConflict: false,
+          replacedCounts,
+          error: errMsg,
         };
       } finally {
         datasetResetLockRef.current = false;
@@ -3600,12 +4057,34 @@ export function WorkspaceProvider({ children }) {
       datasetResetLockRef.current = true;
       setIsClearingWorkspaceData(true);
 
+      const prevSuites = suitesRef.current;
+      const prevCases = testCasesRef.current;
+      const prevRuns = testRunsRef.current;
+      const prevExecutions = executionsRef.current;
+      const prevDefects = defectsRef.current;
+      const prevActivity = activityLogRef.current;
+
       const replacedCounts = {
-        suites: suitesRef.current.length,
-        testCases: testCasesRef.current.length,
-        testRuns: testRunsRef.current.length,
-        executions: executionsRef.current.length,
-        defects: defectsRef.current.length,
+        suites: prevSuites.length,
+        testCases: prevCases.length,
+        testRuns: prevRuns.length,
+        executions: prevExecutions.length,
+        defects: prevDefects.length,
+      };
+
+      const rollbackState = () => {
+        suitesRef.current = prevSuites;
+        testCasesRef.current = prevCases;
+        testRunsRef.current = prevRuns;
+        executionsRef.current = prevExecutions;
+        defectsRef.current = prevDefects;
+        activityLogRef.current = prevActivity;
+        setSuites(prevSuites);
+        setTestCases(prevCases);
+        setTestRuns(prevRuns);
+        setExecutions(prevExecutions);
+        setDefects(prevDefects);
+        setActivityLog(prevActivity);
       };
 
       try {
@@ -3618,12 +4097,7 @@ export function WorkspaceProvider({ children }) {
             description: 'Default test suite',
           },
         ];
-        setSuites(defaultSuites);
-        setTestCases([]);
-        setTestRuns([]);
-        setExecutions([]);
-        setDefects([]);
-        setActivityLog([
+        const nextActivity = [
           {
             id: `act-${Date.now()}`,
             category: 'settings',
@@ -3631,38 +4105,72 @@ export function WorkspaceProvider({ children }) {
             detail: 'Project workspace reset to empty state.',
             timestamp: formatTimestamp(),
           },
-        ]);
+        ];
+        suitesRef.current = defaultSuites;
+        testCasesRef.current = [];
+        testRunsRef.current = [];
+        executionsRef.current = [];
+        defectsRef.current = [];
+        activityLogRef.current = nextActivity;
+
+        setSuites(defaultSuites);
+        setTestCases([]);
+        setTestRuns([]);
+        setExecutions([]);
+        setDefects([]);
+        setActivityLog(nextActivity);
         setSelectedTestCaseId(null);
         setSelectedTestRunId(null);
         setSelectedDefectId(null);
 
         let backendRes = null;
         if (selectedProjectId) {
+          const defaultSuiteIdSet = new Set(defaultSuites.map((s) => s.id));
+          const deletionTombstones = {
+            suites: prevSuites
+              .map((s) => s.id)
+              .filter((id) => !defaultSuiteIdSet.has(id)),
+            testCases: prevCases.map((c) => c.id).filter(Boolean),
+            testRuns: prevRuns.map((r) => r.id).filter(Boolean),
+            executions: prevExecutions.map((ex) => ex.id).filter(Boolean),
+            defects: prevDefects.flatMap((d) =>
+              [d.id, d.defectId].filter(Boolean)
+            ),
+          };
+
           const { testSuites, summaryCounts } = buildBackendTestSuitesPayload(
             defaultSuites,
             []
           );
           const { defects: serializedDefects, defectSummaryCounts } =
             buildBackendDefectsPayload([]);
-          backendRes = await persistProjectDataToBackend({
-            testSuites,
-            executionRuns: [],
-            activeRun: null,
-            executions: [],
-            defects: serializedDefects,
-            ...summaryCounts,
-            ...defectSummaryCounts,
-          });
+          backendRes = await persistProjectDataToBackend(
+            {
+              testSuites,
+              executionRuns: [],
+              activeRun: null,
+              executions: [],
+              defects: serializedDefects,
+              ...summaryCounts,
+              ...defectSummaryCounts,
+            },
+            { deletionTombstones }
+          );
 
           if (backendRes && !backendRes.ok) {
+            rollbackState();
+            const errMsg =
+              backendRes.error ||
+              'Failed to persist cleared workspace state to active project.';
+            if (!options.silentToast) {
+              showToast(errMsg, 'danger');
+            }
             return {
               ok: false,
               status: backendRes.status || 0,
               isConflict: Boolean(backendRes.isConflict),
               replacedCounts,
-              error:
-                backendRes.error ||
-                'Failed to persist cleared workspace state to active project.',
+              error: errMsg,
             };
           }
         }
@@ -3681,6 +4189,21 @@ export function WorkspaceProvider({ children }) {
           project: (backendRes && backendRes.project) || selectedProject,
           replacedCounts,
           error: null,
+        };
+      } catch (err) {
+        rollbackState();
+        const errMsg =
+          (err && err.message) ||
+          'Failed to persist cleared workspace state to active project.';
+        if (!options.silentToast) {
+          showToast(errMsg, 'danger');
+        }
+        return {
+          ok: false,
+          status: 0,
+          isConflict: false,
+          replacedCounts,
+          error: errMsg,
         };
       } finally {
         datasetResetLockRef.current = false;

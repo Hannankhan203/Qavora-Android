@@ -122,7 +122,7 @@ export async function cacheProjectsListOffline(projectsList = [], userId) {
         ...normalized,
         ...existingLocal,
         // Keep the server's latest updatedAt reference if no baseline was recorded
-        _serverUpdatedAt: normalized.updatedAt,
+        _serverUpdatedAt: existingLocal._serverUpdatedAt || normalized.updatedAt,
         _pendingSync: true,
       };
     } else {

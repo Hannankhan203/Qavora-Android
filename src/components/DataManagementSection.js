@@ -142,6 +142,7 @@ export default function DataManagementSection() {
   const [confirmActionModal, setConfirmActionModal] = useState(null);
   const [isExecutingConfirmAction, setIsExecutingConfirmAction] =
     useState(false);
+  const [datasetActionError, setDatasetActionError] = useState(null);
 
   useWorkspaceBackOverlay(() => {
     if (confirmActionModal) {
@@ -675,10 +676,17 @@ export default function DataManagementSection() {
 
   const handleConfirmProtectedAction = async () => {
     if (!confirmActionModal) return;
+    const { type, snapshotId, mode } = confirmActionModal;
     setIsExecutingConfirmAction(true);
-    try {
-      const { type, snapshotId, mode } = confirmActionModal;
+    setConfirmActionModal((prev) => (prev ? { ...prev, error: null } : prev));
+    if (
+      type === 'restore_sample_dataset' ||
+      type === 'clear_active_project_dataset'
+    ) {
+      setDatasetActionError(null);
+    }
 
+    try {
       if (type === 'server_rollback') {
         const res = await executeRollback();
         if (res.ok) {
@@ -690,7 +698,11 @@ export default function DataManagementSection() {
             'success'
           );
         } else {
-          showToast(res.error || 'Rollback failed', 'danger');
+          const errMsg = res.error || 'Rollback failed';
+          setConfirmActionModal((prev) =>
+            prev ? { ...prev, error: errMsg } : prev
+          );
+          showToast(errMsg, 'danger');
         }
         return;
       }
@@ -713,7 +725,11 @@ export default function DataManagementSection() {
             'success'
           );
         } else {
-          showToast(res.error || 'Failed to restore snapshot', 'danger');
+          const errMsg = res.error || 'Failed to restore snapshot';
+          setConfirmActionModal((prev) =>
+            prev ? { ...prev, error: errMsg } : prev
+          );
+          showToast(errMsg, 'danger');
         }
         return;
       }
@@ -741,7 +757,11 @@ export default function DataManagementSection() {
             'info'
           );
         } else {
-          showToast(res.error || 'Failed to reset workspace data', 'danger');
+          const errMsg = res.error || 'Failed to reset workspace data';
+          setConfirmActionModal((prev) =>
+            prev ? { ...prev, error: errMsg } : prev
+          );
+          showToast(errMsg, 'danger');
         }
         return;
       }
@@ -750,21 +770,49 @@ export default function DataManagementSection() {
         const res = await resetToSampleData({ confirmed: true });
         if (res && res.ok) {
           await loadStorageAndSnapshots();
+          setDatasetActionError(null);
           setConfirmActionModal(null);
         } else {
-          showToast(
-            (res && res.error) || 'Failed to restore sample QA dataset',
-            'danger'
+          const errMsg =
+            (res && res.error) || 'Failed to restore sample QA dataset';
+          setDatasetActionError(errMsg);
+          setConfirmActionModal((prev) =>
+            prev ? { ...prev, error: errMsg } : prev
           );
+          showToast(errMsg, 'danger');
         }
         return;
       }
 
       if (type === 'clear_active_project_dataset') {
-        await clearAllWorkspaceData();
-        await loadStorageAndSnapshots();
-        setConfirmActionModal(null);
+        const res = await clearAllWorkspaceData({ confirmed: true });
+        if (res && res.ok) {
+          await loadStorageAndSnapshots();
+          setDatasetActionError(null);
+          setConfirmActionModal(null);
+        } else {
+          const errMsg =
+            (res && res.error) || 'Failed to clear active project dataset';
+          setDatasetActionError(errMsg);
+          setConfirmActionModal((prev) =>
+            prev ? { ...prev, error: errMsg } : prev
+          );
+          showToast(errMsg, 'danger');
+        }
       }
+    } catch (err) {
+      const errMsg =
+        (err && err.message) || 'Protected data operation failed.';
+      if (
+        type === 'restore_sample_dataset' ||
+        type === 'clear_active_project_dataset'
+      ) {
+        setDatasetActionError(errMsg);
+      }
+      setConfirmActionModal((prev) =>
+        prev ? { ...prev, error: errMsg } : prev
+      );
+      showToast(errMsg, 'danger');
     } finally {
       setIsExecutingConfirmAction(false);
     }
@@ -2147,10 +2195,27 @@ export default function DataManagementSection() {
           </Text>
         )}
 
+        {datasetActionError ? (
+          <View
+            style={[
+              styles.errorBanner,
+              {
+                backgroundColor: colors.dangerSoft,
+                borderColor: colors.danger,
+              },
+            ]}
+          >
+            <Text style={[styles.errorBannerText, { color: colors.danger }]}>
+              {datasetActionError}
+            </Text>
+          </View>
+        ) : null}
+
         <View style={styles.actionButtonsRow}>
           <Pressable
             disabled={isRestoringSampleData || isClearingWorkspaceData}
             onPress={() => {
+              setDatasetActionError(null);
               const currentSummary = `${suites.length} suites, ${testCases.length} test cases, ${testRuns.length} test runs, ${executions.length} executions, ${defects.length} defects`;
               const sampleSummary = hasSampleCounts
                 ? ` (${sampleSuitesCount ?? '—'} suites, ${sampleTestCasesCount ?? '—'} test cases, ${sampleTestRunsCount ?? '—'} test runs, ${sampleExecutionsCount ?? '—'} executions, ${sampleDefectsCount ?? '—'} defects)`
@@ -2192,13 +2257,14 @@ export default function DataManagementSection() {
 
           <Pressable
             disabled={isRestoringSampleData || isClearingWorkspaceData}
-            onPress={() =>
+            onPress={() => {
+              setDatasetActionError(null);
               setConfirmActionModal({
                 type: 'clear_active_project_dataset',
                 title: 'Clear Active Project Dataset?',
                 description: `Permanently delete ${suites.length} suites, ${testCases.length} test cases, ${testRuns.length} test runs, ${executions.length} execution records, and ${defects.length} defects in "${selectedProject?.name || profile?.projectName || 'Active Project'}".`,
-              })
-            }
+              });
+            }}
             accessibilityRole="button"
             accessibilityState={{
               disabled: Boolean(
@@ -2757,6 +2823,24 @@ export default function DataManagementSection() {
                     Download Full Backup First
                   </Text>
                 </Pressable>
+              ) : null}
+              {confirmActionModal?.error ? (
+                <View
+                  style={[
+                    styles.errorBanner,
+                    {
+                      backgroundColor: colors.dangerSoft,
+                      borderColor: colors.danger,
+                      marginBottom: 4,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[styles.errorBannerText, { color: colors.danger }]}
+                  >
+                    {confirmActionModal.error}
+                  </Text>
+                </View>
               ) : null}
             </ScrollView>
 

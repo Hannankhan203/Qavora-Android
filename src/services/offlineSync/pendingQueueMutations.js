@@ -30,6 +30,16 @@ import {
   removeCachedProjectOffline,
   getCachedProjectById,
 } from './offlineProjectCache.js';
+import {
+  createEmptyDeletionTombstones,
+  extractActiveIdsFromProjectDataPayload,
+  getProjectDeletionTombstones,
+  hasAnyDeletionTombstones,
+  mergeDeletionTombstones,
+  saveProjectDeletionTombstones,
+  subtractDeletionTombstones,
+  clearProjectDeletionTombstones,
+} from './deletionTombstones.js';
 
 /**
  * Applies a queued mutation optimistically to the user's offline project cache
@@ -429,6 +439,7 @@ export async function queueProjectMutation({
   payload = {},
   expectedUpdatedAt = null,
   description = '',
+  deletionTombstones = null,
 } = {}) {
   const targetUserId = String(userId || '').trim();
   const cleanProjectId = String(projectId || '').trim();
@@ -445,6 +456,19 @@ export async function queueProjectMutation({
     entityType === 'project' ? 'project' : entityType || 'data';
   const effectiveEntityKey =
     normalizedEntityType === 'project' ? 'project' : 'data';
+
+  const cleanPayload =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? { ...payload }
+      : payload || {};
+  if (
+    cleanPayload &&
+    typeof cleanPayload === 'object' &&
+    !Array.isArray(cleanPayload) &&
+    'deletionTombstones' in cleanPayload
+  ) {
+    delete cleanPayload.deletionTombstones;
+  }
 
   const idempotencyKey = buildOperationIdempotencyKey({
     userId: targetUserId,
@@ -472,6 +496,7 @@ export async function queueProjectMutation({
         (op) => op.projectId !== cleanProjectId || op.entityType === 'checklist'
       );
       await savePendingProjectOperations(targetUserId, remainingOps);
+      await clearProjectDeletionTombstones(targetUserId, cleanProjectId);
       await removeCachedProjectOffline(cleanProjectId, targetUserId);
       notifySyncListeners({
         type: 'mutation_cancelled_out',
@@ -493,7 +518,7 @@ export async function queueProjectMutation({
         ...pendingCreateOp,
         payload: {
           ...(pendingCreateOp.payload || {}),
-          ...(payload || {}),
+          ...(cleanPayload || {}),
         },
         updatedAt: nowIso,
         status: 'pending',
@@ -526,15 +551,42 @@ export async function queueProjectMutation({
       (op.status === 'pending' || op.status === 'failed')
   );
 
+  const computeEffectiveTombstones = async (existingOpTombstones = null) => {
+    if (normalizedEntityType === 'project') {
+      return createEmptyDeletionTombstones();
+    }
+    const stored = await getProjectDeletionTombstones(
+      targetUserId,
+      cleanProjectId
+    );
+    const combined = mergeDeletionTombstones(
+      mergeDeletionTombstones(stored, existingOpTombstones),
+      deletionTombstones
+    );
+    const reAdded = extractActiveIdsFromProjectDataPayload(cleanPayload);
+    const nextTombstones = subtractDeletionTombstones(combined, reAdded);
+    await saveProjectDeletionTombstones(
+      targetUserId,
+      cleanProjectId,
+      nextTombstones
+    );
+    return nextTombstones;
+  };
+
   if (matchingIdx !== -1) {
     const existingOp = existingOps[matchingIdx];
+    const nextTombstones = await computeEffectiveTombstones(
+      existingOp.deletionTombstones
+    );
     const coalescedOp = {
       ...existingOp,
       entityType: normalizedEntityType,
       payload:
-        payload && typeof payload === 'object' && !Array.isArray(payload)
-          ? { ...(existingOp.payload || {}), ...payload }
-          : payload,
+        cleanPayload &&
+        typeof cleanPayload === 'object' &&
+        !Array.isArray(cleanPayload)
+          ? { ...(existingOp.payload || {}), ...cleanPayload }
+          : cleanPayload,
       expectedUpdatedAt: existingOp.expectedUpdatedAt || expectedUpdatedAt || null,
       description: description || existingOp.description || '',
       updatedAt: nowIso,
@@ -543,6 +595,11 @@ export async function queueProjectMutation({
       nextRetryAt: null,
       lastError: null,
     };
+    if (hasAnyDeletionTombstones(nextTombstones)) {
+      coalescedOp.deletionTombstones = nextTombstones;
+    } else {
+      delete coalescedOp.deletionTombstones;
+    }
 
     const nextOps = [...existingOps];
     nextOps[matchingIdx] = coalescedOp;
@@ -566,8 +623,10 @@ export async function queueProjectMutation({
         op.projectId !== cleanProjectId ||
         op.status === 'syncing'
     );
+    await clearProjectDeletionTombstones(targetUserId, cleanProjectId);
   }
 
+  const nextTombstones = await computeEffectiveTombstones(null);
   const seq = nextMonotonicSeq();
   const record = {
     id: `pop_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
@@ -578,7 +637,7 @@ export async function queueProjectMutation({
     entityType: normalizedEntityType,
     entityId: entityId || null,
     operationType,
-    payload: payload || {},
+    payload: cleanPayload || {},
     expectedUpdatedAt: expectedUpdatedAt || null,
     description:
       description ||
@@ -593,6 +652,9 @@ export async function queueProjectMutation({
     requiresManualResolution: false,
     conflictDetails: null,
     lastError: null,
+    ...(hasAnyDeletionTombstones(nextTombstones)
+      ? { deletionTombstones: nextTombstones }
+      : {}),
   };
 
   const nextOps = sortProjectOperations([...filteredOps, record]);

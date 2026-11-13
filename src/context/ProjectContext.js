@@ -1047,6 +1047,7 @@ export function ProjectProvider({ children }) {
           skipRefreshAfterMutation = true,
           entityType = 'data',
           description = '',
+          deletionTombstones = null,
           ...resolvedOptions
         } = options || {};
 
@@ -1083,6 +1084,7 @@ export function ProjectProvider({ children }) {
             operationType: 'UPDATE',
             payload: dataUpdates,
             expectedUpdatedAt: baselineUpdatedAt,
+            deletionTombstones,
             description:
               description ||
               `Update QA workspace data (${Object.keys(dataUpdates || {})
