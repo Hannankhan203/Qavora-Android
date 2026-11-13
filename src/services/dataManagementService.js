@@ -37,12 +37,27 @@ import {
   normalizeProjectRecord,
   buildDefaultTestPlan,
   extractSuiteTestCases,
+  ALLOWED_PROJECT_CREATE_FIELDS,
+  ALLOWED_PROJECT_PATCH_FIELDS,
+  ALLOWED_PROJECT_DATA_PATCH_FIELDS,
 } from './projectService.js';
 import {
   getCachedProjectsForUser,
   getPendingProjectOperations,
   cacheProjectsListOffline,
+  queueProjectMutation,
+  queueChecklistMutation,
+  isClientOffline,
+  getOfflineSyncStorageAdapter,
 } from './offlineSyncService.js';
+import {
+  normalizeChecklistRecord,
+  filterChecklistsForUser,
+} from './checklists/checklistNormalization.js';
+import {
+  getCachedChecklistsForUser,
+  cacheChecklistsForUser,
+} from './checklists/checklistCache.js';
 
 export const SUPPORTED_BACKUP_VERSION = 1;
 export const SUPPORTED_SCHEMA_VERSION = 1;
@@ -73,6 +88,13 @@ let customNativeFileAdapters = null;
 function getStorage() {
   if (customDataStorageAdapter) {
     return customDataStorageAdapter;
+  }
+  const syncAdapter =
+    typeof getOfflineSyncStorageAdapter === 'function'
+      ? getOfflineSyncStorageAdapter()
+      : null;
+  if (syncAdapter) {
+    return syncAdapter;
   }
   return AsyncStorage;
 }
@@ -2296,6 +2318,103 @@ export async function resetWorkspaceData(options = {}) {
 // 4. LOCAL POINT-IN-TIME RECOVERY SNAPSHOTS (PER-USER ASYNCSTORAGE)
 // ============================================================================
 
+function pickWhitelistedFields(source, allowedSet, excludedKeys = []) {
+  const result = {};
+  if (!source || typeof source !== 'object') {
+    return result;
+  }
+  const excluded = new Set(excludedKeys);
+  Object.keys(source).forEach((key) => {
+    if (allowedSet.has(key) && !excluded.has(key) && source[key] !== undefined) {
+      result[key] = source[key];
+    }
+  });
+  return result;
+}
+
+function sanitizeSnapshotProject(rawProject, cleanUser) {
+  if (!rawProject || typeof rawProject !== 'object') {
+    return null;
+  }
+  const normalized = normalizeProjectRecord({
+    ...rawProject,
+    userId: cleanUser,
+  });
+  if (!normalized) {
+    return null;
+  }
+  const serverUpdatedAt = rawProject._pendingCreation
+    ? null
+    : rawProject._serverUpdatedAt || rawProject.updatedAt || null;
+
+  return {
+    ...normalized,
+    userId: cleanUser,
+    _serverUpdatedAt: serverUpdatedAt,
+    _pendingSync: false,
+    _pendingCreation: false,
+  };
+}
+
+function sanitizeSnapshotChecklist(rawChecklist, cleanUser) {
+  if (!rawChecklist || typeof rawChecklist !== 'object') {
+    return null;
+  }
+  const normalized = normalizeChecklistRecord({
+    ...rawChecklist,
+    userId: cleanUser,
+  });
+  if (!normalized) {
+    return null;
+  }
+  const serverUpdatedAt = rawChecklist._pendingCreation
+    ? null
+    : rawChecklist._serverUpdatedAt || rawChecklist.updatedAt || null;
+
+  return {
+    ...normalized,
+    userId: cleanUser,
+    _serverUpdatedAt: serverUpdatedAt,
+    _pendingSync: false,
+    _pendingCreation: false,
+    _syncStatus: 'synced',
+    _syncOpId: null,
+    _syncError: null,
+    _conflictDetails: null,
+  };
+}
+
+function buildChecklistQueuePayload(checklist, includeId = false) {
+  const payload = {
+    title: checklist.title,
+    description: checklist.description || '',
+    category: checklist.category || 'General QA',
+    priority: checklist.priority || 'Medium',
+    status: checklist.status || 'Not Started',
+    projectId: checklist.projectId || null,
+    projectName: checklist.projectName || '',
+    environment: checklist.environment || 'Staging',
+    targetRelease: checklist.targetRelease || '',
+    tags: Array.isArray(checklist.tags) ? checklist.tags : [],
+    items: Array.isArray(checklist.items) ? checklist.items : [],
+    phases: Array.isArray(checklist.phases) ? checklist.phases : [],
+    documentNotes: Array.isArray(checklist.documentNotes)
+      ? checklist.documentNotes
+      : [],
+    promotedProjectId:
+      checklist.promotedProjectId || checklist.projectId || null,
+    promotedAt: checklist.promotedAt || null,
+    completedAt: checklist.completedAt || null,
+    completedBy: checklist.completedBy || null,
+    originalPrompt: checklist.originalPrompt || '',
+    schemaVersion: checklist.schemaVersion || 1,
+  };
+  if (includeId && checklist.id) {
+    payload.id = checklist.id;
+  }
+  return payload;
+}
+
 /**
  * Retrieves all local point-in-time recovery snapshots belonging to `userId`.
  *
@@ -2328,17 +2447,21 @@ export async function getLocalRecoverySnapshots(userId) {
 
 /**
  * Creates a durable local point-in-time recovery snapshot for `userId` in
- * AsyncStorage (`@qavora_local_recovery_snapshots_v1:<userId>`).
+ * AsyncStorage (`@qavora_local_recovery_snapshots_v1:<userId>`), capturing
+ * the full supported workspace dataset (projects, plans, phases, suites,
+ * test cases, test runs, executions, defects, and checklists).
  *
  * @param {object} params
  * @param {string} params.userId
- * @param {Array<object>} params.projects
+ * @param {Array<object>} [params.projects=[]]
+ * @param {Array<object>} [params.checklists]
  * @param {string} [params.label='Manual Recovery Snapshot']
  * @param {string} [params.reason='manual']
  */
 export async function createLocalRecoverySnapshot({
   userId,
   projects = [],
+  checklists = undefined,
   label = 'Manual Recovery Snapshot',
   reason = 'manual',
 } = {}) {
@@ -2350,18 +2473,52 @@ export async function createLocalRecoverySnapshot({
     };
   }
 
-  const backupPayload = createFullBackupPayload(projects, []);
+  const scopedProjects = (Array.isArray(projects) ? projects : [])
+    .filter(
+      (p) =>
+        p &&
+        typeof p === 'object' &&
+        (!p.userId || String(p.userId).trim() === cleanUser)
+    )
+    .map((p) => sanitizeSnapshotProject(p, cleanUser))
+    .filter(Boolean);
+
+  const sourceChecklists = Array.isArray(checklists)
+    ? checklists
+    : await getCachedChecklistsForUser(cleanUser);
+
+  const scopedChecklists = filterChecklistsForUser(
+    sourceChecklists
+      .map((c) => sanitizeSnapshotChecklist(c, cleanUser))
+      .filter(Boolean),
+    cleanUser
+  );
+
+  const backupPayload = createFullBackupPayload(scopedProjects, scopedChecklists);
+  const standardizedProjects = backupPayload.projects.map((stdProj, idx) => ({
+    ...stdProj,
+    userId: cleanUser,
+    _serverUpdatedAt:
+      (scopedProjects[idx] && scopedProjects[idx]._serverUpdatedAt) || null,
+    _pendingSync: false,
+    _pendingCreation: false,
+  }));
+
   const nowIso = new Date().toISOString();
   const snapshotRecord = {
     snapshotId: `lsnap_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     userId: cleanUser,
+    backupVersion: backupPayload.backupVersion,
+    schemaVersion: backupPayload.schemaVersion,
     label: String(label || 'Recovery Snapshot').trim(),
     reason: String(reason || 'manual'),
     createdAt: nowIso,
     timestamp: nowIso,
-    projectsCount: backupPayload.projects.length,
+    projectsCount: standardizedProjects.length,
+    checklistsCount: backupPayload.checklists.length,
     metadata: backupPayload.metadata,
-    projects: backupPayload.projects,
+    projects: standardizedProjects,
+    checklists: backupPayload.checklists,
   };
 
   const existing = await getLocalRecoverySnapshots(cleanUser);
@@ -2391,9 +2548,10 @@ export async function createLocalRecoverySnapshot({
 
 /**
  * Restores a local recovery snapshot by `snapshotId` for `userId`.
- * If online, synchronizes the restored projects to the backend via
- * `POST /api/data/import` (`mode: 'replace'` or `'merge'`); if offline, updates
- * the user's offline project cache directly.
+ * Preserves full backward compatibility with older snapshots lacking `checklists`
+ * fields, persists restored projects and checklists into local caches without
+ * accidentally deleting existing checklists, and queues idempotent offline sync
+ * operations for backend persistence when offline or when network fallback occurs.
  *
  * @param {string} snapshotId
  * @param {string} userId
@@ -2424,46 +2582,293 @@ export async function restoreLocalRecoverySnapshot(
   }
 
   const mode = options.mode === 'merge' ? 'merge' : 'replace';
-  const snapshotProjects = Array.isArray(target.projects)
-    ? target.projects.map((p) => ({ ...p, userId: cleanUser }))
-    : [];
+  const rawProjects = Array.isArray(target.projects) ? target.projects : [];
+  const snapshotProjects = rawProjects
+    .map((p) => {
+      if (!p || typeof p !== 'object') return null;
+      const norm = normalizeProjectRecord({ ...p, userId: cleanUser });
+      return norm
+        ? {
+            ...p,
+            ...norm,
+            userId: cleanUser,
+            _serverUpdatedAt:
+              p._serverUpdatedAt ||
+              (!p._pendingCreation && p.updatedAt ? p.updatedAt : null),
+          }
+        : null;
+    })
+    .filter(Boolean);
 
-  // Attempt backend import if not explicitly offline-only
-  if (!options.offlineOnly) {
+  const hasChecklistsField = Array.isArray(target.checklists);
+  const rawChecklists = hasChecklistsField ? target.checklists : [];
+  const snapshotChecklists = filterChecklistsForUser(
+    rawChecklists
+      .map((c) => {
+        if (!c || typeof c !== 'object') return null;
+        const norm = normalizeChecklistRecord({ ...c, userId: cleanUser });
+        if (!norm) return null;
+        const rawHadServerTimestamp = Boolean(
+          c._serverUpdatedAt || (!c._pendingCreation && c.updatedAt)
+        );
+        return {
+          ...norm,
+          userId: cleanUser,
+          _serverUpdatedAt: rawHadServerTimestamp
+            ? c._serverUpdatedAt || c.updatedAt || null
+            : null,
+        };
+      })
+      .filter(Boolean),
+    cleanUser
+  );
+
+  const existingCachedProjects = await getCachedProjectsForUser(cleanUser, true);
+  const existingCachedChecklists = await getCachedChecklistsForUser(cleanUser);
+  const existingPendingOps = await getPendingProjectOperations(cleanUser);
+
+  const persistRestoredChecklistsLocally = async (
+    pendingSyncFlag,
+    pendingCreationById = new Map()
+  ) => {
+    if (snapshotChecklists.length === 0) {
+      return existingCachedChecklists;
+    }
+
+    const restoredById = new Map();
+    snapshotChecklists.forEach((chk) => {
+      const isPendingCreate = Boolean(pendingCreationById.get(chk.id));
+      restoredById.set(chk.id, {
+        ...chk,
+        userId: cleanUser,
+        _pendingSync: pendingSyncFlag,
+        _pendingCreation: isPendingCreate,
+        _syncStatus: pendingSyncFlag ? 'pending' : 'synced',
+        _syncError: null,
+        _conflictDetails: null,
+      });
+    });
+
+    // Never accidentally delete existing checklists not present in the snapshot
+    const preservedExisting = existingCachedChecklists.filter(
+      (chk) => chk && chk.id && !restoredById.has(chk.id)
+    );
+    const mergedChecklists = [...restoredById.values(), ...preservedExisting];
+    await cacheChecklistsForUser(mergedChecklists, cleanUser, {
+      preservePending: pendingSyncFlag,
+    });
+    return mergedChecklists;
+  };
+
+  const mergeOrReplaceLocalProjects = async () => {
+    if (mode === 'merge') {
+      const snapshotProjectIds = new Set(snapshotProjects.map((p) => p.id));
+      const preservedProjects = existingCachedProjects.filter(
+        (p) => p && p.id && !snapshotProjectIds.has(p.id)
+      );
+      return cacheProjectsListOffline(
+        [...snapshotProjects, ...preservedProjects],
+        cleanUser
+      );
+    }
+    return cacheProjectsListOffline(snapshotProjects, cleanUser);
+  };
+
+  const shouldTryOnline = !options.offlineOnly && !isClientOffline();
+
+  // Attempt backend import if online and not explicitly offline-only
+  if (shouldTryOnline) {
+    // If replacing workspace from an older snapshot that did not track checklists,
+    // pass existing cached checklists (when known) so backend replace does not wipe them.
+    const importChecklists = hasChecklistsField
+      ? snapshotChecklists
+      : mode === 'replace' && existingCachedChecklists.length > 0
+      ? existingCachedChecklists
+      : [];
+
     const apiRes = await importWorkspaceData(
       {
         mode,
         projects: snapshotProjects,
-        checklists: [],
+        checklists: importChecklists,
       },
       options.apiOptions || {}
     );
 
     if (apiRes.ok) {
-      await cacheProjectsListOffline(snapshotProjects, cleanUser);
+      await mergeOrReplaceLocalProjects();
+      await persistRestoredChecklistsLocally(false);
       return {
         ok: true,
         source: 'backend',
         mode,
         snapshot: target,
         restoredProjects: snapshotProjects,
+        restoredChecklists: snapshotChecklists,
         apiResult: apiRes,
       };
     }
 
-    if (!apiRes.isNetworkError) {
+    if (!apiRes.isNetworkError && apiRes.status !== 0) {
       return apiRes;
     }
   }
 
-  // Offline restoration fallback: update user's offline cache
-  await cacheProjectsListOffline(snapshotProjects, cleanUser);
+  // Offline / fallback restoration: persist locally AND queue idempotent sync operations
+  await mergeOrReplaceLocalProjects();
+
+  const queuedOperations = [];
+
+  for (let i = 0; i < snapshotProjects.length; i += 1) {
+    const proj = snapshotProjects[i];
+    const existingProj = existingCachedProjects.find((p) => p.id === proj.id);
+    const hasPendingCreate = existingPendingOps.some(
+      (op) =>
+        op.entityType === 'project' &&
+        op.operationType === 'CREATE' &&
+        op.projectId === proj.id &&
+        (op.status === 'pending' || op.status === 'failed')
+    );
+
+    const shouldCreate =
+      hasPendingCreate ||
+      (existingProj ? Boolean(existingProj._pendingCreation) : !proj._serverUpdatedAt);
+
+    if (shouldCreate) {
+      const createPayload = pickWhitelistedFields(
+        proj,
+        ALLOWED_PROJECT_CREATE_FIELDS
+      );
+      const createOp = await queueProjectMutation({
+        userId: cleanUser,
+        projectId: proj.id,
+        entityType: 'project',
+        operationType: 'CREATE',
+        payload: createPayload,
+        expectedUpdatedAt: null,
+        description: `Restore project "${proj.name}" from snapshot "${target.label}"`,
+      });
+      queuedOperations.push(createOp);
+
+      const dataPayload = pickWhitelistedFields(
+        proj,
+        ALLOWED_PROJECT_DATA_PATCH_FIELDS,
+        ['expectedUpdatedAt']
+      );
+      if (Object.keys(dataPayload).length > 0) {
+        const dataOp = await queueProjectMutation({
+          userId: cleanUser,
+          projectId: proj.id,
+          entityType: 'data',
+          operationType: 'UPDATE',
+          payload: dataPayload,
+          expectedUpdatedAt: null,
+          description: `Restore QA workspace data for "${proj.name}" from snapshot`,
+        });
+        queuedOperations.push(dataOp);
+      }
+    } else {
+      const baselineUpdatedAt =
+        (existingProj &&
+          (existingProj._serverUpdatedAt || existingProj.updatedAt)) ||
+        proj._serverUpdatedAt ||
+        proj.updatedAt ||
+        null;
+
+      const metaPayload = pickWhitelistedFields(
+        proj,
+        ALLOWED_PROJECT_PATCH_FIELDS,
+        ['expectedUpdatedAt']
+      );
+      if (Object.keys(metaPayload).length > 0) {
+        const metaOp = await queueProjectMutation({
+          userId: cleanUser,
+          projectId: proj.id,
+          entityType: 'project',
+          operationType: 'UPDATE',
+          payload: metaPayload,
+          expectedUpdatedAt: baselineUpdatedAt,
+          description: `Restore project "${proj.name}" metadata from snapshot "${target.label}"`,
+        });
+        queuedOperations.push(metaOp);
+      }
+
+      const dataPayload = pickWhitelistedFields(
+        proj,
+        ALLOWED_PROJECT_DATA_PATCH_FIELDS,
+        ['expectedUpdatedAt']
+      );
+      if (Object.keys(dataPayload).length > 0) {
+        const dataOp = await queueProjectMutation({
+          userId: cleanUser,
+          projectId: proj.id,
+          entityType: 'data',
+          operationType: 'UPDATE',
+          payload: dataPayload,
+          expectedUpdatedAt: baselineUpdatedAt,
+          description: `Restore QA workspace data for "${proj.name}" from snapshot`,
+        });
+        queuedOperations.push(dataOp);
+      }
+    }
+  }
+
+  const checklistPendingCreationById = new Map();
+  const checklistQueueSpecs = snapshotChecklists.map((chk) => {
+    const existingChk = existingCachedChecklists.find((c) => c.id === chk.id);
+    const hasPendingCreate = existingPendingOps.some(
+      (op) =>
+        op.entityType === 'checklist' &&
+        op.operationType === 'CREATE' &&
+        (op.checklistId === chk.id || op.entityId === chk.id) &&
+        (op.status === 'pending' || op.status === 'failed')
+    );
+    const baselineUpdatedAt =
+      (existingChk &&
+        !existingChk._pendingCreation &&
+        (existingChk._serverUpdatedAt || existingChk.updatedAt)) ||
+      chk._serverUpdatedAt ||
+      null;
+
+    const shouldCreate =
+      hasPendingCreate ||
+      (existingChk ? Boolean(existingChk._pendingCreation) : !baselineUpdatedAt);
+
+    checklistPendingCreationById.set(chk.id, shouldCreate);
+    return {
+      chk,
+      shouldCreate,
+      baselineUpdatedAt,
+    };
+  });
+
+  await persistRestoredChecklistsLocally(true, checklistPendingCreationById);
+
+  for (let i = 0; i < checklistQueueSpecs.length; i += 1) {
+    const { chk, shouldCreate, baselineUpdatedAt } = checklistQueueSpecs[i];
+    const operationType = shouldCreate ? 'CREATE' : 'UPDATE';
+    const chkOp = await queueChecklistMutation({
+      userId: cleanUser,
+      checklistId: chk.id,
+      projectId: chk.projectId || null,
+      operationType,
+      mutationSubType: 'snapshot_restore',
+      payload: buildChecklistQueuePayload(chk, operationType === 'CREATE'),
+      expectedUpdatedAt: operationType === 'UPDATE' ? baselineUpdatedAt : null,
+      description: `Restore checklist "${chk.title}" from snapshot "${target.label}"`,
+    });
+    queuedOperations.push(chkOp);
+  }
+
   return {
     ok: true,
     source: 'offline_cache',
     mode,
     snapshot: target,
     restoredProjects: snapshotProjects,
+    restoredChecklists: snapshotChecklists,
+    queuedOperationsCount: queuedOperations.length,
+    queuedOperations,
   };
 }
 

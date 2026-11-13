@@ -1367,11 +1367,15 @@ export function generateProjectReport(source = {}, filters = {}) {
 }
 
 /**
- * Escapes a value for RFC-4180 CSV output.
+ * Escapes a value for RFC-4180 CSV output while neutralizing spreadsheet formula injection.
  */
-function escapeCsvCell(value) {
+export function escapeCsvCell(value) {
   if (value === null || value === undefined) return '';
-  const str = String(value);
+  let str = String(value);
+  // Prevent CSV formula injection matching Qavora Web (`dataManager.js:1194`)
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = `'${str}`;
+  }
   if (/[",\r\n]/.test(str)) {
     return `"${str.replace(/"/g, '""')}"`;
   }

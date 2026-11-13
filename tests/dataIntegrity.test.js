@@ -65,6 +65,11 @@ const {
   fetchRecoverySnapshot,
   executeRollback,
   importWorkspaceData,
+  getLocalRecoverySnapshots,
+  createLocalRecoverySnapshot,
+  restoreLocalRecoverySnapshot,
+  getLocalSnapshotsStorageKey,
+  setDataManagementStorageAdapter,
 } = await import('../src/services/dataManagementService.js');
 
 // =============================================================================
@@ -996,6 +1001,9 @@ describe('CRIT-04 — Recovery Snapshot & Backup Checklist Preservation', () => 
     setAuthUserStorageAdapter(memoryAsyncStorage);
     setProjectStorageAdapter(memoryAsyncStorage);
     setOfflineSyncStorageAdapter(memoryAsyncStorage);
+    setDataManagementStorageAdapter(memoryAsyncStorage);
+    setChecklistStorageAdapter(memoryAsyncStorage);
+    setSimulatedOfflineMode(false, { skipAutoReconnect: true });
     setActiveSyncUser(null);
     await clearAllCookies();
     process.env.EXPO_PUBLIC_API_BASE_URL = 'https://qavora.example.test';
@@ -1004,7 +1012,10 @@ describe('CRIT-04 — Recovery Snapshot & Backup Checklist Preservation', () => 
 
   afterEach(async () => {
     await harness.cleanup();
+    setSimulatedOfflineMode(false, { skipAutoReconnect: true });
     setActiveSyncUser(null);
+    setDataManagementStorageAdapter(null);
+    setChecklistStorageAdapter(null);
     globalThis.fetch = originalFetch;
     if (originalApiUrl === undefined) {
       delete process.env.EXPO_PUBLIC_API_BASE_URL;
@@ -1171,6 +1182,328 @@ describe('CRIT-04 — Recovery Snapshot & Backup Checklist Preservation', () => 
     await harness.flush(50);
 
     expect(harness.container.textContent).toContain('3 projects · 5 checklists');
+  });
+
+  it('captures complete workspace + checklists in local recovery snapshots, preserves backward compatibility with legacy snapshots, and restores locally without deleting existing checklists', async () => {
+    const userId = 'user-snap-local-1';
+    const richProject = {
+      id: 'proj-snap-full',
+      userId,
+      name: 'Complete Snapshot Project',
+      version: '2.1.0',
+      updatedAt: '2026-06-01T10:00:00.000Z',
+      testPlan: {
+        id: 'plan-1',
+        name: 'Master Plan',
+        phases: [{ id: 'ph-1', name: 'Smoke Phase' }],
+      },
+      testSuites: [
+        {
+          id: 'suite-1',
+          name: 'Auth Suite',
+          phaseId: 'ph-1',
+          cases: [
+            { id: 'TC-1', title: 'Login Test', lastStatus: 'Passed' },
+            { id: 'TC-2', title: 'Logout Test', lastStatus: 'Untested' },
+          ],
+        },
+      ],
+      executionRuns: [
+        {
+          id: 'RUN-1',
+          name: 'RC1 Smoke',
+          status: 'Completed',
+          results: [{ testCaseId: 'TC-1', status: 'Passed' }],
+        },
+      ],
+      executions: [
+        { id: 'EX-1', testCaseId: 'TC-1', status: 'PASSED', executedAt: '2026-06-01T09:00:00.000Z' },
+      ],
+      defects: [
+        { id: 'DEF-1', defectId: 'DEF-1', title: 'Session Timeout Bug', severity: 'High', status: 'Open' },
+      ],
+    };
+
+    const richChecklists = [
+      {
+        id: 'chk-snap-1',
+        userId,
+        projectId: 'proj-snap-full',
+        title: 'Release Checklist',
+        category: 'Release Readiness',
+        priority: 'Critical',
+        tags: ['android', 'release'],
+        updatedAt: '2026-06-01T10:00:00.000Z',
+        items: [
+          { id: 'ci-1', title: 'Verify APK signing', completed: true },
+          { id: 'ci-2', title: 'Verify ProGuard mapping', completed: false },
+        ],
+        documentNotes: [{ id: 'note-1', text: 'Reviewed by QA Lead' }],
+      },
+    ];
+
+    const snapResult = await createLocalRecoverySnapshot({
+      userId,
+      projects: [richProject],
+      checklists: richChecklists,
+      label: 'Full Release Checkpoint',
+      reason: 'manual',
+    });
+
+    expect(snapResult.ok).toBe(true);
+    expect(snapResult.snapshot.backupVersion).toBe(1);
+    expect(snapResult.snapshot.schemaVersion).toBe(1);
+    expect(snapResult.snapshot.projectsCount).toBe(1);
+    expect(snapResult.snapshot.checklistsCount).toBe(1);
+    expect(snapResult.snapshot.metadata.totalChecklists).toBe(1);
+    expect(snapResult.snapshot.metadata.totalTestCases).toBe(2);
+    expect(snapResult.snapshot.metadata.totalDefects).toBe(1);
+
+    // Round-trip serialization/deserialization via storage preserves all project & checklist records
+    const loadedSnapshots = await getLocalRecoverySnapshots(userId);
+    expect(loadedSnapshots.length).toBe(1);
+    const deserialized = loadedSnapshots[0];
+    expect(deserialized.projects[0].testPlan.phases[0].id).toBe('ph-1');
+    expect(deserialized.projects[0].executionRuns[0].id).toBe('RUN-1');
+    expect(deserialized.projects[0].executions[0].id).toBe('EX-1');
+    expect(deserialized.projects[0].defects[0].id).toBe('DEF-1');
+    expect(deserialized.checklists.length).toBe(1);
+    expect(deserialized.checklists[0].id).toBe('chk-snap-1');
+    expect(deserialized.checklists[0].projectId).toBe('proj-snap-full');
+    expect(deserialized.checklists[0].tags).toEqual(['android', 'release']);
+    expect(deserialized.checklists[0].items.length).toBe(2);
+    expect(deserialized.checklists[0].items[0].completed).toBe(true);
+    expect(deserialized.checklists[0].documentNotes.some((n) => n.id === 'note-1')).toBe(true);
+
+    // Existing extra checklist on device/backend must NOT be deleted upon snapshot restore
+    await cacheChecklistsForUser(
+      [
+        {
+          id: 'chk-existing-keep',
+          userId,
+          title: 'Existing Checklist Created Later',
+          updatedAt: '2026-06-02T10:00:00.000Z',
+          items: [{ id: 'k-1', title: 'Keep me alive', completed: false }],
+        },
+      ],
+      userId
+    );
+
+    const restoreOfflineRes = await restoreLocalRecoverySnapshot(
+      deserialized.snapshotId,
+      userId,
+      { mode: 'replace', offlineOnly: true }
+    );
+    expect(restoreOfflineRes.ok).toBe(true);
+    expect(restoreOfflineRes.source).toBe('offline_cache');
+    expect(restoreOfflineRes.restoredChecklists.map((c) => c.id)).toEqual(['chk-snap-1']);
+
+    const localChecklistsAfter = await getCachedChecklistsForUser(userId);
+    expect(localChecklistsAfter.map((c) => c.id)).toContain('chk-snap-1');
+    expect(localChecklistsAfter.map((c) => c.id)).toContain('chk-existing-keep');
+
+    const queuedOps = await getPendingProjectOperations(userId);
+    expect(queuedOps.some((op) => op.entityType === 'checklist' && op.operationType === 'DELETE')).toBe(false);
+
+    // Older legacy snapshot without `checklists` / `checklistsCount` fields restores cleanly
+    const legacySnapshot = {
+      snapshotId: 'lsnap_legacy_v0',
+      userId,
+      label: 'Legacy Snapshot Without Checklists',
+      reason: 'manual',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      projectsCount: 1,
+      metadata: { totalProjects: 1, totalTestCases: 1, totalDefects: 0 },
+      projects: [
+        {
+          id: 'proj-legacy-1',
+          userId,
+          name: 'Legacy Project',
+          testSuites: [{ id: 's-leg', name: 'Legacy Suite', cases: [{ id: 'TC-L1', title: 'Legacy Case' }] }],
+        },
+      ],
+    };
+    await memoryAsyncStorage.setItem(
+      getLocalSnapshotsStorageKey(userId),
+      JSON.stringify([legacySnapshot, deserialized])
+    );
+
+    const legacyRestoreRes = await restoreLocalRecoverySnapshot(
+      'lsnap_legacy_v0',
+      userId,
+      { mode: 'merge', offlineOnly: true }
+    );
+    expect(legacyRestoreRes.ok).toBe(true);
+    expect(legacyRestoreRes.restoredProjects[0].id).toBe('proj-legacy-1');
+    expect(legacyRestoreRes.restoredChecklists).toEqual([]);
+    const checklistsAfterLegacy = await getCachedChecklistsForUser(userId);
+    expect(checklistsAfterLegacy.map((c) => c.id)).toContain('chk-snap-1');
+    expect(checklistsAfterLegacy.map((c) => c.id)).toContain('chk-existing-keep');
+  });
+
+  it('queues idempotent sync operations on offline snapshot restore, deduplicates retries, retains failed ops, syncs when back online, and enforces user isolation', async () => {
+    const userA = 'user-snap-sync-a';
+    const userB = 'user-snap-sync-b';
+
+    const baselineProject = {
+      id: 'proj-sync-1',
+      userId: userA,
+      name: 'Synced Project V1',
+      updatedAt: '2026-06-01T10:00:00.000Z',
+      testSuites: [
+        {
+          id: 'suite-sync-1',
+          name: 'Core',
+          cases: [{ id: 'TC-S1', title: 'Restored Case', lastStatus: 'Passed' }],
+        },
+      ],
+      executionRuns: [],
+      executions: [],
+      defects: [],
+    };
+    const baselineChecklist = {
+      id: 'chk-sync-1',
+      userId: userA,
+      projectId: 'proj-sync-1',
+      title: 'Restored Checklist V1',
+      updatedAt: '2026-06-01T10:00:00.000Z',
+      items: [{ id: 'item-1', title: 'Check build', completed: true }],
+    };
+    const offlineNewChecklist = {
+      id: 'chk-sync-new',
+      userId: userA,
+      title: 'Offline Created Checklist',
+      _pendingCreation: true,
+      items: [{ id: 'item-n1', title: 'Offline Task', completed: false }],
+    };
+
+    // Seed existing synced baselines in User A cache
+    await cacheProjectOffline(baselineProject, userA, {
+      pendingSync: false,
+      pendingCreation: false,
+    });
+    await cacheChecklistOffline(baselineChecklist, userA, {
+      pendingSync: false,
+      pendingCreation: false,
+      serverUpdatedAt: '2026-06-01T10:00:00.000Z',
+    });
+
+    const createdSnap = await createLocalRecoverySnapshot({
+      userId: userA,
+      projects: [baselineProject],
+      checklists: [baselineChecklist, offlineNewChecklist],
+      label: 'Sync Test Snapshot',
+    });
+    expect(createdSnap.ok).toBe(true);
+    const snapId = createdSnap.snapshot.snapshotId;
+
+    // Simulate offline restore and retry repeatedly -> must coalesce without duplicate queue ops
+    setSimulatedOfflineMode(true, { skipAutoReconnect: true });
+    const restoreAttempt1 = await restoreLocalRecoverySnapshot(snapId, userA, {
+      mode: 'replace',
+    });
+    expect(restoreAttempt1.ok).toBe(true);
+    expect(restoreAttempt1.source).toBe('offline_cache');
+    expect(restoreAttempt1.queuedOperationsCount).toBeGreaterThan(0);
+
+    const opsAfterFirstRestore = await getPendingProjectOperations(userA);
+    const keysAfterFirst = opsAfterFirstRestore.map((op) => op.idempotencyKey).sort();
+    expect(keysAfterFirst).toEqual([
+      `chk_${userA}_chk-sync-1_checklist_UPDATE`,
+      `chk_${userA}_chk-sync-new_checklist_CREATE`,
+      `proj_${userA}_proj-sync-1_data_workspace_data_UPDATE`,
+      `proj_${userA}_proj-sync-1_project_root_UPDATE`,
+    ]);
+
+    // Retry restoration twice more -> operation count and idempotency keys remain identical
+    await restoreLocalRecoverySnapshot(snapId, userA, { mode: 'replace' });
+    await restoreLocalRecoverySnapshot(snapId, userA, { mode: 'replace' });
+    const opsAfterRepeatedRestore = await getPendingProjectOperations(userA);
+    expect(opsAfterRepeatedRestore.length).toBe(opsAfterFirstRestore.length);
+    expect(opsAfterRepeatedRestore.map((op) => op.idempotencyKey).sort()).toEqual(keysAfterFirst);
+
+    // User B isolation check: User B sees zero snapshots, zero cached checklists, zero pending ops from User A
+    expect(await getLocalRecoverySnapshots(userB)).toEqual([]);
+    expect(await getCachedChecklistsForUser(userB)).toEqual([]);
+    expect(await getPendingProjectOperations(userB)).toEqual([]);
+    const crossUserRestore = await restoreLocalRecoverySnapshot(snapId, userB, {
+      offlineOnly: true,
+    });
+    expect(crossUserRestore.ok).toBe(false);
+
+    // Reconnect with temporary 500 failure -> pending ops MUST be retained with retry metadata
+    await storeCookiesFromResponse(
+      new Response('{}', {
+        status: 200,
+        headers: { 'set-cookie': 'qavora_auth_token=tok_snap_a; Path=/; HttpOnly' },
+      }),
+      'https://qavora.example.test/api/auth/login'
+    );
+    setActiveSyncUser(userA);
+    setSimulatedOfflineMode(false, { skipAutoReconnect: true });
+
+    let shouldFailBackend = true;
+    const syncedRequests = [];
+    globalThis.fetch = async (url, init = {}) => {
+      const target = String(url);
+      if (target.endsWith('/api/auth/csrf')) {
+        return new Response(JSON.stringify({ csrfToken: 'csrf_snap_sync' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (shouldFailBackend) {
+        return new Response(JSON.stringify({ error: 'Temporary outage' }), {
+          status: 503,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      syncedRequests.push({ method: init.method || 'GET', target, body: JSON.parse(init.body || '{}') });
+      if (target.endsWith('/api/projects/proj-sync-1') && init.method === 'PATCH') {
+        return new Response(
+          JSON.stringify({ ...baselineProject, updatedAt: '2026-06-02T01:00:00.000Z' }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        );
+      }
+      if (target.endsWith('/api/projects/proj-sync-1/data') && init.method === 'PATCH') {
+        return new Response(
+          JSON.stringify({ project: { ...baselineProject, updatedAt: '2026-06-02T01:00:01.000Z' } }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        );
+      }
+      if (target.endsWith('/api/checklists/chk-sync-1') && init.method === 'PATCH') {
+        return new Response(
+          JSON.stringify({ checklist: { ...baselineChecklist, updatedAt: '2026-06-02T01:00:02.000Z' } }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        );
+      }
+      if (target.endsWith('/api/checklists') && init.method === 'POST') {
+        return new Response(
+          JSON.stringify({ checklist: { ...offlineNewChecklist, id: 'chk-sync-new', updatedAt: '2026-06-02T01:00:03.000Z' } }),
+          { status: 201, headers: { 'content-type': 'application/json' } }
+        );
+      }
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+
+    const failedSync = await processProjectSyncQueue(userA);
+    // project UPDATE + 2 checklists fail (3), while dependent data UPDATE stays halted in queue (4 total retained)
+    expect(failedSync.failed).toBe(3);
+    expect(failedSync.synced).toBe(0);
+    const retainedOps = await getPendingProjectOperations(userA);
+    expect(retainedOps.length).toBe(4);
+    expect(retainedOps.filter((op) => op.retryCount === 1).length).toBe(3);
+
+    // Recover network and retry -> all 4 operations (2 project + 2 checklist) sync and dequeue cleanly
+    shouldFailBackend = false;
+    const recoveredSync = await processProjectSyncQueue(userA, { ignoreBackoff: true });
+    expect(recoveredSync.synced).toBe(4);
+    expect(recoveredSync.failed).toBe(0);
+    expect(await getPendingProjectOperations(userA)).toEqual([]);
+    expect(syncedRequests.some((r) => r.method === 'POST' && r.target.endsWith('/api/checklists'))).toBe(true);
+    expect(syncedRequests.some((r) => r.method === 'PATCH' && r.target.endsWith('/api/checklists/chk-sync-1'))).toBe(true);
+    expect(syncedRequests.some((r) => r.method === 'PATCH' && r.target.endsWith('/api/projects/proj-sync-1/data'))).toBe(true);
+    expect(syncedRequests.some((r) => r.method === 'DELETE')).toBe(false);
   });
 });
 

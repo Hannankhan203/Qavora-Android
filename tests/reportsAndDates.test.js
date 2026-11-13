@@ -9,6 +9,8 @@ const {
   formatReportAsJSON,
   formatReportAsCSV,
   formatReportAsMarkdown,
+  escapeCsvCell,
+  exportGeneratedReport,
 } = await import('../src/services/reportService.js');
 
 const TZ_TEST_PROJECT = {
@@ -386,5 +388,149 @@ describe('Report Metrics & Date-Range Edge Cases', () => {
     const mdText = formatReportAsMarkdown(suiteReport);
     expect(mdText).toContain('# Qavora QA Report');
     expect(mdText).toContain('Executive KPI Summary');
+  });
+});
+
+// =============================================================================
+// 3. CRIT-05 — Report Service CSV Formula-Injection Protection
+// =============================================================================
+describe('CRIT-05 — Report Service CSV Formula-Injection Protection', () => {
+  it('neutralizes =, +, -, @, tab, and CR triggers without double-sanitizing or altering safe text', () => {
+    expect(escapeCsvCell(null)).toBe('');
+    expect(escapeCsvCell(undefined)).toBe('');
+    expect(escapeCsvCell('Safe Text')).toBe('Safe Text');
+    expect(escapeCsvCell('Café ✅ — 日本語')).toBe('Café ✅ — 日本語');
+    expect(escapeCsvCell(-42)).toBe("'-42");
+    expect(escapeCsvCell('=SUM(1,1)')).toBe(`"'=SUM(1,1)"`);
+    expect(escapeCsvCell('+1+1')).toBe("'+1+1");
+    expect(escapeCsvCell('-1+1')).toBe("'-1+1");
+    expect(escapeCsvCell('@SUM(1,1)')).toBe(`"'@SUM(1,1)"`);
+    expect(escapeCsvCell('\t=1+1')).toBe("'\t=1+1");
+    expect(escapeCsvCell('\r=1+1')).toBe(`"'\r=1+1"`);
+    expect(escapeCsvCell('a,"b"\nc')).toBe('"a,""b""\nc"');
+    expect(escapeCsvCell('=HYPERLINK("http://evil.test","Click")')).toBe(
+      `"'=HYPERLINK(""http://evil.test"",""Click"")"`
+    );
+
+    // Already-sanitized single-quote prefix is not double-prefixed
+    expect(escapeCsvCell("'=SUM(1,1)")).toBe(`"'=SUM(1,1)"`);
+    expect(escapeCsvCell("'+1+1")).toBe("'+1+1");
+  });
+
+  it('sanitizes formula-triggering values across test cases, executions, test runs, defects, and project summary CSV exports while leaving JSON and Markdown intact', async () => {
+    const hostileReportProject = {
+      id: 'proj-report-csv',
+      name: '=HYPERLINK("http://evil.example","Click")',
+      status: 'Active',
+      testSuites: [
+        {
+          id: 'suite-evil',
+          name: '@SUM(1+1)*cmd',
+          category: '+Security',
+          testCases: [
+            {
+              id: '=TC-1',
+              title: '-2+3+cmd|"/C calc"!A0',
+              priority: 'P0',
+              testType: '\tFunctional',
+              lastStatus: 'Failed',
+              updatedAt: '2026-05-10T10:00:00.000Z',
+            },
+          ],
+        },
+      ],
+      executions: [
+        {
+          id: 'ex-1',
+          testCaseId: '=TC-1',
+          caseTitle: '=cmd|"/C calc"!A0',
+          suiteName: '@SUM(1+1)*cmd',
+          status: 'FAILED',
+          tester: '+attacker',
+          environment: '-prod',
+          buildVersion: '\t=build',
+          executedAt: '2026-05-10T10:00:00.000Z',
+        },
+      ],
+      executionRuns: [
+        {
+          id: 'run-1',
+          name: '=IMPORTXML("http://evil.test","//a")',
+          suiteName: '@SUM(1+1)*cmd',
+          status: 'Completed',
+          buildVersion: '+1.0',
+          deviceInfo: '\r=device',
+          environment: '-staging',
+          tester: '\t@qa',
+          startedAt: '2026-05-10T10:00:00.000Z',
+          results: [{ testCaseId: '=TC-1', status: 'Failed' }],
+        },
+      ],
+      defects: [
+        {
+          id: '@DEF-1',
+          defectId: '@DEF-1',
+          title: '=2+5, "Café ✅"',
+          severity: 'Critical',
+          priority: 'P0',
+          status: 'Open',
+          assignee: '-admin\nline2',
+          updatedAt: '2026-05-10T10:00:00.000Z',
+        },
+      ],
+    };
+
+    const summaryReport = generateProjectReport(hostileReportProject, {
+      reportType: 'project_summary',
+    });
+    const summaryCsv = formatReportAsCSV(summaryReport);
+
+    // Header & section structure remain intact
+    expect(summaryCsv).toContain('QAVORA QA REPORT EXPORT');
+    expect(summaryCsv).toContain('KPI Metric,Value');
+    expect(summaryCsv).toContain('TEST SUITES QUALITY & COVERAGE');
+    expect(summaryCsv).toContain('RECENT TEST EXECUTIONS LOG');
+    expect(summaryCsv).toContain('TEST RUN CYCLES');
+    expect(summaryCsv).toContain('DEFECTS LOG');
+
+    // Formula payloads are safely neutralized with leading apostrophe (and quoted when containing CSV specials)
+    expect(summaryCsv).toContain(`"'=HYPERLINK(""http://evil.example"",""Click"")"`);
+    expect(summaryCsv).toContain("'@SUM(1+1)*cmd");
+    expect(summaryCsv).toContain("'+Security");
+    expect(summaryCsv).toContain("'=TC-1");
+    expect(summaryCsv).toContain(`"'=cmd|""/C calc""!A0"`);
+    expect(summaryCsv).toContain("'+attacker");
+    expect(summaryCsv).toContain("'-prod");
+    expect(summaryCsv).toContain("'\t=build");
+    expect(summaryCsv).toContain(`"'=IMPORTXML(""http://evil.test"",""//a"")"`);
+    expect(summaryCsv).toContain(`"'\r=device"`);
+    expect(summaryCsv).toContain("'\t@qa");
+    expect(summaryCsv).toContain("'@DEF-1");
+    expect(summaryCsv).toContain(`"'=2+5, ""Café ✅"""`);
+    expect(summaryCsv).toContain(`"'-admin\nline2"`);
+
+    // Test Case Status report type uses the same neutralized CSV path
+    const caseStatusReport = generateProjectReport(hostileReportProject, {
+      reportType: 'case_status',
+    });
+    const caseStatusCsv = formatReportAsCSV(caseStatusReport);
+    expect(caseStatusCsv).toContain('TEST CASES STATUS LOG');
+    expect(caseStatusCsv).toContain(`"'-2+3+cmd|""/C calc""!A0"`);
+    expect(caseStatusCsv).toContain("'\tFunctional");
+
+    // exportGeneratedReport routes CSV through formatReportAsCSV cleanly
+    const exportedCsv = await exportGeneratedReport(caseStatusReport, 'csv', {
+      skipPlatformShare: true,
+    });
+    expect(exportedCsv.ok).toBe(true);
+    expect(exportedCsv.content).toBe(caseStatusCsv);
+
+    // JSON and Markdown exports remain unmangled (no apostrophe prefixes added)
+    const jsonParsed = JSON.parse(formatReportAsJSON(summaryReport));
+    expect(jsonParsed.project.name).toBe('=HYPERLINK("http://evil.example","Click")');
+    expect(jsonParsed.defects[0].title).toBe('=2+5, "Café ✅"');
+    const mdOut = formatReportAsMarkdown(summaryReport);
+    expect(mdOut).toContain('=HYPERLINK("http://evil.example","Click")');
+    expect(mdOut).toContain('=2+5, "Café ✅"');
   });
 });

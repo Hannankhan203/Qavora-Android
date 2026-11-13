@@ -59,6 +59,7 @@ import {
   deleteLocalRecoverySnapshot,
 } from '../services/dataManagementService.js';
 import { cacheProjectsListOffline } from '../services/offlineSyncService.js';
+import { getCachedChecklistsForUser } from '../services/checklistService.js';
 import VectorIcon from './VectorIcon.js';
 
 export default function DataManagementSection() {
@@ -70,6 +71,7 @@ export default function DataManagementSection() {
     refreshProjects,
     syncStatus,
     isOffline,
+    refreshSyncStatus,
     syncOfflineQueue,
     resolveSyncConflict,
     retrySyncOperation,
@@ -560,6 +562,7 @@ export default function DataManagementSection() {
         await createLocalRecoverySnapshot({
           userId: activeUserId,
           projects,
+          checklists,
           label: 'Pre-Import Safety Snapshot',
           reason: 'pre_replace_import',
         });
@@ -643,6 +646,7 @@ export default function DataManagementSection() {
     const res = await createLocalRecoverySnapshot({
       userId: activeUserId,
       projects,
+      checklists,
       label,
       reason: 'manual',
     });
@@ -717,7 +721,16 @@ export default function DataManagementSection() {
           }
         );
         if (res.ok) {
+          if (typeof setChecklists === 'function') {
+            const updatedChecklists = await getCachedChecklistsForUser(
+              activeUserId
+            );
+            setChecklists(updatedChecklists);
+          }
           await refreshProjects({ autoSelectFirst: true });
+          if (typeof refreshSyncStatus === 'function') {
+            await refreshSyncStatus();
+          }
           await loadStorageAndSnapshots();
           setConfirmActionModal(null);
           showToast(
@@ -739,6 +752,7 @@ export default function DataManagementSection() {
           await createLocalRecoverySnapshot({
             userId: activeUserId,
             projects,
+            checklists,
             label: 'Pre-Reset Emergency Snapshot',
             reason: 'pre_reset',
           });
@@ -1997,7 +2011,13 @@ export default function DataManagementSection() {
                   >
                     {snap.createdAt} · {snap.projectsCount} projects ·{' '}
                     {snap.metadata?.totalTestCases ?? 0} cases ·{' '}
-                    {snap.metadata?.totalDefects ?? 0} defects
+                    {snap.metadata?.totalDefects ?? 0} defects ·{' '}
+                    {snap.checklistsCount ??
+                      snap.metadata?.totalChecklists ??
+                      (Array.isArray(snap.checklists)
+                        ? snap.checklists.length
+                        : 0)}{' '}
+                    checklists
                   </Text>
                 </View>
                 <View style={styles.queueItemBtns}>
