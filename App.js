@@ -139,7 +139,12 @@ function ThemeToggleIcon({ isDark, iconColor, maskColor }) {
 
 function QavoraQAShell() {
   const { colors, isDark, toggleTheme } = useTheme();
-  const { selectedProject, syncStatus, isOffline } = useProjects();
+  const {
+    selectedProject,
+    syncStatus,
+    isOffline,
+    isMutating: isProjectMutating,
+  } = useProjects();
   const {
     activeTab,
     setActiveTab,
@@ -181,11 +186,16 @@ function QavoraQAShell() {
     selectedDefectId,
     setSelectedDefectId,
     toast,
+    showToast,
     dismissToast,
     resetBlockedSwipeTouch,
     isSwipeBlockedByChild,
     handleActiveBackOverlay,
+    isAnyMutationActive,
   } = useWorkspace();
+  const isMutationInFlight = Boolean(isAnyMutationActive || isProjectMutating);
+  const isMutationInFlightRef = useRef(isMutationInFlight);
+  isMutationInFlightRef.current = isMutationInFlight;
 
   const { width: viewportWidth } = useWindowDimensions();
   const drawerWidth = Math.max(
@@ -616,6 +626,14 @@ function QavoraQAShell() {
       return true;
     }
 
+    // 0c. Active async mutation -> prevent hardware Back from interrupting in-flight saves/deletes
+    if (isMutationInFlightRef.current) {
+      if (typeof showToast === 'function') {
+        showToast('Saving changes. Please wait before leaving.', 'warning');
+      }
+      return true;
+    }
+
     // 1–3. Active Checklists flow (strictly scoped to Checklists destination)
     if (isChecklistsActive) {
       if (checklistCreateModalOpen) {
@@ -754,6 +772,7 @@ function QavoraQAShell() {
     isDrawerOpen,
     closeDrawer,
     handleActiveBackOverlay,
+    showToast,
     setChecklistCreateModalOpen,
     setActiveChecklistId,
     setProjectViewMode,
@@ -976,12 +995,19 @@ function QavoraQAShell() {
     (item) => {
       Keyboard.dismiss();
       isKeyboardOpenRef.current = false;
+      if (isMutationInFlightRef.current) {
+        if (typeof showToast === 'function') {
+          showToast('Saving changes. Please wait before switching views.', 'warning');
+        }
+        closeDrawer();
+        return;
+      }
       if (item && typeof item.onSelect === 'function') {
         item.onSelect();
       }
       closeDrawer();
     },
-    [closeDrawer]
+    [closeDrawer, showToast]
   );
 
   // Single stable Android Hardware Back Navigation listener (no duplicate listeners on state updates)
@@ -1077,6 +1103,12 @@ function QavoraQAShell() {
             onPress={() => {
               if (isDrawerOpen) {
                 closeDrawer();
+              }
+              if (isMutationInFlightRef.current) {
+                if (typeof showToast === 'function') {
+                  showToast('Saving changes. Please wait before switching views.', 'warning');
+                }
+                return;
               }
               if (selectedProject) {
                 openDashboardOverview();
@@ -1452,6 +1484,13 @@ function QavoraQAShell() {
                 {selectedProject ? (
                   <Pressable
                     onPress={() => {
+                      if (isMutationInFlightRef.current) {
+                        if (typeof showToast === 'function') {
+                          showToast('Saving changes. Please wait before switching views.', 'warning');
+                        }
+                        closeDrawer();
+                        return;
+                      }
                       openProjectDetails();
                       closeDrawer();
                     }}
@@ -1655,20 +1694,37 @@ function QavoraQAShell() {
 function AuthRootGate() {
   const { colors, isThemeLoaded } = useTheme();
   const { isAuthenticated, isRestoringSession } = useAuth();
+  const [isRootLayoutReady, setIsRootLayoutReady] = useState(false);
   const hasHiddenSplashRef = useRef(false);
+
+  const handleRootLayout = useCallback(() => {
+    setIsRootLayoutReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (isRootLayoutReady || !isThemeLoaded || isRestoringSession) {
+      return undefined;
+    }
+    // Fallback for non-layout test environments so SplashScreen.hideAsync always completes
+    const timer = setTimeout(() => {
+      setIsRootLayoutReady(true);
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [isRootLayoutReady, isThemeLoaded, isRestoringSession]);
 
   useEffect(() => {
     if (hasHiddenSplashRef.current) return;
-    if (isThemeLoaded && !isRestoringSession) {
+    if (isThemeLoaded && !isRestoringSession && isRootLayoutReady) {
       hasHiddenSplashRef.current = true;
       if (typeof SplashScreen?.hideAsync === 'function') {
         SplashScreen.hideAsync().catch(() => {});
       }
     }
-  }, [isThemeLoaded, isRestoringSession]);
+  }, [isThemeLoaded, isRestoringSession, isRootLayoutReady]);
 
+  let content;
   if (isRestoringSession) {
-    return (
+    content = (
       <SafeAreaView
         edges={['top', 'bottom', 'left', 'right']}
         style={[
@@ -1693,18 +1749,25 @@ function AuthRootGate() {
         </View>
       </SafeAreaView>
     );
-  }
-
-  if (!isAuthenticated) {
-    return <AuthScreen />;
+  } else if (!isAuthenticated) {
+    content = <AuthScreen />;
+  } else {
+    content = (
+      <ProjectProvider>
+        <WorkspaceProvider>
+          <QavoraQAShell />
+        </WorkspaceProvider>
+      </ProjectProvider>
+    );
   }
 
   return (
-    <ProjectProvider>
-      <WorkspaceProvider>
-        <QavoraQAShell />
-      </WorkspaceProvider>
-    </ProjectProvider>
+    <View
+      onLayout={handleRootLayout}
+      style={[styles.safeRoot, { backgroundColor: colors.background }]}
+    >
+      {content}
+    </View>
   );
 }
 

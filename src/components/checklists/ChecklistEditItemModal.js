@@ -29,17 +29,26 @@ export default function ChecklistEditItemModal({
   setEditItemPriority,
   editItemNotes,
   setEditItemNotes,
+  editItemError,
+  setEditItemError,
   handleSaveEditedItem,
   busyMutation,
 }) {
   const { colors } = useTheme();
+  const handleClose = () => {
+    if (busyMutation) return;
+    if (typeof setEditItemError === 'function') {
+      setEditItemError(null);
+    }
+    setEditingItem(null);
+  };
 
   return (
     <Modal
       visible={Boolean(editingItem)}
       transparent
       animationType="fade"
-      onRequestClose={() => !busyMutation && setEditingItem(null)}
+      onRequestClose={handleClose}
     >
       <KeyboardAvoidingView
         accessibilityViewIsModal={true}
@@ -63,13 +72,34 @@ export default function ChecklistEditItemModal({
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
+            {editItemError ? (
+              <View
+                style={[
+                  styles.errorAlert,
+                  {
+                    backgroundColor: colors.dangerSoft,
+                    borderColor: colors.danger,
+                  },
+                ]}
+              >
+                <Text style={[styles.errorAlertText, { color: colors.danger }]}>
+                  {editItemError}
+                </Text>
+              </View>
+            ) : null}
+
             <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
               Step Title *
             </Text>
             <TextInput
               ref={editItemTitleRef}
               value={editItemTitle}
-              onChangeText={setEditItemTitle}
+              onChangeText={(val) => {
+                setEditItemTitle(val);
+                if (editItemError && typeof setEditItemError === 'function') {
+                  setEditItemError(null);
+                }
+              }}
               editable={!busyMutation}
               accessibilityLabel="Step Title, required"
               returnKeyType="next"
@@ -222,7 +252,7 @@ export default function ChecklistEditItemModal({
             ]}
           >
             <Pressable
-              onPress={() => !busyMutation && setEditingItem(null)}
+              onPress={handleClose}
               disabled={busyMutation}
               accessibilityRole="button"
               accessibilityState={{ disabled: Boolean(busyMutation) }}

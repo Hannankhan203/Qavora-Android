@@ -27,7 +27,6 @@ export default function DefectDetailModal({
   setSelectedTestCaseId,
   setSelectedTestRunId,
   setActiveTab,
-  setDefectPendingDelete,
   onRequestDeleteDefect,
   openEditDefectForm,
 }) {
@@ -611,9 +610,6 @@ export default function DefectDetailModal({
                     if (isUpdatingStatus) return;
                     if (typeof onRequestDeleteDefect === 'function') {
                       onRequestDeleteDefect(viewingDefect);
-                    } else if (typeof setDefectPendingDelete === 'function') {
-                      closeDetailModal();
-                      setDefectPendingDelete(viewingDefect);
                     }
                   }}
                 >

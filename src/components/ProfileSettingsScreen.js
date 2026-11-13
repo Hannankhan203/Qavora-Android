@@ -13,7 +13,10 @@ import {
 import { useTheme, monoFontFamily } from '../theme/theme';
 import { useAuth } from '../context/AuthContext';
 import { useProjects } from '../context/ProjectContext';
-import { useWorkspace } from '../context/WorkspaceContext';
+import {
+  useWorkspace,
+  useWorkspaceMutationLock,
+} from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
 
 export default function ProfileSettingsScreen() {
@@ -49,7 +52,13 @@ export default function ProfileSettingsScreen() {
   );
   const [defaultBuild, setDefaultBuild] = useState(profile.defaultBuild || '');
   const [verifyingSession, setVerifyingSession] = useState(false);
+  const [sessionFeedback, setSessionFeedback] = useState(null);
   const [profileFeedback, setProfileFeedback] = useState(null);
+
+  useWorkspaceMutationLock(
+    isSavingProfile || verifyingSession,
+    'profile-settings'
+  );
 
   const scrollViewRef = useRef(null);
   const settingsCardYRef = useRef(260);
@@ -71,25 +80,28 @@ export default function ProfileSettingsScreen() {
     }, 80);
   }, []);
 
+  const selectedProjectId = selectedProject ? selectedProject.id : null;
+  const selectedProjectName = selectedProject ? selectedProject.name : '';
+  const selectedProjectVersion = selectedProject
+    ? selectedProject.version
+    : '';
+  const selectedProjectUpdatedAt = selectedProject
+    ? selectedProject.updatedAt
+    : '';
+
   useEffect(() => {
     setTesterName(profile.testerName || '');
     setRole(profile.role || '');
-    setProjectName(
-      (selectedProject && selectedProject.name) || profile.projectName || ''
-    );
-    setTargetVersion(
-      (selectedProject && selectedProject.version) ||
-        profile.targetVersion ||
-        ''
-    );
+    setProjectName(selectedProjectName || profile.projectName || '');
+    setTargetVersion(selectedProjectVersion || profile.targetVersion || '');
     setDefaultDevice(profile.defaultDevice || '');
     setDefaultBuild(profile.defaultBuild || '');
   }, [
     profile,
-    selectedProject && selectedProject.id,
-    selectedProject && selectedProject.name,
-    selectedProject && selectedProject.version,
-    selectedProject && selectedProject.updatedAt,
+    selectedProjectId,
+    selectedProjectName,
+    selectedProjectVersion,
+    selectedProjectUpdatedAt,
   ]);
 
   const handleSaveSettings = async () => {
@@ -130,11 +142,42 @@ export default function ProfileSettingsScreen() {
   };
 
   const handleVerifySession = async () => {
+    if (verifyingSession || isAuthBusy) return;
     setVerifyingSession(true);
+    setSessionFeedback(null);
     try {
       const res = await refreshCurrentUser();
-      if (res && res.ok && showToast) {
-        showToast(`Session verified for ${res.user.email}`, 'success');
+      if (res && res.ok) {
+        const verifiedEmail =
+          (res.user && res.user.email) || (user && user.email) || 'account';
+        setSessionFeedback({
+          tone: 'success',
+          message: `Session verified for ${verifiedEmail}.`,
+        });
+        if (showToast) {
+          showToast(`Session verified for ${verifiedEmail}`, 'success');
+        }
+      } else {
+        const errMsg =
+          (res && res.error) ||
+          'Failed to verify active session. Please check your connection or sign in again.';
+        setSessionFeedback({
+          tone: 'danger',
+          message: errMsg,
+        });
+        if (showToast) {
+          showToast(errMsg, 'danger');
+        }
+      }
+    } catch (err) {
+      const errMsg =
+        (err && err.message) || 'Failed to verify active session.';
+      setSessionFeedback({
+        tone: 'danger',
+        message: errMsg,
+      });
+      if (showToast) {
+        showToast(errMsg, 'danger');
       }
     } finally {
       setVerifyingSession(false);
@@ -413,6 +456,40 @@ export default function ProfileSettingsScreen() {
                   {isAuthBusy ? 'Signing out...' : 'Sign Out'}
                 </Text>
               </Pressable>
+            </View>
+          ) : null}
+
+          {user && sessionFeedback ? (
+            <View
+              style={[
+                styles.feedbackBanner,
+                {
+                  marginTop: 10,
+                  marginBottom: 0,
+                  backgroundColor:
+                    sessionFeedback.tone === 'danger'
+                      ? colors.dangerSoft
+                      : colors.successSoft,
+                  borderColor:
+                    sessionFeedback.tone === 'danger'
+                      ? colors.danger
+                      : colors.success,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.feedbackBannerText,
+                  {
+                    color:
+                      sessionFeedback.tone === 'danger'
+                        ? colors.danger
+                        : colors.success,
+                  },
+                ]}
+              >
+                {sessionFeedback.message}
+              </Text>
             </View>
           ) : null}
         </View>

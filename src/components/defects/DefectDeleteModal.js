@@ -12,7 +12,6 @@ import styles from './defectsStyles';
 export default function DefectDeleteModal({
   theme,
   defectPendingDelete,
-  setDefectPendingDelete,
   isDeletingDefect,
   handleConfirmDeleteDefect,
   defectDeleteError,
@@ -22,8 +21,6 @@ export default function DefectDeleteModal({
     if (isDeletingDefect) return;
     if (typeof onCancelDeleteDefect === 'function') {
       onCancelDeleteDefect();
-    } else if (typeof setDefectPendingDelete === 'function') {
-      setDefectPendingDelete(null);
     }
   };
 

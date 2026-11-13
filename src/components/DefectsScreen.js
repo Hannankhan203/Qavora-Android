@@ -14,6 +14,7 @@ import { useTheme, monoFontFamily } from '../theme/theme';
 import {
   useWorkspace,
   useWorkspaceBackOverlay,
+  useWorkspaceMutationLock,
 } from '../context/WorkspaceContext';
 import {
   DEFECT_SEVERITIES,
@@ -318,6 +319,11 @@ export default function DefectsScreen() {
 
   // Status update in detail modal
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+
+  useWorkspaceMutationLock(
+    isSubmittingDefect || isDeletingDefect || isUpdatingStatus,
+    'defects-screen'
+  );
 
   const closeDetailModal = useCallback(() => {
     if (isUpdatingStatus) return;
@@ -679,7 +685,7 @@ export default function DefectsScreen() {
       const targetId = defectPendingDelete.id;
       const targetDisplay =
         defectPendingDelete.defectId || defectPendingDelete.id;
-      const res = await deleteDefect(targetId);
+      const res = await deleteDefect(targetId, { silentToast: true });
       if (!res?.ok) {
         const errMsg = res?.error || 'Failed to delete defect.';
         setDefectDeleteError(errMsg);
@@ -692,6 +698,10 @@ export default function DefectsScreen() {
         setDefectPendingDelete(null);
         showFeedback('success', `Deleted defect ${targetDisplay}.`);
       }
+    } catch (err) {
+      const errMsg = (err && err.message) || 'Failed to delete defect.';
+      setDefectDeleteError(errMsg);
+      showFeedback('error', errMsg);
     } finally {
       setIsDeletingDefect(false);
     }
@@ -1295,7 +1305,6 @@ export default function DefectsScreen() {
         setSelectedTestCaseId={setSelectedTestCaseId}
         setSelectedTestRunId={setSelectedTestRunId}
         setActiveTab={setActiveTab}
-        setDefectPendingDelete={setDefectPendingDelete}
         onRequestDeleteDefect={handleRequestDeleteFromDetail}
         openEditDefectForm={openEditDefectForm}
       />
@@ -1349,7 +1358,6 @@ export default function DefectsScreen() {
       <DefectDeleteModal
         theme={theme}
         defectPendingDelete={defectPendingDelete}
-        setDefectPendingDelete={setDefectPendingDelete}
         isDeletingDefect={isDeletingDefect}
         defectDeleteError={defectDeleteError}
         onCancelDeleteDefect={handleCancelDeleteDefect}

@@ -13,6 +13,7 @@ import { useTheme, monoFontFamily } from '../theme/theme';
 import {
   useWorkspace,
   useWorkspaceBackOverlay,
+  useWorkspaceMutationLock,
 } from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
 import styles from './testCases/testCasesStyles';
@@ -641,6 +642,19 @@ export default function TestCasesScreen({
   const [isDeletingPhase, setIsDeletingPhase] = useState(false);
   const [phaseDeleteError, setPhaseDeleteError] = useState('');
 
+  useWorkspaceMutationLock(
+    isSubmittingCase ||
+      isMovingCase ||
+      isDeletingCase ||
+      isSubmittingSuite ||
+      isDeletingSuite ||
+      isSubmittingPlan ||
+      isSubmittingPhase ||
+      isDeletingPhase ||
+      isMutatingCaseDetail,
+    'testcases-screen'
+  );
+
   useWorkspaceBackOverlay(() => {
     if (deletingCase) {
       if (!isDeletingCase) {
@@ -1001,12 +1015,14 @@ export default function TestCasesScreen({
 
   const openMoveCaseModal = useCallback(
     (tc) => {
+      if (!tc) return;
       const otherSuite = suites.find((s) => s.id !== tc.suiteId) || suites[0];
+      setSelectedTestCaseId(null);
       setCaseMoveError('');
       setMovingCase(tc);
       setMoveTargetSuiteId(otherSuite ? otherSuite.id : tc.suiteId);
     },
-    [suites]
+    [suites, setSelectedTestCaseId]
   );
 
   const handleCancelMoveCase = useCallback(() => {
@@ -1025,22 +1041,31 @@ export default function TestCasesScreen({
     setCaseMoveError('');
     setIsMovingCase(true);
     try {
-      const res = await moveTestCaseToSuite(movingCase.id, moveTargetSuiteId);
+      const res = await moveTestCaseToSuite(movingCase.id, moveTargetSuiteId, {
+        silentToast: true,
+      });
       if (res && res.ok) {
         setCaseMoveError('');
         setMovingCase(null);
       } else {
         setCaseMoveError((res && res.error) || 'Failed to move test case.');
       }
+    } catch (err) {
+      setCaseMoveError((err && err.message) || 'Failed to move test case.');
     } finally {
       setIsMovingCase(false);
     }
   };
 
-  const openDeleteCaseConfirm = useCallback((tc) => {
-    setCaseDeleteError('');
-    setDeletingCase(tc);
-  }, []);
+  const openDeleteCaseConfirm = useCallback(
+    (tc) => {
+      if (!tc) return;
+      setSelectedTestCaseId(null);
+      setCaseDeleteError('');
+      setDeletingCase(tc);
+    },
+    [setSelectedTestCaseId]
+  );
 
   const handleCancelDeleteCase = useCallback(() => {
     if (isDeletingCase) return;
@@ -1053,13 +1078,15 @@ export default function TestCasesScreen({
     setCaseDeleteError('');
     setIsDeletingCase(true);
     try {
-      const res = await deleteTestCase(deletingCase.id);
+      const res = await deleteTestCase(deletingCase.id, { silentToast: true });
       if (res && res.ok) {
         setCaseDeleteError('');
         setDeletingCase(null);
       } else {
         setCaseDeleteError((res && res.error) || 'Failed to delete test case.');
       }
+    } catch (err) {
+      setCaseDeleteError((err && err.message) || 'Failed to delete test case.');
     } finally {
       setIsDeletingCase(false);
     }
@@ -1179,7 +1206,10 @@ export default function TestCasesScreen({
         suiteDeleteMode === 'move' && suiteDeleteTargetId
           ? suiteDeleteTargetId
           : null;
-      const res = await deleteSuite(targetId, { moveCasesToSuiteId });
+      const res = await deleteSuite(targetId, {
+        moveCasesToSuiteId,
+        silentToast: true,
+      });
       if (res && res.ok) {
         if (selectedSuiteId === targetId) {
           setSelectedSuiteId(moveCasesToSuiteId || 'all');
@@ -1191,6 +1221,8 @@ export default function TestCasesScreen({
           (res && res.error) || 'Failed to delete test suite.'
         );
       }
+    } catch (err) {
+      setSuiteDeleteError((err && err.message) || 'Failed to delete test suite.');
     } finally {
       setIsDeletingSuite(false);
     }
@@ -1321,7 +1353,9 @@ export default function TestCasesScreen({
     setPhaseDeleteError('');
     setIsDeletingPhase(true);
     try {
-      const res = await deleteTestPlanPhase(deletingPhase.id);
+      const res = await deleteTestPlanPhase(deletingPhase.id, {
+        silentToast: true,
+      });
       if (res && res.ok) {
         setPhaseDeleteError('');
         setDeletingPhase(null);
@@ -1330,6 +1364,10 @@ export default function TestCasesScreen({
           (res && res.error) || 'Failed to delete testing phase.'
         );
       }
+    } catch (err) {
+      setPhaseDeleteError(
+        (err && err.message) || 'Failed to delete testing phase.'
+      );
     } finally {
       setIsDeletingPhase(false);
     }

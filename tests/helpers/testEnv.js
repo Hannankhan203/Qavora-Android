@@ -446,6 +446,34 @@ mock.module('react-native', () => {
   return {
     Platform: { OS: 'android', select: (obj) => obj.android ?? obj.default },
     useColorScheme: () => 'light',
+    useWindowDimensions: () => ({ width: 390, height: 844, scale: 2, fontScale: 1 }),
+    Animated: {
+      Value: class FakeAnimatedValue {
+        constructor(v = 0) {
+          this._value = v;
+        }
+        setValue(v) {
+          this._value = v;
+        }
+        interpolate() {
+          return this;
+        }
+      },
+      timing: (val, cfg = {}) => ({
+        start: (cb) => {
+          if (val && typeof val.setValue === 'function' && cfg.toValue !== undefined) {
+            val.setValue(cfg.toValue);
+          }
+          if (typeof cb === 'function') cb({ finished: true });
+        },
+        stop: () => {},
+      }),
+      View: Host('rn-animated-view'),
+      Text: Host('rn-animated-text'),
+    },
+    PanResponder: {
+      create: () => ({ panHandlers: {} }),
+    },
     StyleSheet: {
       create: (styles) => styles,
       flatten: (s) => (Array.isArray(s) ? Object.assign({}, ...s.filter(Boolean)) : s || {}),

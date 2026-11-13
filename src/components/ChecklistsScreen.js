@@ -18,6 +18,7 @@ import { useProjects } from '../context/ProjectContext';
 import {
   useWorkspace,
   useWorkspaceBackOverlay,
+  useWorkspaceMutationLock,
 } from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
 import styles from './checklists/checklistsStyles';
@@ -542,6 +543,7 @@ export default function ChecklistsScreen({
   // New item composer inside active checklist detail
   const [newItemTitle, setNewItemTitle] = useState('');
   const [newItemPriority, setNewItemPriority] = useState('Medium');
+  const [newItemCategory, setNewItemCategory] = useState('General QA');
   const [newItemNotes, setNewItemNotes] = useState('');
 
   // Edit existing item modal state
@@ -550,6 +552,7 @@ export default function ChecklistsScreen({
   const [editItemPriority, setEditItemPriority] = useState('Medium');
   const [editItemCategory, setEditItemCategory] = useState('General QA');
   const [editItemNotes, setEditItemNotes] = useState('');
+  const [editItemError, setEditItemError] = useState(null);
 
   // Create / Edit Checklist Modal state (Synchronized with centralized create_checklist destination)
   const [formModalVisible, setFormModalVisibleState] = useState(false);
@@ -604,6 +607,11 @@ export default function ChecklistsScreen({
   const [promoteError, setPromoteError] = useState(null);
   const [promoteSuccessResult, setPromoteSuccessResult] = useState(null);
 
+  useWorkspaceMutationLock(
+    busyMutation || Boolean(busyItemId) || isPromoting,
+    'checklists-screen'
+  );
+
   useWorkspaceBackOverlay(() => {
     if (deleteTargetChecklist) {
       if (!busyMutation) {
@@ -617,7 +625,10 @@ export default function ChecklistsScreen({
       return true;
     }
     if (editingItem) {
-      if (!busyMutation) setEditingItem(null);
+      if (!busyMutation) {
+        setEditItemError(null);
+        setEditingItem(null);
+      }
       return true;
     }
     if (formModalVisible) {
@@ -1005,6 +1016,7 @@ export default function ChecklistsScreen({
     setActiveChecklistId(checklist.id);
     setItemFilterMode('all');
     setNewItemTitle('');
+    setNewItemCategory(checklist.category || 'General QA');
     setNewItemNotes('');
 
     if (!isOfflineMode && currentUserId) {
@@ -1427,7 +1439,7 @@ export default function ChecklistsScreen({
       id: `chk_item_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       title: cleanTitle,
       priority: newItemPriority,
-      category: activeChecklist.category || 'General QA',
+      category: newItemCategory || activeChecklist.category || 'General QA',
       notes: newItemNotes.trim(),
       completed: false,
     };
@@ -1469,10 +1481,13 @@ export default function ChecklistsScreen({
   // Open Edit Item modal
   const openEditItemModal = (item) => {
     if (!item) return;
+    setEditItemError(null);
     setEditingItem(item);
     setEditItemTitle(item.title || '');
     setEditItemPriority(item.priority || 'Medium');
-    setEditItemCategory(item.category || 'General QA');
+    setEditItemCategory(
+      item.category || activeChecklist?.category || 'General QA'
+    );
     setEditItemNotes(item.notes || '');
   };
 
@@ -1482,11 +1497,15 @@ export default function ChecklistsScreen({
       return;
     }
     const cleanTitle = editItemTitle.trim();
-    if (!cleanTitle) return;
+    if (!cleanTitle) {
+      setEditItemError('Step title is required.');
+      return;
+    }
 
     Keyboard.dismiss();
     mutationLockRef.current = true;
     setBusyMutation(true);
+    setEditItemError(null);
 
     try {
       const itemUpdates = {
@@ -1503,13 +1522,14 @@ export default function ChecklistsScreen({
         { userId: currentUserId }
       );
 
-      if (res.ok && res.checklist) {
+      if (res && res.ok && res.checklist) {
         syncChecklistsState(
           checklists.map((c) =>
             c.id === activeChecklist.id ? res.checklist : c
           ),
           false
         );
+        setEditItemError(null);
         setEditingItem(null);
         if (res.queuedOffline) {
           setIsFromOfflineCache(true);
@@ -1523,7 +1543,21 @@ export default function ChecklistsScreen({
           );
         }
       } else {
-        setErrorBanner(res.error || 'Failed to update checklist item.');
+        const errMsg =
+          (res && res.error) || 'Failed to update checklist item.';
+        setEditItemError(errMsg);
+        setErrorBanner(errMsg);
+        if (showToast) {
+          showToast(errMsg, 'danger');
+        }
+      }
+    } catch (err) {
+      const errMsg =
+        (err && err.message) || 'Failed to update checklist item.';
+      setEditItemError(errMsg);
+      setErrorBanner(errMsg);
+      if (showToast) {
+        showToast(errMsg, 'danger');
       }
     } finally {
       mutationLockRef.current = false;
@@ -2426,9 +2460,14 @@ export default function ChecklistsScreen({
                   return (
                     <Pressable
                       key={prio}
+                      disabled={busyMutation}
                       onPress={() => setNewItemPriority(prio)}
                       accessibilityRole="radio"
-                      accessibilityState={{ selected: active, checked: active }}
+                      accessibilityState={{
+                        selected: active,
+                        checked: active,
+                        disabled: Boolean(busyMutation),
+                      }}
                       accessibilityLabel={`New step priority: ${prio}`}
                       style={[
                         styles.miniPill,
@@ -2457,10 +2496,59 @@ export default function ChecklistsScreen({
                 })}
               </View>
 
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                onTouchStart={notifyBlockedSwipeTouchStart}
+                contentContainerStyle={styles.horizontalPillsRow}
+                accessibilityRole="radiogroup"
+              >
+                {CHECKLIST_CATEGORIES.map((cat) => {
+                  const active = newItemCategory === cat;
+                  return (
+                    <Pressable
+                      key={cat}
+                      disabled={busyMutation}
+                      onPress={() => setNewItemCategory(cat)}
+                      accessibilityRole="radio"
+                      accessibilityState={{
+                        selected: active,
+                        checked: active,
+                        disabled: Boolean(busyMutation),
+                      }}
+                      accessibilityLabel={`New step category: ${cat}`}
+                      style={[
+                        styles.miniPill,
+                        {
+                          backgroundColor: active
+                            ? colors.primary
+                            : colors.background,
+                          borderColor: active ? colors.primary : colors.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.miniPillText,
+                          {
+                            color: active
+                              ? colors.textOnPrimary
+                              : colors.textSecondary,
+                          },
+                        ]}
+                      >
+                        {cat}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+
               <TextInput
                 ref={newItemNotesRef}
                 value={newItemNotes}
                 onChangeText={setNewItemNotes}
+                editable={!busyMutation}
                 placeholder="Optional verification note / expected outcome..."
                 placeholderTextColor={colors.textMuted}
                 accessibilityLabel="Optional verification note or expected outcome"
@@ -2613,6 +2701,8 @@ export default function ChecklistsScreen({
           setEditItemPriority={setEditItemPriority}
           editItemNotes={editItemNotes}
           setEditItemNotes={setEditItemNotes}
+          editItemError={editItemError}
+          setEditItemError={setEditItemError}
           handleSaveEditedItem={handleSaveEditedItem}
           busyMutation={busyMutation}
         />

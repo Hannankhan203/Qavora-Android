@@ -14,6 +14,7 @@ import { useTheme, monoFontFamily } from '../theme/theme';
 import {
   useWorkspace,
   useWorkspaceBackOverlay,
+  useWorkspaceMutationLock,
   computeRunMetrics,
   toWebExecutionOutcome,
 } from '../context/WorkspaceContext';
@@ -222,6 +223,12 @@ const ExecutionCaseRowCard = React.memo(function ExecutionCaseRowCard({
             Executed {formatShortTimestamp(tc.runResult.executedAt)} by{' '}
             {tc.runResult.tester || 'QA Engineer'} •{' '}
             {tc.runResult.environment || activeRun.environment || 'Staging'}
+            {tc.runResult.device || activeRun?.deviceInfo
+              ? ` • ${tc.runResult.device || activeRun?.deviceInfo}`
+              : ''}
+            {tc.runResult.buildVersion || activeRun?.buildVersion
+              ? ` • Build ${tc.runResult.buildVersion || activeRun?.buildVersion}`
+              : ''}
           </Text>
         ) : null}
 
@@ -708,6 +715,14 @@ export default function TestRunsScreen({
   // Run status mutation state
   const [isTogglingRunStatus, setIsTogglingRunStatus] = useState(false);
 
+  useWorkspaceMutationLock(
+    isSubmittingExec ||
+      isSubmittingRun ||
+      isDeletingRun ||
+      isTogglingRunStatus,
+    'testruns-screen'
+  );
+
   useWorkspaceBackOverlay(() => {
     if (runPendingDelete) {
       if (!isDeletingRun) {
@@ -1167,7 +1182,9 @@ export default function TestRunsScreen({
     setRunDeleteError('');
     try {
       const targetName = runPendingDelete.name;
-      const res = await deleteTestRun(runPendingDelete.id);
+      const res = await deleteTestRun(runPendingDelete.id, {
+        silentToast: true,
+      });
       if (!res?.ok) {
         const errMsg = res?.error || 'Failed to delete test run.';
         setRunDeleteError(errMsg);
@@ -1177,6 +1194,10 @@ export default function TestRunsScreen({
         setRunPendingDelete(null);
         showFeedback('success', `Deleted test run "${targetName}".`);
       }
+    } catch (err) {
+      const errMsg = (err && err.message) || 'Failed to delete test run.';
+      setRunDeleteError(errMsg);
+      showFeedback('error', errMsg);
     } finally {
       setIsDeletingRun(false);
     }

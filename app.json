@@ -5,6 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/qavora-icon-512.png",
+    "backgroundColor": "#F8FAFC",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true

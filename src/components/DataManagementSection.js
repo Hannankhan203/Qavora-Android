@@ -35,6 +35,7 @@ import { useProjects } from '../context/ProjectContext.js';
 import {
   useWorkspace,
   useWorkspaceBackOverlay,
+  useWorkspaceMutationLock,
 } from '../context/WorkspaceContext.js';
 import {
   exportProjectAsJSON,
@@ -169,6 +170,11 @@ export default function DataManagementSection() {
 
   // Sync busy indicator
   const [isManualSyncing, setIsManualSyncing] = useState(false);
+
+  useWorkspaceMutationLock(
+    isExporting || isImporting || isExecutingConfirmAction || isManualSyncing,
+    'data-management'
+  );
 
   const scrollViewRef = useRef(null);
   const importCardYRef = useRef(0);
@@ -2530,6 +2536,7 @@ export default function DataManagementSection() {
                 onPress={handleShareFromExportPreview}
                 disabled={isExporting}
                 accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isExporting) }}
                 accessibilityLabel="Share or save exported file"
                 style={[
                   styles.primaryBtn,
@@ -2719,10 +2726,12 @@ export default function DataManagementSection() {
             <View style={styles.modeSelectorCol} accessibilityRole="radiogroup">
               <Pressable
                 onPress={() => setImportMode('merge')}
+                disabled={isImporting}
                 accessibilityRole="radio"
                 accessibilityState={{
                   selected: importMode === 'merge',
                   checked: importMode === 'merge',
+                  disabled: Boolean(isImporting),
                 }}
                 accessibilityLabel="Safe Merge import mode"
                 style={[
@@ -2761,10 +2770,12 @@ export default function DataManagementSection() {
 
               <Pressable
                 onPress={() => setImportMode('replace')}
+                disabled={isImporting}
                 accessibilityRole="radio"
                 accessibilityState={{
                   selected: importMode === 'replace',
                   checked: importMode === 'replace',
+                  disabled: Boolean(isImporting),
                 }}
                 accessibilityLabel="Destructive Replace import mode"
                 style={[
@@ -2808,6 +2819,7 @@ export default function DataManagementSection() {
                 onPress={handleExecuteImport}
                 disabled={isImporting}
                 accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isImporting) }}
                 accessibilityLabel={
                   importMode === 'replace'
                     ? 'Confirm Destructive Replace'
@@ -2836,9 +2848,10 @@ export default function DataManagementSection() {
               </Pressable>
 
               <Pressable
-                onPress={() => setImportPreview(null)}
+                onPress={() => !isImporting && setImportPreview(null)}
                 disabled={isImporting}
                 accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isImporting) }}
                 accessibilityLabel="Cancel import"
                 style={[
                   styles.secondaryBtn,
@@ -2906,7 +2919,11 @@ export default function DataManagementSection() {
               {confirmActionModal?.type === 'workspace_reset' ? (
                 <Pressable
                   onPress={handleExportFullBackupJSON}
+                  disabled={isExecutingConfirmAction || isExporting}
                   accessibilityRole="button"
+                  accessibilityState={{
+                    disabled: Boolean(isExecutingConfirmAction || isExporting),
+                  }}
                   accessibilityLabel="Download Full Backup First"
                   style={[
                     styles.secondaryBtn,
@@ -2949,6 +2966,9 @@ export default function DataManagementSection() {
                 onPress={handleConfirmProtectedAction}
                 disabled={isExecutingConfirmAction}
                 accessibilityRole="button"
+                accessibilityState={{
+                  disabled: Boolean(isExecutingConfirmAction),
+                }}
                 accessibilityLabel="Confirm and Proceed"
                 style={[
                   styles.primaryBtn,

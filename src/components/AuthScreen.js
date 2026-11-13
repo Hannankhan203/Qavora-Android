@@ -7,7 +7,7 @@
  * Keyboard & Error UX Guarantees (MEDIUM-3):
  * - Keyboard-aware layout and automatic scroll-to-focused-input on narrow Android screens (360dp).
  * - Full Next/Done return-key navigation across Login and Registration fields.
- * - Inline + label-row password visibility toggles accessible while the keyboard is open.
+ * - Single inline password visibility toggle per password field, reset on mode switch & submit.
  * - Password-manager and autofill compatibility (`autoComplete`, `textContentType`, `importantForAutofill`).
  * - Field-level validation feedback + sanitized user-facing error messages via `formatAuthErrorMessage`.
  */
@@ -269,6 +269,9 @@ export default function AuthScreen() {
     (nextMode) => {
       Keyboard.dismiss();
       setMode(nextMode);
+      setShowLoginPassword(false);
+      setShowRegisterPassword(false);
+      setShowRegisterConfirmPassword(false);
       setLocalError(null);
       setFieldErrors({});
       clearAuthFeedback();
@@ -298,6 +301,8 @@ export default function AuthScreen() {
       setLocalError(nextFieldErrors.email || nextFieldErrors.password);
       return;
     }
+
+    setShowLoginPassword(false);
 
     const result = await login({
       email: trimmedEmail,
@@ -344,6 +349,9 @@ export default function AuthScreen() {
       setLocalError(firstError);
       return;
     }
+
+    setShowRegisterPassword(false);
+    setShowRegisterConfirmPassword(false);
 
     const result = await register({
       name: trimmedName,
@@ -731,6 +739,7 @@ export default function AuthScreen() {
                         onBlur={() => handleFieldBlur('loginPassword')}
                         placeholder="Enter your password"
                         placeholderTextColor={colors.textMuted}
+                        accessibilityLabel="Login password"
                         secureTextEntry={!showLoginPassword}
                         autoCapitalize="none"
                         autoCorrect={false}
@@ -745,14 +754,19 @@ export default function AuthScreen() {
                       />
                       <Pressable
                         onPress={() => setShowLoginPassword((prev) => !prev)}
+                        disabled={isLoading}
                         hitSlop={8}
                         accessibilityRole="button"
+                        accessibilityState={{ disabled: Boolean(isLoading) }}
                         accessibilityLabel={
                           showLoginPassword ? 'Hide password' : 'Show password'
                         }
                         style={[
                           styles.inlinePasswordToggleBtn,
-                          { borderLeftColor: colors.border },
+                          {
+                            borderLeftColor: colors.border,
+                            opacity: isLoading ? 0.5 : 1,
+                          },
                         ]}
                       >
                         <Text
@@ -1067,6 +1081,7 @@ export default function AuthScreen() {
                         onBlur={() => handleFieldBlur('registerPassword')}
                         placeholder="At least 8 characters"
                         placeholderTextColor={colors.textMuted}
+                        accessibilityLabel="Create password"
                         secureTextEntry={!showRegisterPassword}
                         autoCapitalize="none"
                         autoCorrect={false}
@@ -1087,14 +1102,19 @@ export default function AuthScreen() {
                         onPress={() =>
                           setShowRegisterPassword((prev) => !prev)
                         }
+                        disabled={isLoading}
                         hitSlop={8}
                         accessibilityRole="button"
+                        accessibilityState={{ disabled: Boolean(isLoading) }}
                         accessibilityLabel={
                           showRegisterPassword ? 'Hide password' : 'Show password'
                         }
                         style={[
                           styles.inlinePasswordToggleBtn,
-                          { borderLeftColor: colors.border },
+                          {
+                            borderLeftColor: colors.border,
+                            opacity: isLoading ? 0.5 : 1,
+                          },
                         ]}
                       >
                         <Text
@@ -1161,6 +1181,7 @@ export default function AuthScreen() {
                         }
                         placeholder="Re-enter your password"
                         placeholderTextColor={colors.textMuted}
+                        accessibilityLabel="Confirm Password"
                         secureTextEntry={!showRegisterConfirmPassword}
                         autoCapitalize="none"
                         autoCorrect={false}
@@ -1177,8 +1198,10 @@ export default function AuthScreen() {
                         onPress={() =>
                           setShowRegisterConfirmPassword((prev) => !prev)
                         }
+                        disabled={isLoading}
                         hitSlop={8}
                         accessibilityRole="button"
+                        accessibilityState={{ disabled: Boolean(isLoading) }}
                         accessibilityLabel={
                           showRegisterConfirmPassword
                             ? 'Hide confirm password'
@@ -1186,7 +1209,10 @@ export default function AuthScreen() {
                         }
                         style={[
                           styles.inlinePasswordToggleBtn,
-                          { borderLeftColor: colors.border },
+                          {
+                            borderLeftColor: colors.border,
+                            opacity: isLoading ? 0.5 : 1,
+                          },
                         ]}
                       >
                         <Text
@@ -1515,21 +1541,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 7,
     flexShrink: 1,
-  },
-  passwordHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  headerTogglePassBtn: {
-    paddingVertical: 2,
-    paddingHorizontal: 4,
-    marginBottom: 5,
-  },
-  togglePassText: {
-    fontSize: 12,
-    fontWeight: '700',
   },
   input: {
     minHeight: 48,

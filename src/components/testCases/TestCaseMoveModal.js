@@ -87,8 +87,13 @@ export default function TestCaseMoveModal({
                     <Pressable
                       key={s.id}
                       onPress={() => setMoveTargetSuiteId(s.id)}
+                      disabled={Boolean(isMovingCase)}
                       accessibilityRole="radio"
-                      accessibilityState={{ selected: active, checked: active }}
+                      accessibilityState={{
+                        selected: active,
+                        checked: active,
+                        disabled: Boolean(isMovingCase),
+                      }}
                       accessibilityLabel={`Destination suite: ${s.name}`}
                       style={[
                         styles.suiteSelectItem,

@@ -956,6 +956,31 @@ export async function processProjectSyncQueue(userId, options = {}) {
                 resolvedProjectId,
                 syncedProject.updatedAt
               );
+              const remainingQueue = await getPendingProjectOperations(targetUserId);
+              let queueTimestampUpdated = false;
+              const nextQueue = remainingQueue.map((queuedItem) => {
+                if (
+                  !queuedItem ||
+                  queuedItem.entityType === 'checklist' ||
+                  queuedItem.projectId !== resolvedProjectId ||
+                  queuedItem.operationType === 'CREATE' ||
+                  queuedItem.status === 'conflict' ||
+                  queuedItem.status === 'completed'
+                ) {
+                  return queuedItem;
+                }
+                if (queuedItem.expectedUpdatedAt === syncedProject.updatedAt) {
+                  return queuedItem;
+                }
+                queueTimestampUpdated = true;
+                return {
+                  ...queuedItem,
+                  expectedUpdatedAt: syncedProject.updatedAt,
+                };
+              });
+              if (queueTimestampUpdated) {
+                await savePendingProjectOperations(targetUserId, nextQueue);
+              }
             }
             updatedProjectsMap.set(syncedProject.id, syncedProject);
           }
@@ -1010,6 +1035,31 @@ export async function processProjectSyncQueue(userId, options = {}) {
               resolvedProjectId,
               recoveredProject.updatedAt
             );
+            const remainingQueue = await getPendingProjectOperations(targetUserId);
+            let queueTimestampUpdated = false;
+            const nextQueue = remainingQueue.map((queuedItem) => {
+              if (
+                !queuedItem ||
+                queuedItem.entityType === 'checklist' ||
+                queuedItem.projectId !== resolvedProjectId ||
+                queuedItem.operationType === 'CREATE' ||
+                queuedItem.status === 'conflict' ||
+                queuedItem.status === 'completed'
+              ) {
+                return queuedItem;
+              }
+              if (queuedItem.expectedUpdatedAt === recoveredProject.updatedAt) {
+                return queuedItem;
+              }
+              queueTimestampUpdated = true;
+              return {
+                ...queuedItem,
+                expectedUpdatedAt: recoveredProject.updatedAt,
+              };
+            });
+            if (queueTimestampUpdated) {
+              await savePendingProjectOperations(targetUserId, nextQueue);
+            }
           }
           updatedProjectsMap.set(recoveredProject.id, recoveredProject);
           synced += 1;

@@ -117,10 +117,12 @@ export default function ChecklistFormModal({
                 >
                   <Pressable
                     onPress={() => handleSelectStarterTemplate('none')}
+                    disabled={Boolean(busyMutation)}
                     accessibilityRole="radio"
                     accessibilityState={{
                       selected: formTemplateId === 'none',
                       checked: formTemplateId === 'none',
+                      disabled: Boolean(busyMutation),
                     }}
                     accessibilityLabel="Starter template: Blank Custom"
                     style={[
@@ -157,10 +159,12 @@ export default function ChecklistFormModal({
                       <Pressable
                         key={tpl.id}
                         onPress={() => handleSelectStarterTemplate(tpl.id)}
+                        disabled={Boolean(busyMutation)}
                         accessibilityRole="radio"
                         accessibilityState={{
                           selected: active,
                           checked: active,
+                          disabled: Boolean(busyMutation),
                         }}
                         accessibilityLabel={`Starter template: ${tpl.name} (${tpl.items.length} steps)`}
                         style={[
@@ -201,6 +205,7 @@ export default function ChecklistFormModal({
               ref={formTitleRef}
               value={formTitle}
               onChangeText={setFormTitle}
+              editable={!busyMutation}
               placeholder="e.g., Android v2.4 Release Readiness Checklist"
               placeholderTextColor={colors.textMuted}
               accessibilityLabel="Checklist Title, required"
@@ -225,6 +230,7 @@ export default function ChecklistFormModal({
               ref={formDescRef}
               value={formDescription}
               onChangeText={setFormDescription}
+              editable={!busyMutation}
               placeholder="Describe the verification scope and sign-off criteria..."
               placeholderTextColor={colors.textMuted}
               accessibilityLabel="Checklist Description"
@@ -260,8 +266,13 @@ export default function ChecklistFormModal({
                   <Pressable
                     key={cat}
                     onPress={() => setFormCategory(cat)}
+                    disabled={Boolean(busyMutation)}
                     accessibilityRole="radio"
-                    accessibilityState={{ selected: active, checked: active }}
+                    accessibilityState={{
+                      selected: active,
+                      checked: active,
+                      disabled: Boolean(busyMutation),
+                    }}
                     accessibilityLabel={`Checklist category: ${cat}`}
                     style={[
                       styles.filterPill,
@@ -303,8 +314,13 @@ export default function ChecklistFormModal({
                   <Pressable
                     key={prio}
                     onPress={() => setFormPriority(prio)}
+                    disabled={Boolean(busyMutation)}
                     accessibilityRole="radio"
-                    accessibilityState={{ selected: active, checked: active }}
+                    accessibilityState={{
+                      selected: active,
+                      checked: active,
+                      disabled: Boolean(busyMutation),
+                    }}
                     accessibilityLabel={`Checklist priority: ${prio}`}
                     style={[
                       styles.miniPill,
@@ -344,10 +360,12 @@ export default function ChecklistFormModal({
               {selectedProjectId ? (
                 <Pressable
                   onPress={() => setFormProjectScope('current')}
+                  disabled={Boolean(busyMutation)}
                   accessibilityRole="radio"
                   accessibilityState={{
                     selected: formProjectScope === 'current',
                     checked: formProjectScope === 'current',
+                    disabled: Boolean(busyMutation),
                   }}
                   accessibilityLabel={`Associate with project ${
                     selectedProject?.name || selectedProjectId
@@ -384,10 +402,12 @@ export default function ChecklistFormModal({
 
               <Pressable
                 onPress={() => setFormProjectScope('workspace')}
+                disabled={Boolean(busyMutation)}
                 accessibilityRole="radio"
                 accessibilityState={{
                   selected: formProjectScope === 'workspace',
                   checked: formProjectScope === 'workspace',
+                  disabled: Boolean(busyMutation),
                 }}
                 accessibilityLabel="Workspace-Wide (Standalone) scope"
                 style={[
@@ -431,6 +451,7 @@ export default function ChecklistFormModal({
                   ref={formEnvRef}
                   value={formEnvironment}
                   onChangeText={setFormEnvironment}
+                  editable={!busyMutation}
                   placeholder="Staging"
                   placeholderTextColor={colors.textMuted}
                   accessibilityLabel="Checklist Environment"
@@ -459,6 +480,7 @@ export default function ChecklistFormModal({
                   ref={formReleaseRef}
                   value={formTargetRelease}
                   onChangeText={setFormTargetRelease}
+                  editable={!busyMutation}
                   placeholder="v1.0.0"
                   placeholderTextColor={colors.textMuted}
                   accessibilityLabel="Checklist Target Release"
@@ -496,6 +518,7 @@ export default function ChecklistFormModal({
                   ref={formCustomItemsRef}
                   value={formCustomItemsText}
                   onChangeText={setFormCustomItemsText}
+                  editable={!busyMutation}
                   placeholder={
                     'Verify login session cookie persistence\nValidate CSRF header on mutations\nConfirm dark mode contrast'
                   }
@@ -526,9 +549,10 @@ export default function ChecklistFormModal({
             ]}
           >
             <Pressable
-              onPress={() => setFormModalVisible(false)}
+              onPress={() => !busyMutation && setFormModalVisible(false)}
               disabled={busyMutation}
               accessibilityRole="button"
+              accessibilityState={{ disabled: Boolean(busyMutation) }}
               accessibilityLabel="Cancel checklist form"
               style={[
                 styles.modalCancelBtn,
@@ -547,6 +571,7 @@ export default function ChecklistFormModal({
               onPress={handleSaveChecklistForm}
               disabled={busyMutation}
               accessibilityRole="button"
+              accessibilityState={{ disabled: Boolean(busyMutation) }}
               accessibilityLabel={
                 formMode === 'create' ? 'Create Checklist' : 'Save Changes'
               }

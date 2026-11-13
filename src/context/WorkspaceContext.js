@@ -138,11 +138,21 @@ export function WorkspaceProvider({ children }) {
   const defectSeqRef = useRef({});
   const prevResolvedUserIdRef = useRef(resolvedUserId);
 
-  const initialWorkspace = useMemo(
-    () => buildProjectWorkspaceState(selectedProject, null, user),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
-  );
+  const selectedProjectRef = useRef(selectedProject);
+  selectedProjectRef.current = selectedProject;
+  const userRef = useRef(user);
+  userRef.current = user;
+  const remappedProjectTransitionRef = useRef(null);
+
+  const initialWorkspaceRef = useRef(null);
+  if (!initialWorkspaceRef.current) {
+    initialWorkspaceRef.current = buildProjectWorkspaceState(
+      selectedProject,
+      null,
+      user
+    );
+  }
+  const initialWorkspace = initialWorkspaceRef.current;
 
   const [profile, setProfile] = useState(initialWorkspace.profile);
   const [testPlan, setTestPlan] = useState(initialWorkspace.testPlan);
@@ -330,6 +340,34 @@ export function WorkspaceProvider({ children }) {
     }
     return false;
   }, []);
+
+  // Track active screen/modal mutations so drawer, tabs, and hardware back do not interrupt in-flight writes
+  const activeUiMutationsRef = useRef(new Set());
+  const [hasActiveUiMutation, setHasActiveUiMutation] = useState(false);
+  const setUiMutationActive = useCallback((mutationKey, active) => {
+    const cleanKey = mutationKey ? String(mutationKey).trim() : '';
+    if (!cleanKey) return;
+    const activeSet = activeUiMutationsRef.current;
+    const prevSize = activeSet.size;
+    if (active) {
+      activeSet.add(cleanKey);
+    } else {
+      activeSet.delete(cleanKey);
+    }
+    if ((activeSet.size > 0) !== (prevSize > 0)) {
+      setHasActiveUiMutation(activeSet.size > 0);
+    }
+  }, []);
+
+  const isAnyMutationActive = Boolean(
+    isSyncingProjectData ||
+      isSavingProfile ||
+      isRestoringSampleData ||
+      isClearingWorkspaceData ||
+      hasActiveUiMutation
+  );
+  const isAnyMutationActiveRef = useRef(isAnyMutationActive);
+  isAnyMutationActiveRef.current = isAnyMutationActive;
 
   // Cross-module prefill state for creating a defect directly from a failed test case execution
   const [draftDefectFromExecution, setDraftDefectFromExecution] = useState(null);
@@ -947,6 +985,10 @@ export function WorkspaceProvider({ children }) {
         evt.newProjectId &&
         evt.oldProjectId !== evt.newProjectId
       ) {
+        remappedProjectTransitionRef.current = {
+          from: evt.oldProjectId,
+          to: evt.newProjectId,
+        };
         const oldScopedKey = getScopedProjectKey(
           evt.oldProjectId,
           resolvedUserId
@@ -1100,18 +1142,33 @@ export function WorkspaceProvider({ children }) {
   // Switch workspace data cleanly whenever the selected project or authenticated user changes
   useEffect(() => {
     let mounted = true;
+    const currentProject = selectedProjectRef.current;
+    const currentUser = userRef.current;
 
-    setSelectedTestCaseId(null);
-    setSelectedTestRunId(null);
-    setSelectedDefectId(null);
-    setExecutingTestCaseId(null);
-    setDraftDefectFromExecution(null);
-    setProjectDataError(null);
-    setProjectDataConflict(null);
+    const pendingRemap = remappedProjectTransitionRef.current;
+    const isRemapTransition = Boolean(
+      pendingRemap &&
+        selectedProjectId &&
+        pendingRemap.to === selectedProjectId &&
+        prevSelectedProjectIdRef.current === pendingRemap.from
+    );
+    if (isRemapTransition) {
+      remappedProjectTransitionRef.current = null;
+    }
 
-    if (!selectedProjectId || !selectedProject) {
+    if (!isRemapTransition) {
+      setSelectedTestCaseId(null);
+      setSelectedTestRunId(null);
+      setSelectedDefectId(null);
+      setExecutingTestCaseId(null);
+      setDraftDefectFromExecution(null);
+      setProjectDataError(null);
+      setProjectDataConflict(null);
+    }
+
+    if (!selectedProjectId || !currentProject) {
       prevSelectedProjectIdRef.current = null;
-      const emptyState = buildProjectWorkspaceState(null, null, user);
+      const emptyState = buildProjectWorkspaceState(null, null, currentUser);
       applyWorkspaceStateSnapshot(emptyState);
       setHydratedProjectId(null);
       setLastPersistedAt(null);
@@ -1141,14 +1198,16 @@ export function WorkspaceProvider({ children }) {
       );
     }
 
-    setIsStorageHydrated(false);
-    setHydratedProjectId(null);
-    const immediateState = buildProjectWorkspaceState(
-      selectedProject,
-      null,
-      user
-    );
-    applyWorkspaceStateSnapshot(immediateState);
+    if (!isRemapTransition) {
+      setIsStorageHydrated(false);
+      setHydratedProjectId(null);
+      const immediateState = buildProjectWorkspaceState(
+        currentProject,
+        null,
+        currentUser
+      );
+      applyWorkspaceStateSnapshot(immediateState);
+    }
 
     const storageKey = getProjectWorkspaceStorageKey(
       selectedProjectId,
@@ -1172,6 +1231,28 @@ export function WorkspaceProvider({ children }) {
     ])
       .then(([raw, pendingOps, storedSeqState, projectTombstones]) => {
         if (!mounted) return;
+        const latestProject = selectedProjectRef.current || currentProject;
+        const latestUser = userRef.current || currentUser;
+
+        if (isRemapTransition) {
+          // Preserve live in-memory state when seamlessly promoting temp_ ID to server ID
+          if (
+            scopedKey &&
+            !(Array.isArray(pendingOps) ? pendingOps : []).some(
+              (op) =>
+                op.projectId === selectedProjectId &&
+                op.entityType !== 'checklist' &&
+                op.status !== 'completed'
+            ) &&
+            !isCurrentProjectDirty(selectedProjectId, resolvedUserId)
+          ) {
+            setAppliedServerSnapshot(latestProject, resolvedUserId);
+          }
+          setHydratedProjectId(selectedProjectId);
+          setIsStorageHydrated(true);
+          return;
+        }
+
         let snapshot = null;
         if (raw) {
           try {
@@ -1200,13 +1281,13 @@ export function WorkspaceProvider({ children }) {
           }
         } else {
           clearProjectDirty(selectedProjectId, resolvedUserId);
-          setAppliedServerSnapshot(selectedProject, resolvedUserId);
+          setAppliedServerSnapshot(latestProject, resolvedUserId);
         }
 
         const resolved = buildProjectWorkspaceState(
-          selectedProject,
+          latestProject,
           snapshot,
-          user,
+          latestUser,
           { preferSnapshot }
         );
 
@@ -1280,8 +1361,17 @@ export function WorkspaceProvider({ children }) {
     return () => {
       mounted = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProjectId, resolvedUserId]);
+  }, [
+    selectedProjectId,
+    resolvedUserId,
+    getScopedProjectKey,
+    applyWorkspaceStateSnapshot,
+    clearProjectDirty,
+    isCurrentProjectDirty,
+    setAppliedServerSnapshot,
+    setSelectedTestCaseId,
+    setSelectedTestRunId,
+  ]);
 
   // Synchronize workspace state whenever selectedProject is refreshed from server,
   // while guarding against overwriting hydrated local state, dirty edits, and stale metadata.
@@ -1863,7 +1953,11 @@ export function WorkspaceProvider({ children }) {
     async (phaseId, options = {}) => {
       const cleanPhaseId = typeof phaseId === 'string' ? phaseId.trim() : '';
       if (!cleanPhaseId) {
-        return { ok: false, status: 400, error: 'Phase ID is required.' };
+        const errMsg = 'Phase ID is required.';
+        if (!options.silentToast) {
+          showToast(errMsg, 'danger');
+        }
+        return { ok: false, status: 400, error: errMsg };
       }
 
       const currentPlan = buildDefaultTestPlan({
@@ -1875,7 +1969,11 @@ export function WorkspaceProvider({ children }) {
         : [];
       const targetPhase = existingPhases.find((p) => p.id === cleanPhaseId);
       if (!targetPhase) {
-        return { ok: false, status: 404, error: 'Testing phase not found.' };
+        const errMsg = 'Testing phase not found.';
+        if (!options.silentToast) {
+          showToast(errMsg, 'danger');
+        }
+        return { ok: false, status: 404, error: errMsg };
       }
 
       const nowIso = new Date().toISOString();
@@ -1925,11 +2023,15 @@ export function WorkspaceProvider({ children }) {
         suitesRef.current = prevSuites;
         setTestPlan(prevPlan);
         setSuites(prevSuites);
-        showToast(result.error || 'Failed to delete phase', 'danger');
+        if (!options.silentToast) {
+          showToast(result.error || 'Failed to delete phase', 'danger');
+        }
         return result;
       }
 
-      showToast(`Deleted phase "${targetPhase.name}"`, 'info');
+      if (!options.silentToast) {
+        showToast(`Deleted phase "${targetPhase.name}"`, 'info');
+      }
       return result;
     },
     [selectedProject, persistProjectDataToBackend, showToast]
@@ -2117,7 +2219,11 @@ export function WorkspaceProvider({ children }) {
       const prevSuites = suitesRef.current;
       const target = prevSuites.find((s) => s.id === cleanId);
       if (!target) {
-        return { ok: false, status: 404, error: 'Test suite not found.' };
+        const errMsg = 'Test suite not found.';
+        if (!options.silentToast) {
+          showToast(errMsg, 'danger');
+        }
+        return { ok: false, status: 404, error: errMsg };
       }
 
       const { moveCasesToSuiteId, ...requestOptions } = options || {};
@@ -2227,7 +2333,9 @@ export function WorkspaceProvider({ children }) {
         setTestCases(prevCases);
         setTestRuns(prevRuns);
         setDefects(prevDefects);
-        showToast(result.error || 'Failed to delete suite', 'danger');
+        if (!requestOptions.silentToast) {
+          showToast(result.error || 'Failed to delete suite', 'danger');
+        }
         return result;
       }
 
@@ -2539,6 +2647,9 @@ export function WorkspaceProvider({ children }) {
       if (!targetSuite) {
         const errMsg = 'Target test suite not found.';
         setProjectDataError(errMsg);
+        if (!options.silentToast) {
+          showToast(errMsg, 'danger');
+        }
         return { ok: false, status: 404, testCase: null, error: errMsg };
       }
 
@@ -2552,7 +2663,11 @@ export function WorkspaceProvider({ children }) {
       );
 
       if (res.ok) {
-        showToast(`Moved ${cleanCaseId} to "${targetSuite.name}"`, 'success');
+        if (!options.silentToast) {
+          showToast(`Moved ${cleanCaseId} to "${targetSuite.name}"`, 'success');
+        }
+      } else if (!options.silentToast) {
+        showToast(res.error || 'Failed to move test case', 'danger');
       }
       return res;
     },
@@ -2566,7 +2681,11 @@ export function WorkspaceProvider({ children }) {
       const prevCases = testCasesRef.current;
       const target = prevCases.find((tc) => tc.id === cleanCaseId);
       if (!target) {
-        return { ok: false, status: 404, error: 'Test case not found.' };
+        const errMsg = 'Test case not found.';
+        if (!options.silentToast) {
+          showToast(errMsg, 'danger');
+        }
+        return { ok: false, status: 404, error: errMsg };
       }
 
       const prevRuns = testRunsRef.current;
@@ -2635,7 +2754,9 @@ export function WorkspaceProvider({ children }) {
         setTestCases(prevCases);
         setTestRuns(prevRuns);
         setDefects(prevDefects);
-        showToast(result.error || 'Failed to delete test case', 'danger');
+        if (!options.silentToast) {
+          showToast(result.error || 'Failed to delete test case', 'danger');
+        }
         return result;
       }
 
@@ -2644,7 +2765,9 @@ export function WorkspaceProvider({ children }) {
         `Deleted test case ${cleanCaseId}`,
         target.title || 'Removed from repository.'
       );
-      showToast(`Deleted ${cleanCaseId}`, 'info');
+      if (!options.silentToast) {
+        showToast(`Deleted ${cleanCaseId}`, 'info');
+      }
       return result;
     },
     [
@@ -3283,7 +3406,11 @@ export function WorkspaceProvider({ children }) {
       const prevRuns = testRunsRef.current;
       const target = prevRuns.find((r) => r.id === cleanRunId);
       if (!target) {
-        return { ok: false, status: 404, error: 'Test run not found.' };
+        const errMsg = 'Test run not found.';
+        if (!options.silentToast) {
+          showToast(errMsg, 'danger');
+        }
+        return { ok: false, status: 404, error: errMsg };
       }
 
       const prevDefects = defectsRef.current;
@@ -3329,7 +3456,9 @@ export function WorkspaceProvider({ children }) {
         defectsRef.current = prevDefects;
         setTestRuns(prevRuns);
         setDefects(prevDefects);
-        showToast(result.error || 'Failed to delete test run', 'danger');
+        if (!options.silentToast) {
+          showToast(result.error || 'Failed to delete test run', 'danger');
+        }
         return result;
       }
 
@@ -3338,7 +3467,9 @@ export function WorkspaceProvider({ children }) {
         `Deleted Test Run ${cleanRunId}`,
         target.name || 'Removed test run.'
       );
-      showToast(`Deleted ${cleanRunId}`, 'info');
+      if (!options.silentToast) {
+        showToast(`Deleted ${cleanRunId}`, 'info');
+      }
       return result;
     },
     [
@@ -3781,7 +3912,11 @@ export function WorkspaceProvider({ children }) {
     async (defectId, options = {}) => {
       const cleanId = typeof defectId === 'string' ? defectId.trim() : '';
       if (!cleanId) {
-        return { ok: false, status: 404, error: 'Defect not found.' };
+        const errMsg = 'Defect not found.';
+        if (!options.silentToast) {
+          showToast(errMsg, 'danger');
+        }
+        return { ok: false, status: 404, error: errMsg };
       }
       const prevDefects = defectsRef.current;
       const { defect: target, index: targetIndex } = findDefectById(
@@ -3789,7 +3924,11 @@ export function WorkspaceProvider({ children }) {
         cleanId
       );
       if (!target || targetIndex === -1) {
-        return { ok: false, status: 404, error: 'Defect not found.' };
+        const errMsg = 'Defect not found.';
+        if (!options.silentToast) {
+          showToast(errMsg, 'danger');
+        }
+        return { ok: false, status: 404, error: errMsg };
       }
 
       const prevRuns = testRunsRef.current;
@@ -3883,7 +4022,9 @@ export function WorkspaceProvider({ children }) {
         setDefects(prevDefects);
         setTestRuns(prevRuns);
         setExecutions(prevExecs);
-        showToast(result.error || 'Failed to delete defect', 'danger');
+        if (!options.silentToast) {
+          showToast(result.error || 'Failed to delete defect', 'danger');
+        }
         return result;
       }
 
@@ -3900,7 +4041,9 @@ export function WorkspaceProvider({ children }) {
         `Deleted defect ${target.id}`,
         target.title || ''
       );
-      showToast(`Deleted ${target.id}`, 'info');
+      if (!options.silentToast) {
+        showToast(`Deleted ${target.id}`, 'info');
+      }
       return result;
     },
     [
@@ -4687,6 +4830,10 @@ export function WorkspaceProvider({ children }) {
     isSwipeBlockedByChild,
     registerBackOverlayHandler,
     handleActiveBackOverlay,
+    setUiMutationActive,
+    hasActiveUiMutation,
+    isAnyMutationActive,
+    isAnyMutationActiveRef,
   };
 
   return React.createElement(
@@ -4731,4 +4878,27 @@ export function useWorkspaceBackOverlay(handlerFn) {
       return false;
     });
   }, [registerBackOverlayHandler]);
+}
+
+let mutationLockSeq = 0;
+
+/**
+ * Registers whether a screen has an active async UI mutation in progress so
+ * navigation controls and Android Back cannot interrupt in-flight writes.
+ */
+export function useWorkspaceMutationLock(isActive, lockName = 'screen-mutation') {
+  const { setUiMutationActive } = useWorkspace();
+  const idRef = useRef(null);
+  if (!idRef.current) {
+    mutationLockSeq += 1;
+    idRef.current = `${lockName}-${mutationLockSeq}`;
+  }
+
+  useEffect(() => {
+    const lockId = idRef.current;
+    setUiMutationActive(lockId, Boolean(isActive));
+    return () => {
+      setUiMutationActive(lockId, false);
+    };
+  }, [setUiMutationActive, isActive]);
 }

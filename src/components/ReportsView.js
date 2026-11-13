@@ -19,6 +19,7 @@ import { useProjects } from '../context/ProjectContext';
 import {
   useWorkspace,
   useWorkspaceBackOverlay,
+  useWorkspaceMutationLock,
 } from '../context/WorkspaceContext';
 import VectorIcon from './VectorIcon';
 
@@ -527,6 +528,8 @@ export default function ReportsView({ topHeaderNode = null }) {
   const [exportError, setExportError] = useState(null);
   const [previewModalVisible, setPreviewModalVisible] = useState(false);
   const [previewPayload, setPreviewPayload] = useState(null);
+
+  useWorkspaceMutationLock(isExporting, 'reports-view');
 
   useWorkspaceBackOverlay(() => {
     if (previewModalVisible) {
@@ -1374,8 +1377,10 @@ export default function ReportsView({ topHeaderNode = null }) {
             </Text>
             <Pressable
               onPress={() => handleExportFormat('markdown', true)}
+              disabled={isExporting}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
+              accessibilityState={{ disabled: Boolean(isExporting) }}
               accessibilityLabel="Inspect and preview report output"
               style={styles.previewLinkBtn}
             >
@@ -2099,9 +2104,13 @@ export default function ReportsView({ topHeaderNode = null }) {
                   <Pressable
                     key={fmt.id}
                     onPress={() => handleExportFormat(fmt.id, true)}
+                    disabled={isExporting}
                     hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                     accessibilityRole="tab"
-                    accessibilityState={{ selected: Boolean(active) }}
+                    accessibilityState={{
+                      selected: Boolean(active),
+                      disabled: Boolean(isExporting),
+                    }}
                     accessibilityLabel={`Preview ${fmt.label} format`}
                     style={[
                       styles.filterPillSmall,
@@ -2155,11 +2164,16 @@ export default function ReportsView({ topHeaderNode = null }) {
             <View style={styles.modalFooter}>
               <Pressable
                 onPress={handleShareFromPreview}
+                disabled={isExporting}
                 accessibilityRole="button"
+                accessibilityState={{ disabled: Boolean(isExporting) }}
                 accessibilityLabel="Share report output"
                 style={[
                   styles.shareModalBtn,
-                  { backgroundColor: colors.primary },
+                  {
+                    backgroundColor: colors.primary,
+                    opacity: isExporting ? 0.65 : 1,
+                  },
                 ]}
               >
                 <Text
