@@ -518,7 +518,6 @@ export default function TestCasesScreen({
     updateTestCase,
     moveTestCaseToSuite,
     deleteTestCase,
-    showToast,
     notifyBlockedSwipeTouchStart,
   } = useWorkspace();
 

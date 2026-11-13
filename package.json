@@ -26,8 +26,18 @@
     "ios": "expo start --ios",
     "web": "expo start --web --port 3000",
     "build": "expo export --platform web",
-    "lint": "node -e \"const fs=require('fs'),path=require('path'),expoDir=path.dirname(require.resolve('expo/package.json')),metroDir=path.dirname(require.resolve('@expo/metro-config/package.json')),paths=[process.cwd(),expoDir,metroDir],babel=require(require.resolve('@babel/core',{paths})),preset=require.resolve('babel-preset-expo',{paths}),files=['index.js','App.js'];(function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(e.isFile()&&e.name.endsWith('.js'))files.push(p);}})('src');files.sort();for(const f of files){babel.parseSync(fs.readFileSync(f,'utf8'),{filename:path.resolve(f),presets:[preset],babelrc:false,configFile:false});}console.log('Validated '+files.length+' JS/JSX files.');\"",
+    "lint": "eslint . && node -e \"const fs=require('fs'),path=require('path'),expoDir=path.dirname(require.resolve('expo/package.json')),metroDir=path.dirname(require.resolve('@expo/metro-config/package.json')),paths=[process.cwd(),expoDir,metroDir],babel=require(require.resolve('@babel/core',{paths})),preset=require.resolve('babel-preset-expo',{paths}),files=['index.js','App.js'];(function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(e.isFile()&&e.name.endsWith('.js'))files.push(p);}})('src');files.sort();for(const f of files){babel.parseSync(fs.readFileSync(f,'utf8'),{filename:path.resolve(f),presets:[preset],babelrc:false,configFile:false});}console.log('Validated '+files.length+' JS/JSX files.');\"",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "test:coverage": "bun test --coverage",
     "audit": "npm audit"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "@babel/eslint-parser": "^7.28.6",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.14.0"
+  }
 }

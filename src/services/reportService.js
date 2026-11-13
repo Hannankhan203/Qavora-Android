@@ -703,7 +703,6 @@ export function computeProjectDashboardMetrics(source = {}) {
 export function generateProjectReport(source = {}, filters = {}) {
   const {
     project,
-    testPlan,
     phases,
     suites,
     testCases,

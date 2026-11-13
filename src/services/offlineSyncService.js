@@ -24,7 +24,6 @@ import {
   updateProjectStatus as updateProjectStatusApi,
   updateProjectData as updateProjectDataApi,
   deleteProject as deleteProjectApi,
-  normalizeProjectRecord,
   extractSuiteTestCases,
 } from './projectService.js';
 import {
@@ -33,7 +32,6 @@ import {
   updateChecklist as updateChecklistApi,
   deleteChecklist as deleteChecklistApi,
 } from './checklistService.js';
-import { normalizeChecklistRecord } from './checklists/checklistNormalization.js';
 import {
   cacheChecklistOffline,
   removeCachedChecklistOffline,
