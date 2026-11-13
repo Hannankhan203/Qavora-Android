@@ -20,6 +20,7 @@ import {
   apiGet,
   apiPost,
   getApiBaseUrl,
+  validateBaseUrl,
   isLocalMockBackendActive,
   ApiClientError,
 } from './apiClient.js';
@@ -296,16 +297,12 @@ export function formatAuthErrorMessage(errOrResult, context = 'login') {
     isObj && typeof errOrResult.code === 'string'
       ? errOrResult.code.trim().toUpperCase()
       : '';
+  const hasHttpErrorStatus = status !== null && status >= 400;
   const isTimeout = Boolean(
     (isObj && errOrResult.isTimeout) ||
       code === 'REQUEST_TIMEOUT' ||
       status === 408 ||
       status === 504
-  );
-  const isNetworkError = Boolean(
-    (isObj && errOrResult.isNetworkError) ||
-      code === 'NETWORK_ERROR' ||
-      status === 0
   );
 
   const rawMessage =
@@ -323,7 +320,24 @@ export function formatAuthErrorMessage(errOrResult, context = 'login') {
   const sanitized = sanitizeSensitiveDiagnosticText(rawMessage);
   const lower = sanitized.toLowerCase();
 
-  // 1. Timeout handling
+  // 1. Configuration errors (must precede network classification so missing/insecure env URLs
+  //    are never misreported as internet connectivity failures)
+  if (
+    !hasHttpErrorStatus &&
+    (code === 'INVALID_BASE_URL' ||
+      code === 'INSECURE_PRODUCTION_URL' ||
+      code === 'UNCONFIGURED_BASE_URL' ||
+      /\b(expo_public_api_base_url|invalid api base url|insecure_production_url|not configured properly|server connection url is not configured)\b/i.test(
+        lower
+      ))
+  ) {
+    if (context === 'health') {
+      return 'Server connection URL is not configured properly.';
+    }
+    return 'The Qavora server connection is not configured properly. Please check the application environment settings.';
+  }
+
+  // 2. Timeout handling
   if (isTimeout || /\btimed?\s*out\b/i.test(lower)) {
     if (context === 'health') {
       return 'Server connection timed out. Tap Check to retry.';
@@ -331,13 +345,36 @@ export function formatAuthErrorMessage(errOrResult, context = 'login') {
     return 'The server took too long to respond. Please check your internet connection and try again.';
   }
 
-  // 2. Network / offline connectivity handling (only when no HTTP status >= 400 was returned)
+  // 3. Network / offline connectivity handling (never classify HTTP >= 400 or explicit non-network errors as offline)
+  const hasExplicitNonNetworkFlag =
+    isObj && errOrResult.isNetworkError === false;
+  const hasSpecificNonNetworkCode = Boolean(
+    code &&
+      code !== 'NETWORK_ERROR' &&
+      code !== 'API_ERROR' &&
+      code !== 'LOGIN_ERROR' &&
+      code !== 'REGISTER_ERROR' &&
+      code !== 'SESSION_ERROR' &&
+      code !== 'UNKNOWN_ERROR'
+  );
+  const isNetworkError =
+    !hasHttpErrorStatus &&
+    Boolean(
+      (isObj && errOrResult.isNetworkError === true) ||
+        code === 'NETWORK_ERROR' ||
+        (status === 0 &&
+          !hasExplicitNonNetworkFlag &&
+          !hasSpecificNonNetworkCode)
+    );
+
   if (
-    isNetworkError ||
-    ((status === null || status === 0) &&
-      /\b(network request failed|fetch failed|failed to fetch|network error|econnrefused|enotfound|ehostunreach|econnreset|socket hang up|offline|unable to resolve host)\b/i.test(
-        lower
-      ))
+    !hasHttpErrorStatus &&
+    (isNetworkError ||
+      ((status === null || status === 0) &&
+        !hasExplicitNonNetworkFlag &&
+        /\b(network request failed|fetch failed|failed to fetch|network error|econnrefused|enotfound|ehostunreach|econnreset|socket hang up|offline|unable to resolve host)\b/i.test(
+          lower
+        )))
   ) {
     if (context === 'health') {
       return 'Unable to reach the Qavora server. Check your internet connection.';
@@ -345,19 +382,16 @@ export function formatAuthErrorMessage(errOrResult, context = 'login') {
     return 'Unable to connect to the Qavora server. Please check your internet connection and try again.';
   }
 
-  // 3. Configuration errors
-  if (
-    code === 'INVALID_BASE_URL' ||
-    code === 'INSECURE_PRODUCTION_URL' ||
-    code === 'UNCONFIGURED_BASE_URL' ||
-    /\b(expo_public_api_base_url|invalid api base url|insecure_production_url)\b/i.test(
-      lower
-    )
-  ) {
-    if (context === 'health') {
-      return 'Server connection URL is not configured properly.';
+  // 3b. Client runtime / secure storage errors (not network or credential errors)
+  if (code.startsWith('SECURE_STORE_')) {
+    if (sanitized && sanitized.length <= 180) {
+      return sanitized;
     }
-    return 'The Qavora server connection is not configured properly. Please check the application environment settings.';
+    return 'Unable to access secure device storage for your authentication session. Please try again.';
+  }
+
+  if (code === 'FETCH_UNAVAILABLE' || code === 'INVALID_REQUEST_BODY') {
+    return 'Unable to prepare the authentication request in this runtime. Please try again.';
   }
 
   // 4. HTTP 429 Rate Limit
@@ -451,6 +485,18 @@ export function formatAuthErrorMessage(errOrResult, context = 'login') {
     return 'The Qavora server is temporarily unavailable. Please try again in a few moments.';
   }
 
+  // 8b. HTTP 404 Not Found (e.g. misrouted API base URL or missing endpoint)
+  if (status === 404 || code === 'HTTP_404') {
+    if (
+      sanitized &&
+      sanitized.length <= 180 &&
+      !/request failed with http/i.test(sanitized)
+    ) {
+      return sanitized;
+    }
+    return 'The Qavora authentication endpoint was not found (HTTP 404). Please verify the server URL configuration.';
+  }
+
   // 9. Preserve clean field-level validation messages (400 / 422 or client validation)
   if (
     sanitized &&
@@ -458,6 +504,11 @@ export function formatAuthErrorMessage(errOrResult, context = 'login') {
     !/request failed with http/i.test(sanitized)
   ) {
     return sanitized;
+  }
+
+  // 9b. Generic HTTP 4xx fallback (never misreport as network or credential error)
+  if (status !== null && status >= 400 && status < 500) {
+    return `The Qavora server could not process this request (HTTP ${status}). Please try again.`;
   }
 
   // 10. Context-specific safe fallbacks
@@ -630,7 +681,11 @@ export async function registerUser(
     };
   } catch (err) {
     const isApiErr = err instanceof ApiClientError;
-    const status = isApiErr && typeof err.status === 'number' ? err.status : 0;
+    const status = isApiErr && typeof err.status === 'number' ? err.status : null;
+    const errCode =
+      err && typeof err.code === 'string' && err.code.trim()
+        ? err.code.trim()
+        : 'REGISTER_ERROR';
     const debugDiagnostic = buildSafeDebugDiagnostics(err, 'register');
     const safeErrorMessage = formatAuthErrorMessage(err, 'register');
 
@@ -639,7 +694,7 @@ export async function registerUser(
       status,
       user: null,
       error: safeErrorMessage,
-      code: isApiErr ? err.code : 'REGISTER_ERROR',
+      code: errCode,
       isNetworkError: isApiErr ? Boolean(err.isNetworkError) : false,
       isTimeout: isApiErr ? Boolean(err.isTimeout) : false,
       field: status === 409 ? 'email' : undefined,
@@ -744,7 +799,11 @@ export async function loginUser(
     await clearAllCookies();
     await clearCachedUserProfile();
     const isApiErr = err instanceof ApiClientError;
-    const status = isApiErr && typeof err.status === 'number' ? err.status : 0;
+    const status = isApiErr && typeof err.status === 'number' ? err.status : null;
+    const errCode =
+      err && typeof err.code === 'string' && err.code.trim()
+        ? err.code.trim()
+        : 'LOGIN_ERROR';
     const debugDiagnostic = buildSafeDebugDiagnostics(err, 'login');
     const safeErrorMessage = formatAuthErrorMessage(err, 'login');
 
@@ -753,7 +812,7 @@ export async function loginUser(
       status,
       user: null,
       error: safeErrorMessage,
-      code: isApiErr ? err.code : 'LOGIN_ERROR',
+      code: errCode,
       isNetworkError: isApiErr ? Boolean(err.isNetworkError) : false,
       isTimeout: isApiErr ? Boolean(err.isTimeout) : false,
       debugDiagnostic,
@@ -789,7 +848,11 @@ export async function fetchCurrentUser(options = {}) {
     };
   } catch (err) {
     const isApiErr = err instanceof ApiClientError;
-    const status = isApiErr && typeof err.status === 'number' ? err.status : 0;
+    const status = isApiErr && typeof err.status === 'number' ? err.status : null;
+    const errCode =
+      err && typeof err.code === 'string' && err.code.trim()
+        ? err.code.trim()
+        : 'SESSION_ERROR';
     const debugDiagnostic = buildSafeDebugDiagnostics(err, 'session');
 
     if (status === 401) {
@@ -800,6 +863,7 @@ export async function fetchCurrentUser(options = {}) {
     return {
       ok: false,
       status,
+      code: errCode,
       user: null,
       isExpired: status === 401,
       isNetworkError: isApiErr ? Boolean(err.isNetworkError) : false,
@@ -854,18 +918,41 @@ export async function restoreAuthenticatedSession(options = {}) {
         reason: 'NO_STORED_SESSION',
       };
     }
-  } else if (!isBrowserDom && !hasAuthCookie()) {
-    // In React Native / non-DOM environments, if no auth cookie is stored, skip network call
-    if (cachedUser) {
-      await clearCachedUserProfile();
+  } else {
+    const baseUrlValidation = validateBaseUrl(baseUrl, {
+      requireHttps: options.requireHttps,
+    });
+    if (!baseUrlValidation.valid) {
+      return {
+        ok: false,
+        status: null,
+        user: null,
+        isExpired: false,
+        code: baseUrlValidation.code || 'INVALID_BASE_URL',
+        reason: baseUrlValidation.code || 'INVALID_BASE_URL',
+        error: formatAuthErrorMessage(
+          {
+            code: baseUrlValidation.code || 'INVALID_BASE_URL',
+            message: baseUrlValidation.reason,
+          },
+          'session'
+        ),
+      };
     }
-    return {
-      ok: false,
-      status: null,
-      user: null,
-      isExpired: false,
-      reason: 'NO_STORED_SESSION',
-    };
+
+    if (!isBrowserDom && !hasAuthCookie()) {
+      // In React Native / non-DOM environments, if no auth cookie is stored, skip network call
+      if (cachedUser) {
+        await clearCachedUserProfile();
+      }
+      return {
+        ok: false,
+        status: null,
+        user: null,
+        isExpired: false,
+        reason: 'NO_STORED_SESSION',
+      };
+    }
   }
 
   const meResult = await fetchCurrentUser({
@@ -927,9 +1014,11 @@ export async function restoreAuthenticatedSession(options = {}) {
   return {
     ok: false,
     status: meResult.status,
+    code: meResult.code,
     user: null,
     isExpired: false,
     isNetworkError: Boolean(meResult.isNetworkError),
+    isTimeout: Boolean(meResult.isTimeout),
     error: formatAuthErrorMessage(meResult, 'session'),
   };
 }

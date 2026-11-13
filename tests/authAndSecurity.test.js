@@ -1230,4 +1230,115 @@ describe('HIGH-01 — Mock Backend Security Hardening', () => {
       expect(secureStoreMap.get(COOKIE_JAR_SECURE_STORE_KEY)).toBeDefined();
     });
   });
+
+  it('10. preview environment configures Vercel HTTPS backend + trusted Origin, forbids local mock, and never mistakes config or HTTP errors for internet connectivity failures', async () => {
+    const origTrustedOrigin = process.env.EXPO_PUBLIC_TRUSTED_ORIGIN;
+
+    try {
+      // A. Missing URL in preview fails closed with configuration error (NOT internet connectivity error)
+      process.env.EXPO_PUBLIC_ENV = 'preview';
+      process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK = 'false';
+      delete process.env.EXPO_PUBLIC_API_BASE_URL;
+      delete process.env.EXPO_PUBLIC_TRUSTED_ORIGIN;
+
+      expect(isLocalMockBackendActive()).toBe(false);
+      expect(validateBaseUrl('')).toMatchObject({
+        valid: false,
+        code: 'INVALID_BASE_URL',
+      });
+
+      const unconfiguredLogin = await loginUser({
+        email: 'preview@qavora.app',
+        password: 'Password123!',
+      });
+      expect(unconfiguredLogin.ok).toBe(false);
+      expect(unconfiguredLogin.code).toBe('INVALID_BASE_URL');
+      expect(unconfiguredLogin.isNetworkError).toBe(false);
+      expect(unconfiguredLogin.error).toBe(
+        'The Qavora server connection is not configured properly. Please check the application environment settings.'
+      );
+      // Re-formatting through AuthContext must preserve the config error, never overwrite with internet error
+      expect(formatAuthErrorMessage(unconfiguredLogin, 'login')).toBe(
+        'The Qavora server connection is not configured properly. Please check the application environment settings.'
+      );
+
+      // B. Non-network HTTP / SecureStore errors must NOT be misclassified as internet connectivity errors
+      expect(
+        formatAuthErrorMessage(
+          { status: 404, code: 'HTTP_404', message: 'Request failed with HTTP 404 (Not Found).' },
+          'login'
+        )
+      ).toContain('HTTP 404');
+      expect(
+        formatAuthErrorMessage(
+          { status: null, code: 'SECURE_STORE_WRITE_FAILED', isNetworkError: false, message: 'Unable to securely store your authentication session on this device.' },
+          'login'
+        )
+      ).toBe('Unable to securely store your authentication session on this device.');
+
+      // C. Valid preview configuration targets https://qavora-mongo-db-integrated.vercel.app with matching Origin
+      process.env.EXPO_PUBLIC_ENV = 'preview';
+      process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK = 'false';
+      process.env.EXPO_PUBLIC_API_BASE_URL = 'https://qavora-mongo-db-integrated.vercel.app';
+      process.env.EXPO_PUBLIC_TRUSTED_ORIGIN = 'https://qavora-mongo-db-integrated.vercel.app';
+
+      expect(apiClient.getBaseUrl()).toBe('https://qavora-mongo-db-integrated.vercel.app');
+      expect(apiClient.getTrustedOrigin()).toBe('https://qavora-mongo-db-integrated.vercel.app');
+      expect(isLocalMockBackendActive()).toBe(false);
+
+      let capturedLoginUrl = null;
+      let capturedLoginHeaders = null;
+
+      await runWithNativeRuntime(async () => {
+        globalThis.fetch = async (url, init = {}) => {
+          const target = String(url);
+          if (target.endsWith('/api/auth/csrf')) {
+            return new Response(JSON.stringify({ csrfToken: 'csrf_preview_1' }), {
+              status: 200,
+              headers: {
+                'content-type': 'application/json',
+                'set-cookie': '__Host-qavora_csrf_token=csrf_preview_1; Path=/; Secure',
+              },
+            });
+          }
+          if (target.endsWith('/api/auth/login')) {
+            capturedLoginUrl = target;
+            capturedLoginHeaders = Object.fromEntries(new Headers(init.headers).entries());
+          }
+          return new Response(
+            JSON.stringify({
+              user: {
+                userId: 'preview-u1',
+                email: 'preview@qavora.app',
+                name: 'Preview Tester',
+                role: 'QA Tester',
+              },
+            }),
+            {
+              status: 200,
+              headers: {
+                'content-type': 'application/json',
+                'set-cookie': '__Host-qavora_auth_token=tok_preview; Path=/; Secure; HttpOnly',
+              },
+            }
+          );
+        };
+
+        const previewLogin = await loginUser({
+          email: 'preview@qavora.app',
+          password: 'PreviewPassword123!',
+        });
+        expect(previewLogin.ok).toBe(true);
+        expect(capturedLoginUrl).toBe('https://qavora-mongo-db-integrated.vercel.app/api/auth/login');
+        expect(capturedLoginHeaders.origin).toBe('https://qavora-mongo-db-integrated.vercel.app');
+      });
+    } finally {
+      if (origTrustedOrigin === undefined) {
+        delete process.env.EXPO_PUBLIC_TRUSTED_ORIGIN;
+      } else {
+        process.env.EXPO_PUBLIC_TRUSTED_ORIGIN = origTrustedOrigin;
+      }
+    }
+  });
 });
+

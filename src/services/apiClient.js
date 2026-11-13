@@ -195,8 +195,20 @@ export function isProductionEnvironment() {
     return false;
   }
   return (
-    process.env.EXPO_PUBLIC_ENV === 'production' ||
-    process.env.NODE_ENV === 'production'
+    stripQuotesAndTrim(process.env.EXPO_PUBLIC_ENV).toLowerCase() ===
+      'production' || process.env.NODE_ENV === 'production'
+  );
+}
+
+/**
+ * Determines whether the application is configured for preview mode.
+ */
+export function isPreviewEnvironment() {
+  if (typeof process === 'undefined' || !process.env) {
+    return false;
+  }
+  return (
+    stripQuotesAndTrim(process.env.EXPO_PUBLIC_ENV).toLowerCase() === 'preview'
   );
 }
 
@@ -214,11 +226,11 @@ export function isLocalMockOptedIn() {
 }
 
 /**
- * Determines whether the runtime is a production or compiled release build
+ * Determines whether the runtime is a production, preview, or compiled release build
  * where local mock fallback must always be forbidden.
  */
 export function isReleaseOrProductionRuntime() {
-  if (isProductionEnvironment()) {
+  if (isProductionEnvironment() || isPreviewEnvironment()) {
     return true;
   }
   const isNodeTest =
@@ -286,13 +298,16 @@ export function getApiBaseUrl(overrideBaseUrl) {
     return normalizeBaseUrl(overrideBaseUrl);
   }
 
-  const envBaseUrl =
-    (typeof process !== 'undefined' &&
-      process.env &&
-      (process.env.EXPO_PUBLIC_API_BASE_URL || process.env.EXPO_PUBLIC_API_URL)) ||
-    '';
+  const primaryBaseUrl =
+    typeof process !== 'undefined' && process.env
+      ? stripQuotesAndTrim(process.env.EXPO_PUBLIC_API_BASE_URL)
+      : '';
+  const fallbackBaseUrl =
+    typeof process !== 'undefined' && process.env
+      ? stripQuotesAndTrim(process.env.EXPO_PUBLIC_API_URL)
+      : '';
 
-  return normalizeBaseUrl(envBaseUrl);
+  return normalizeBaseUrl(primaryBaseUrl || fallbackBaseUrl);
 }
 
 /**
@@ -363,12 +378,15 @@ export function getTrustedOrigin(overrideBaseUrl, explicitTrustedOrigin) {
   }
 
   if (!isCustomBaseUrlOverride) {
-    const rawConfiguredOrigin =
-      (typeof process !== 'undefined' &&
-        process.env &&
-        (process.env.EXPO_PUBLIC_TRUSTED_ORIGIN || process.env.EXPO_PUBLIC_APP_ORIGIN)) ||
-      '';
-    const configuredOrigin = stripQuotesAndTrim(rawConfiguredOrigin);
+    const primaryOrigin =
+      typeof process !== 'undefined' && process.env
+        ? stripQuotesAndTrim(process.env.EXPO_PUBLIC_TRUSTED_ORIGIN)
+        : '';
+    const fallbackOrigin =
+      typeof process !== 'undefined' && process.env
+        ? stripQuotesAndTrim(process.env.EXPO_PUBLIC_APP_ORIGIN)
+        : '';
+    const configuredOrigin = primaryOrigin || fallbackOrigin;
 
     if (configuredOrigin) {
       try {
@@ -420,11 +438,17 @@ export function getTrustedOrigin(overrideBaseUrl, explicitTrustedOrigin) {
  */
 export function validateBaseUrl(baseUrl, options = {}) {
   if (!baseUrl) {
+    const isProd = isProductionEnvironment();
+    const isPreview = isPreviewEnvironment();
     const isProdOrRelease = isReleaseOrProductionRuntime();
     return {
       valid: false,
       code: 'INVALID_BASE_URL',
-      reason: isProdOrRelease
+      reason: isProd
+        ? 'Backend API base URL is not configured for production. Set EXPO_PUBLIC_API_BASE_URL in your environment (local mock mode is disabled in production builds).'
+        : isPreview
+        ? 'Backend API base URL is not configured for preview. Set EXPO_PUBLIC_API_BASE_URL in your environment (local mock mode is disabled in preview builds).'
+        : isProdOrRelease
         ? 'Backend API base URL is not configured for production. Set EXPO_PUBLIC_API_BASE_URL in your environment (local mock mode is disabled in production builds).'
         : 'Backend API base URL is not configured. Set EXPO_PUBLIC_API_BASE_URL in your environment, or set EXPO_PUBLIC_ALLOW_LOCAL_MOCK=true for explicit local demo mode.',
     };
@@ -450,6 +474,7 @@ export function validateBaseUrl(baseUrl, options = {}) {
     const mustUseHttps =
       Boolean(options.requireHttps) ||
       isProductionEnvironment() ||
+      isPreviewEnvironment() ||
       hasHostPrefixedCookies();
 
     if (mustUseHttps && parsed.protocol !== 'https:') {
@@ -457,7 +482,7 @@ export function validateBaseUrl(baseUrl, options = {}) {
         valid: false,
         code: 'INSECURE_PRODUCTION_URL',
         reason:
-          'Production authentication and __Host- Secure cookies require an HTTPS (https://) backend URL.',
+          'Production/preview authentication and __Host- Secure cookies require an HTTPS (https://) backend URL.',
       };
     }
 

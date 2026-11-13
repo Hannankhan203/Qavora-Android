@@ -536,11 +536,13 @@ describe('Phase 6 — LOW Issues Remediation (LOW-01..LOW-04)', () => {
     expect(preview.distribution).toBe('internal');
     expect(preview.android?.buildType).toBe('apk');
     expect(preview.env.EXPO_PUBLIC_ENV).toBe('preview');
-    expect(preview.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK).toBe('false');
-    expect(preview.env.EXPO_PUBLIC_API_BASE_URL).not.toBe(
-      production.env.EXPO_PUBLIC_API_BASE_URL
+    expect(preview.env.EXPO_PUBLIC_API_BASE_URL).toBe(
+      'https://qavora-mongo-db-integrated.vercel.app'
     );
-    expect(JSON.stringify(preview)).not.toContain('qavora-mongo-db-integrated.vercel.app');
+    expect(preview.env.EXPO_PUBLIC_TRUSTED_ORIGIN).toBe(
+      'https://qavora-mongo-db-integrated.vercel.app'
+    );
+    expect(preview.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK).toBe('false');
 
     expect(production).toBeTruthy();
     expect(production.distribution).toBe('store');
@@ -553,6 +555,9 @@ describe('Phase 6 — LOW Issues Remediation (LOW-01..LOW-04)', () => {
       'https://qavora-mongo-db-integrated.vercel.app'
     );
     expect(production.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK).toBe('false');
+    expect(preview.env.EXPO_PUBLIC_ENV).not.toBe(production.env.EXPO_PUBLIC_ENV);
+    expect(preview.distribution).not.toBe(production.distribution);
+    expect(preview.android?.buildType).not.toBe(production.android?.buildType);
 
     expect(easRaw).not.toMatch(/secret|password|private_key|api_key|token/i);
   });
