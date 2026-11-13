@@ -925,8 +925,15 @@ export function WorkspaceProvider({ children }) {
         return;
       }
 
+      if (evt.type === 'offline_import_completed' && evt.mode === 'replace') {
+        dirtyProjectsRef.current = {};
+        queuedDirtyGenRef.current = {};
+        appliedServerStateRef.current = {};
+      }
+
       if (
         evt.entityType === 'checklist' ||
+        evt.type === 'offline_import_completed' ||
         evt.type === 'sync_completed' ||
         evt.type === 'conflict_resolved' ||
         evt.type === 'operation_discarded'
@@ -1013,6 +1020,24 @@ export function WorkspaceProvider({ children }) {
     clearProjectDirty,
     applyWorkspaceStateSnapshot,
   ]);
+
+  const refreshChecklists = useCallback(async (options = {}) => {
+    const targetUserId = String(
+      options.userId || resolvedUserIdRef.current || ''
+    ).trim();
+    if (!targetUserId) {
+      setChecklists([]);
+      return { ok: true, checklists: [], error: null };
+    }
+    const res = await fetchChecklists({
+      ...options,
+      userId: targetUserId,
+    });
+    if (res && res.ok && Array.isArray(res.checklists)) {
+      setChecklists(res.checklists);
+    }
+    return res;
+  }, []);
 
   // Switch workspace data cleanly whenever the selected project or authenticated user changes
   useEffect(() => {
@@ -4285,6 +4310,7 @@ export function WorkspaceProvider({ children }) {
     defects,
     checklists,
     setChecklists,
+    refreshChecklists,
     activityLog,
     metrics,
     reportTypes: REPORT_TYPES,

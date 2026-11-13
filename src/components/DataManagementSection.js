@@ -52,6 +52,7 @@ import {
   clearRecoverySnapshot,
   executeRollback,
   importWorkspaceData,
+  importWorkspaceOffline,
   resetWorkspaceData,
   getLocalRecoverySnapshots,
   createLocalRecoverySnapshot,
@@ -59,7 +60,10 @@ import {
   deleteLocalRecoverySnapshot,
 } from '../services/dataManagementService.js';
 import { cacheProjectsListOffline } from '../services/offlineSyncService.js';
-import { getCachedChecklistsForUser } from '../services/checklistService.js';
+import {
+  fetchChecklists,
+  getCachedChecklistsForUser,
+} from '../services/checklistService.js';
 import VectorIcon from './VectorIcon.js';
 
 export default function DataManagementSection() {
@@ -86,6 +90,7 @@ export default function DataManagementSection() {
     clearProjectDataError,
     checklists,
     setChecklists,
+    refreshChecklists,
     profile,
     suites,
     testCases,
@@ -457,6 +462,7 @@ export default function DataManagementSection() {
     try {
       const res = await pickAndValidateBackupFile({
         existingProjects: projects,
+        existingChecklists: checklists,
       });
 
       if (res.canceled) {
@@ -494,7 +500,9 @@ export default function DataManagementSection() {
       setImportMode('merge');
       setImportPreview(res);
       showToast(
-        `Validated "${res.fileName}" (${res.projectsCount} project(s)) — review preview to confirm`,
+        `Validated "${res.fileName}" (${res.projectsCount} project(s), ${
+          res.checklistsCount || 0
+        } checklist(s)) — review preview to confirm`,
         'success'
       );
     } finally {
@@ -541,6 +549,7 @@ export default function DataManagementSection() {
       fileName: activeFileName,
       fileSize: byteSize,
       existingProjects: projects,
+      existingChecklists: checklists,
     });
 
     if (!validation.ok) {
@@ -557,8 +566,13 @@ export default function DataManagementSection() {
     if (!importPreview || !importPreview.ok) return;
     setIsImporting(true);
     try {
+      const hasChecklists = Array.isArray(checklists) && checklists.length > 0;
       // Always create a local safety snapshot before Destructive Replace
-      if (importMode === 'replace' && activeUserId && projects.length > 0) {
+      if (
+        importMode === 'replace' &&
+        activeUserId &&
+        (projects.length > 0 || hasChecklists)
+      ) {
         await createLocalRecoverySnapshot({
           userId: activeUserId,
           projects,
@@ -569,39 +583,41 @@ export default function DataManagementSection() {
       }
 
       if (isOffline && activeUserId) {
-        // Offline import fallback: merge or replace in user's offline project cache
-        let nextProjects = [];
-        if (importMode === 'replace') {
-          nextProjects = importPreview.projects.map((p) => ({
-            ...p,
-            userId: activeUserId,
-          }));
-        } else {
-          const existingIds = new Set(projects.map((p) => p.id));
-          const mergedIncoming = importPreview.projects.map((p) => {
-            if (existingIds.has(p.id)) {
-              return {
-                ...p,
-                id: `proj_${Date.now()}_${Math.random()
-                  .toString(36)
-                  .slice(2, 7)}`,
-                name: `${p.name} (Imported)`,
-                userId: activeUserId,
-              };
-            }
-            return { ...p, userId: activeUserId };
-          });
-          nextProjects = [...mergedIncoming, ...projects];
+        const offlineRes = await importWorkspaceOffline({
+          userId: activeUserId,
+          mode: importMode,
+          projects: importPreview.projects,
+          checklists: importPreview.checklists,
+          existingProjects: projects,
+          existingChecklists: checklists,
+        });
+
+        if (!offlineRes || !offlineRes.ok) {
+          const errMsg =
+            (offlineRes && offlineRes.error) ||
+            'Offline workspace import failed.';
+          setImportValidationError(errMsg);
+          showToast(errMsg, 'danger');
+          return;
         }
 
-        await cacheProjectsListOffline(nextProjects, activeUserId);
+        if (
+          typeof setChecklists === 'function' &&
+          Array.isArray(offlineRes.checklists)
+        ) {
+          setChecklists(offlineRes.checklists);
+        }
         await refreshProjects({ autoSelectFirst: true });
+        if (typeof refreshSyncStatus === 'function') {
+          await refreshSyncStatus();
+        }
         await loadStorageAndSnapshots();
         setImportPreview(null);
         setImportJsonText('');
         setSelectedBackupFileMeta(null);
         showToast(
-          `Imported ${importPreview.projectsCount} project(s) into offline workspace (${importMode.toUpperCase()})`,
+          offlineRes.message ||
+            `Imported ${offlineRes.importedProjectsCount} project(s) and ${offlineRes.importedChecklistsCount} checklist(s) into offline workspace (${importMode.toUpperCase()})`,
           'success'
         );
         return;
@@ -618,16 +634,63 @@ export default function DataManagementSection() {
         return;
       }
 
-      await refreshProjects({ autoSelectFirst: true });
+      const checklistsRefreshPromise =
+        typeof refreshChecklists === 'function'
+          ? refreshChecklists({ userId: activeUserId })
+          : fetchChecklists({ userId: activeUserId }).then((chkRes) => {
+              if (
+                chkRes &&
+                chkRes.ok &&
+                Array.isArray(chkRes.checklists) &&
+                typeof setChecklists === 'function'
+              ) {
+                setChecklists(chkRes.checklists);
+              }
+              return chkRes;
+            });
+
+      const [, chkRefreshRes] = await Promise.all([
+        refreshProjects({ autoSelectFirst: true }),
+        checklistsRefreshPromise,
+      ]);
+
+      if (typeof refreshSyncStatus === 'function') {
+        await refreshSyncStatus();
+      }
       await loadStorageAndSnapshots();
+
+      const checklistRefreshFailed = Boolean(
+        chkRefreshRes && chkRefreshRes.ok === false
+      );
+      if (
+        checklistRefreshFailed &&
+        typeof setChecklists === 'function' &&
+        activeUserId
+      ) {
+        const cachedFallback = await getCachedChecklistsForUser(activeUserId);
+        if (Array.isArray(cachedFallback)) {
+          setChecklists(cachedFallback);
+        }
+      }
+
       setImportPreview(null);
       setImportJsonText('');
       setSelectedBackupFileMeta(null);
-      showToast(
-        res.message ||
-          `Imported ${importPreview.projectsCount} project(s) (${importMode})`,
-        'success'
-      );
+      if (checklistRefreshFailed) {
+        showToast(
+          chkRefreshRes.error ||
+            'Workspace imported, but checklists refresh failed. Showing cached checklists.',
+          'warning'
+        );
+      } else {
+        showToast(
+          res.message ||
+            `Imported ${importPreview.projectsCount} project(s) and ${
+              importPreview.checklistsCount || 0
+            } checklist(s) (${importMode})`,
+          'success'
+        );
+      }
     } finally {
       setIsImporting(false);
     }
@@ -2601,6 +2664,19 @@ export default function DataManagementSection() {
                 </Text>
                 <Text style={[styles.metricLabel, { color: colors.textMuted }]}>
                   Defects
+                </Text>
+              </View>
+              <View style={styles.metricCell}>
+                <Text
+                  style={[
+                    styles.metricValue,
+                    { color: colors.info, fontFamily: monoFontFamily },
+                  ]}
+                >
+                  {importPreview?.checklistsCount ?? 0}
+                </Text>
+                <Text style={[styles.metricLabel, { color: colors.textMuted }]}>
+                  Checklists
                 </Text>
               </View>
             </View>

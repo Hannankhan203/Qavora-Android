@@ -179,19 +179,22 @@ export function mergeChecklistsWithPendingOps(
           ? pendingOp.payload.snapshot || pendingOp.payload
           : {};
 
+      const isPendingCreateOp = pendingOp.operationType === 'CREATE';
+
       const preserved = normalizeChecklistRecord({
         ...serverChk,
         ...existingLocal,
         ...(opSnapshot && typeof opSnapshot === 'object' ? opSnapshot : {}),
         id: serverChk.id,
         userId: cleanUser || serverChk.userId,
-        _serverUpdatedAt:
-          pendingOp.expectedUpdatedAt ||
-          serverChk.updatedAt ||
-          existingLocal._serverUpdatedAt ||
-          null,
+        _serverUpdatedAt: isPendingCreateOp
+          ? null
+          : pendingOp.expectedUpdatedAt ||
+            serverChk.updatedAt ||
+            existingLocal._serverUpdatedAt ||
+            null,
         _pendingSync: true,
-        _pendingCreation: false,
+        _pendingCreation: isPendingCreateOp,
         _syncStatus:
           pendingOp.status === 'conflict'
             ? 'conflict'

@@ -374,6 +374,17 @@ export async function queueChecklistMutation({
           op.status !== 'syncing'
         )
     );
+  } else {
+    filteredOps = existingOps.filter(
+      (op) =>
+        !(
+          op.entityType === 'checklist' &&
+          (op.checklistId === cleanChecklistId ||
+            op.entityId === cleanChecklistId) &&
+          op.operationType === 'DELETE' &&
+          op.status !== 'syncing'
+        )
+    );
   }
 
   const seq = nextMonotonicSeq();
@@ -624,6 +635,16 @@ export async function queueProjectMutation({
         op.status === 'syncing'
     );
     await clearProjectDeletionTombstones(targetUserId, cleanProjectId);
+  } else {
+    filteredOps = existingOps.filter(
+      (op) =>
+        !(
+          op.entityType === 'project' &&
+          op.projectId === cleanProjectId &&
+          op.operationType === 'DELETE' &&
+          op.status !== 'syncing'
+        )
+    );
   }
 
   const nextTombstones = await computeEffectiveTombstones(null);

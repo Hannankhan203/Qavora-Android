@@ -37,6 +37,7 @@ import {
   normalizeProjectRecord,
   buildDefaultTestPlan,
   extractSuiteTestCases,
+  containsProhibitedKeys,
   ALLOWED_PROJECT_CREATE_FIELDS,
   ALLOWED_PROJECT_PATCH_FIELDS,
   ALLOWED_PROJECT_DATA_PATCH_FIELDS,
@@ -44,20 +45,37 @@ import {
 import {
   getCachedProjectsForUser,
   getPendingProjectOperations,
+  cacheProjectOffline,
   cacheProjectsListOffline,
+  removeCachedProjectOffline,
   queueProjectMutation,
   queueChecklistMutation,
   isClientOffline,
   getOfflineSyncStorageAdapter,
 } from './offlineSyncService.js';
 import {
+  getOfflineProjectsCacheKey,
+  getPendingProjectOpsKey,
+  notifySyncListeners,
+} from './offlineSync/syncState.js';
+import {
+  extractActiveIdsFromProjectDataPayload,
+  subtractDeletionTombstones,
+  hasAnyDeletionTombstones,
+} from './offlineSync/deletionTombstones.js';
+import {
+  getChecklistCacheKey,
   normalizeChecklistRecord,
+  normalizeChecklistItem,
   filterChecklistsForUser,
 } from './checklists/checklistNormalization.js';
 import {
   getCachedChecklistsForUser,
   cacheChecklistsForUser,
+  cacheChecklistOffline,
+  removeCachedChecklistOffline,
 } from './checklists/checklistCache.js';
+import { getProjectWorkspaceStorageKey } from '../context/workspace/workspaceConstants.js';
 
 export const SUPPORTED_BACKUP_VERSION = 1;
 export const SUPPORTED_SCHEMA_VERSION = 1;
@@ -1032,11 +1050,172 @@ export function assertSafeImportObjectKeys(value, path = 'root') {
  * @param {number} [options.fileSize=0]
  * @param {Array<object>} [options.existingProjects=[]]
  */
+export function validateAndNormalizeImportedChecklists(
+  rawChecklists,
+  warnings = []
+) {
+  if (rawChecklists === undefined || rawChecklists === null) {
+    return { ok: true, checklists: [] };
+  }
+  if (!Array.isArray(rawChecklists)) {
+    return {
+      ok: false,
+      error: 'Field "checklists" must be an array.',
+    };
+  }
+
+  const normalizedList = [];
+  const seenIds = new Set();
+
+  for (let i = 0; i < rawChecklists.length; i += 1) {
+    const rawChk = rawChecklists[i];
+    if (!rawChk || typeof rawChk !== 'object' || Array.isArray(rawChk)) {
+      return {
+        ok: false,
+        error: `Checklist at index ${i} is not a valid object.`,
+      };
+    }
+
+    const rawId =
+      rawChk.id !== undefined &&
+      rawChk.id !== null &&
+      String(rawChk.id).trim() !== ''
+        ? String(rawChk.id).trim()
+        : rawChk._id !== undefined &&
+          rawChk._id !== null &&
+          String(rawChk._id).trim() !== ''
+        ? String(rawChk._id).trim()
+        : '';
+
+    if (
+      rawId &&
+      (rawId.includes('/') || rawId.includes('\\') || rawId.includes('..'))
+    ) {
+      return {
+        ok: false,
+        error: `Checklist ID "${rawId}" at index ${i} contains invalid path characters.`,
+      };
+    }
+
+    const rawTitle =
+      typeof rawChk.title === 'string' && rawChk.title.trim()
+        ? rawChk.title.trim()
+        : typeof rawChk.name === 'string' && rawChk.name.trim()
+        ? rawChk.name.trim()
+        : '';
+
+    if (!rawId && !rawTitle) {
+      return {
+        ok: false,
+        error: `Checklist at index ${i} is missing a required "title" or "id".`,
+      };
+    }
+
+    if (rawChk.items !== undefined && !Array.isArray(rawChk.items)) {
+      return {
+        ok: false,
+        error: `Checklist "${rawTitle || rawId}" has an invalid "items" field (expected an array).`,
+      };
+    }
+    if (rawChk.phases !== undefined && !Array.isArray(rawChk.phases)) {
+      return {
+        ok: false,
+        error: `Checklist "${rawTitle || rawId}" has an invalid "phases" field (expected an array).`,
+      };
+    }
+
+    const directItemLists = [
+      { label: 'items', list: rawChk.items },
+      { label: 'checklistItems', list: rawChk.checklistItems },
+      { label: 'tasks', list: rawChk.tasks },
+    ];
+    for (let lIdx = 0; lIdx < directItemLists.length; lIdx += 1) {
+      const entry = directItemLists[lIdx];
+      if (Array.isArray(entry.list)) {
+        for (let itemIdx = 0; itemIdx < entry.list.length; itemIdx += 1) {
+          if (!normalizeChecklistItem(entry.list[itemIdx], itemIdx)) {
+            return {
+              ok: false,
+              error: `Checklist "${rawTitle || rawId}" contains an unsupported or malformed item in "${entry.label}" at index ${itemIdx}.`,
+            };
+          }
+        }
+      }
+    }
+
+    if (Array.isArray(rawChk.phases)) {
+      for (let pIdx = 0; pIdx < rawChk.phases.length; pIdx += 1) {
+        const ph = rawChk.phases[pIdx];
+        if (!ph || typeof ph !== 'object' || Array.isArray(ph)) {
+          return {
+            ok: false,
+            error: `Checklist "${rawTitle || rawId}" contains an invalid phase at index ${pIdx}.`,
+          };
+        }
+        const phItems = Array.isArray(ph.items)
+          ? ph.items
+          : Array.isArray(ph.tasks)
+          ? ph.tasks
+          : Array.isArray(ph.checks)
+          ? ph.checks
+          : null;
+        if (phItems) {
+          for (let itemIdx = 0; itemIdx < phItems.length; itemIdx += 1) {
+            if (!normalizeChecklistItem(phItems[itemIdx], itemIdx)) {
+              return {
+                ok: false,
+                error: `Checklist "${rawTitle || rawId}" phase ${pIdx + 1} contains an unsupported or malformed item at index ${itemIdx}.`,
+              };
+            }
+          }
+        }
+      }
+    }
+
+    const baseId = rawId || `chk_imp_${Date.now()}_${i + 1}`;
+    let assignedId = baseId;
+    if (seenIds.has(assignedId)) {
+      let dupCounter = i + 1;
+      assignedId = `${baseId}_dup_${dupCounter}`;
+      while (seenIds.has(assignedId)) {
+        dupCounter += 1;
+        assignedId = `${baseId}_dup_${dupCounter}`;
+      }
+      if (Array.isArray(warnings)) {
+        warnings.push(
+          `Duplicate checklist ID "${baseId}" in import file was reassigned to "${assignedId}".`
+        );
+      }
+    }
+    seenIds.add(assignedId);
+
+    const normalized = normalizeChecklistRecord({
+      ...rawChk,
+      id: assignedId,
+      ...(rawTitle ? { title: rawTitle } : {}),
+    });
+    if (!normalized) {
+      return {
+        ok: false,
+        error: `Checklist at index ${i} could not be normalized.`,
+      };
+    }
+
+    normalizedList.push(normalized);
+  }
+
+  return {
+    ok: true,
+    checklists: normalizedList,
+  };
+}
+
 export function parseAndValidateImportPayload(jsonInput, options = {}) {
   const {
     fileName = 'backup.json',
     fileSize = 0,
     existingProjects = [],
+    existingChecklists = [],
   } = options || {};
 
   if (fileSize > MAX_IMPORT_SIZE_BYTES) {
@@ -1133,22 +1312,37 @@ export function parseAndValidateImportPayload(jsonInput, options = {}) {
     }
   }
 
+  if (!Array.isArray(raw) && raw.projects !== undefined && !Array.isArray(raw.projects)) {
+    return {
+      ok: false,
+      error: 'Field "projects" must be an array.',
+    };
+  }
+  if (!Array.isArray(raw) && raw.checklists !== undefined && !Array.isArray(raw.checklists)) {
+    return {
+      ok: false,
+      error: 'Field "checklists" must be an array.',
+    };
+  }
+
   if (
     !Array.isArray(raw) &&
     raw.application === 'Qavora' &&
-    Array.isArray(raw.projects)
+    (Array.isArray(raw.projects) || Array.isArray(raw.checklists))
   ) {
     formatType = 'Full Application Backup';
-    incomingProjects = raw.projects;
-    if (Array.isArray(raw.checklists)) {
-      incomingChecklists = raw.checklists;
-    }
+    incomingProjects = Array.isArray(raw.projects) ? raw.projects : [];
+    incomingChecklists = Array.isArray(raw.checklists) ? raw.checklists : [];
   } else if (!Array.isArray(raw) && Array.isArray(raw.projects)) {
     formatType = 'Multi-Project Archive';
     incomingProjects = raw.projects;
     if (Array.isArray(raw.checklists)) {
       incomingChecklists = raw.checklists;
     }
+  } else if (!Array.isArray(raw) && Array.isArray(raw.checklists)) {
+    formatType = 'Checklists Backup';
+    incomingProjects = [];
+    incomingChecklists = raw.checklists;
   } else if (
     !Array.isArray(raw) &&
     typeof raw.name === 'string' &&
@@ -1650,15 +1844,32 @@ export function parseAndValidateImportPayload(jsonInput, options = {}) {
     );
   }
 
-  const sanitizedChecklists = (
-    Array.isArray(incomingChecklists) ? incomingChecklists : []
-  ).filter(
-    (c) =>
-      c &&
-      typeof c === 'object' &&
-      !Array.isArray(c) &&
-      (typeof c.id === 'string' || typeof c.title === 'string')
+  const checklistValidation = validateAndNormalizeImportedChecklists(
+    incomingChecklists,
+    warnings
   );
+  if (!checklistValidation.ok) {
+    return {
+      ok: false,
+      error: checklistValidation.error,
+    };
+  }
+  const sanitizedChecklists = checklistValidation.checklists;
+
+  const existingChecklistIdsSet = new Set(
+    (Array.isArray(existingChecklists) ? existingChecklists : [])
+      .filter((ec) => ec && (ec.id || ec._id))
+      .map((ec) => String(ec.id || ec._id).trim())
+  );
+  const duplicateChecklistIds = sanitizedChecklists
+    .filter((sc) => existingChecklistIdsSet.has(sc.id))
+    .map((sc) => sc.id);
+
+  if (duplicateChecklistIds.length > 0) {
+    warnings.push(
+      `${duplicateChecklistIds.length} checklist(s) share an ID with an existing checklist in your workspace. In Safe Merge mode, they will be imported as new copies with "(Imported)" appended.`
+    );
+  }
 
   return {
     ok: true,
@@ -1676,6 +1887,7 @@ export function parseAndValidateImportPayload(jsonInput, options = {}) {
     defectsCount,
     checklistsCount: sanitizedChecklists.length,
     duplicateProjectIds,
+    duplicateChecklistIds,
     warnings,
     projects: sanitizedProjects,
     checklists: sanitizedChecklists,
@@ -1770,6 +1982,7 @@ export function validateBackupFileMetadata({
  */
 export async function pickAndValidateBackupFile({
   existingProjects = [],
+  existingChecklists = [],
 } = {}) {
   const picker = getDocumentPickerAdapter();
   if (!picker || typeof picker.getDocumentAsync !== 'function') {
@@ -2018,6 +2231,7 @@ export async function pickAndValidateBackupFile({
     fileName,
     fileSize: effectiveFileSize,
     existingProjects,
+    existingChecklists,
   });
 
   if (!validation.ok) {
@@ -2282,6 +2496,740 @@ export async function importWorkspaceData(
       status: isApiErr ? err.status : 0,
       isNetworkError: isApiErr ? err.isNetworkError : false,
       error: (err && err.message) || 'Failed to import workspace data.',
+    };
+  }
+}
+
+/**
+ * Executes a durable offline workspace import (`merge` or `replace`) for both
+ * projects and checklists using the existing offline cache and synchronization
+ * queue architecture so imported records survive app restarts and server
+ * reconnection reconciliation.
+ *
+ * @param {object} params
+ * @param {string} params.userId
+ * @param {'merge' | 'replace'} [params.mode='merge']
+ * @param {Array<object>} [params.projects=[]]
+ * @param {Array<object>} [params.checklists=[]]
+ * @param {Array<object> | null} [params.existingProjects=null]
+ * @param {Array<object> | null} [params.existingChecklists=null]
+ * @returns {Promise<object>}
+ */
+export async function importWorkspaceOffline({
+  userId,
+  mode = 'merge',
+  projects = [],
+  checklists = [],
+  existingProjects = null,
+  existingChecklists = null,
+} = {}) {
+  const cleanUser = userId ? String(userId).trim() : '';
+  if (!cleanUser) {
+    return {
+      ok: false,
+      error: 'Authenticated userId is required for offline import.',
+    };
+  }
+
+  if (mode !== 'merge' && mode !== 'replace') {
+    return {
+      ok: false,
+      error: 'Import mode must be either "merge" or "replace".',
+    };
+  }
+
+  const rawProjects = Array.isArray(projects) ? projects : [];
+  const rawChecklists = Array.isArray(checklists) ? checklists : [];
+
+  if (rawProjects.length === 0 && rawChecklists.length === 0) {
+    return {
+      ok: false,
+      error: 'No valid projects or checklists provided for import.',
+    };
+  }
+
+  if (
+    containsProhibitedKeys(rawProjects) ||
+    containsProhibitedKeys(rawChecklists)
+  ) {
+    return {
+      ok: false,
+      error:
+        'Security validation failed: Import payload contains prohibited operator or prototype keys.',
+    };
+  }
+
+  const warnings = [];
+  const validatedProjects = [];
+  const seenBatchProjIds = new Set();
+  const nowIso = new Date().toISOString();
+
+  for (let i = 0; i < rawProjects.length; i += 1) {
+    const rawProj = rawProjects[i];
+    if (!rawProj || typeof rawProj !== 'object' || Array.isArray(rawProj)) {
+      return {
+        ok: false,
+        error: `Project at index ${i} is not a valid object.`,
+      };
+    }
+    const rawName =
+      typeof rawProj.name === 'string' ? rawProj.name.trim() : '';
+    if (!rawName) {
+      return {
+        ok: false,
+        error: `Project at index ${i} is missing a required "name".`,
+      };
+    }
+    let projId = String(
+      rawProj.id || rawProj._id || `proj_imp_${Date.now()}_${i + 1}`
+    ).trim();
+    if (seenBatchProjIds.has(projId)) {
+      let suffix = i + 1;
+      let nextProjId = `${projId}_dup_${suffix}`;
+      while (seenBatchProjIds.has(nextProjId)) {
+        suffix += 1;
+        nextProjId = `${projId}_dup_${suffix}`;
+      }
+      warnings.push(
+        `Duplicate project ID "${projId}" in import batch was reassigned to "${nextProjId}".`
+      );
+      projId = nextProjId;
+    }
+    seenBatchProjIds.add(projId);
+
+    const normalizedProj = normalizeProjectRecord({
+      ...rawProj,
+      id: projId,
+      name: rawName,
+      userId: cleanUser,
+      createdAt: rawProj.createdAt || nowIso,
+      updatedAt: rawProj.updatedAt || nowIso,
+    });
+    if (!normalizedProj) {
+      return {
+        ok: false,
+        error: `Project "${rawName}" could not be normalized for offline import.`,
+      };
+    }
+    validatedProjects.push(normalizedProj);
+  }
+
+  const checklistValidation = validateAndNormalizeImportedChecklists(
+    rawChecklists,
+    warnings
+  );
+  if (!checklistValidation.ok) {
+    return {
+      ok: false,
+      error: checklistValidation.error,
+    };
+  }
+  const validatedChecklists = checklistValidation.checklists;
+
+  const storage = getStorage();
+  const projectsCacheKey = getOfflineProjectsCacheKey(cleanUser);
+  const checklistsCacheKey = getChecklistCacheKey(cleanUser);
+  const pendingOpsKey = getPendingProjectOpsKey(cleanUser);
+
+  const snapshotKeys = [projectsCacheKey, checklistsCacheKey, pendingOpsKey].filter(
+    Boolean
+  );
+  const preImportBackup = new Map();
+  if (storage && typeof storage.getItem === 'function') {
+    for (const k of snapshotKeys) {
+      try {
+        preImportBackup.set(k, await storage.getItem(k));
+      } catch {
+        preImportBackup.set(k, null);
+      }
+    }
+  }
+
+  const restorePreImportStorage = async () => {
+    if (!storage) return;
+    for (const [k, prevVal] of preImportBackup.entries()) {
+      try {
+        if (prevVal === null || prevVal === undefined) {
+          if (typeof storage.removeItem === 'function') {
+            await storage.removeItem(k);
+          }
+        } else if (typeof storage.setItem === 'function') {
+          await storage.setItem(k, prevVal);
+        }
+      } catch {
+        // Ignore rollback write errors
+      }
+    }
+  };
+
+  try {
+    const cachedProjects = await getCachedProjectsForUser(cleanUser, true);
+    const cachedChecklists = await getCachedChecklistsForUser(cleanUser);
+    const pendingOps = await getPendingProjectOperations(cleanUser);
+
+    const knownProjectsById = new Map();
+    (Array.isArray(existingProjects) ? existingProjects : []).forEach((p) => {
+      if (p && (p.id || p._id)) {
+        const pid = String(p.id || p._id).trim();
+        if (pid) knownProjectsById.set(pid, p);
+      }
+    });
+    cachedProjects.forEach((p) => {
+      if (p && p.id) knownProjectsById.set(p.id, p);
+    });
+
+    const knownChecklistsById = new Map();
+    (Array.isArray(existingChecklists) ? existingChecklists : []).forEach(
+      (c) => {
+        if (c && (c.id || c._id)) {
+          const cid = String(c.id || c._id).trim();
+          if (cid) knownChecklistsById.set(cid, c);
+        }
+      }
+    );
+    cachedChecklists.forEach((c) => {
+      if (c && c.id) knownChecklistsById.set(c.id, c);
+    });
+
+    const queuedOperations = [];
+    let deletedProjectsCount = 0;
+    let deletedChecklistsCount = 0;
+    let importedProjectsCount = 0;
+    let importedChecklistsCount = 0;
+
+    if (mode === 'merge') {
+      const usedProjectIds = new Set(knownProjectsById.keys());
+      pendingOps.forEach((op) => {
+        if (op && op.entityType !== 'checklist' && op.projectId) {
+          usedProjectIds.add(String(op.projectId).trim());
+        }
+      });
+
+      const projectIdMap = new Map();
+      const finalProjectNameById = new Map();
+      const importedProjectsToCreate = [];
+
+      for (let i = 0; i < validatedProjects.length; i += 1) {
+        const proj = validatedProjects[i];
+        const origId = proj.id;
+        let finalId = origId;
+        let finalName = proj.name;
+
+        if (usedProjectIds.has(finalId)) {
+          let attempt = 1;
+          const stamp = Date.now().toString(36);
+          finalId = `${origId}_imported_${stamp}_${i + 1}`;
+          while (usedProjectIds.has(finalId)) {
+            attempt += 1;
+            finalId = `${origId}_imported_${stamp}_${i + 1}_${attempt}`;
+          }
+          finalName = proj.name.endsWith(' (Imported)')
+            ? proj.name
+            : `${proj.name} (Imported)`;
+          warnings.push(
+            `Project "${proj.name}" shared ID "${origId}" and was merged as new copy "${finalName}" (${finalId}).`
+          );
+        }
+
+        usedProjectIds.add(finalId);
+        projectIdMap.set(origId, finalId);
+        finalProjectNameById.set(finalId, finalName);
+
+        const nextTestPlan =
+          proj.testPlan && typeof proj.testPlan === 'object'
+            ? {
+                ...proj.testPlan,
+                id:
+                  finalId !== origId &&
+                  (!proj.testPlan.id || proj.testPlan.id === `plan_${origId}`)
+                    ? `plan_${finalId}`
+                    : proj.testPlan.id,
+                name:
+                  finalName !== proj.name &&
+                  proj.testPlan.name === `${proj.name} Master Test Plan`
+                    ? `${finalName} Master Test Plan`
+                    : proj.testPlan.name,
+              }
+            : proj.testPlan;
+
+        const preparedProj = normalizeProjectRecord({
+          ...proj,
+          id: finalId,
+          _id: finalId,
+          name: finalName,
+          userId: cleanUser,
+          testPlan: nextTestPlan,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          _serverUpdatedAt: null,
+          _pendingSync: true,
+          _pendingCreation: true,
+        });
+        importedProjectsToCreate.push(preparedProj);
+      }
+
+      for (let i = 0; i < importedProjectsToCreate.length; i += 1) {
+        const proj = importedProjectsToCreate[i];
+        await cacheProjectOffline(
+          { ...proj, _serverUpdatedAt: null },
+          cleanUser,
+          { pendingSync: true, pendingCreation: true }
+        );
+
+        const createPayload = pickWhitelistedFields(
+          proj,
+          ALLOWED_PROJECT_CREATE_FIELDS
+        );
+        const createOp = await queueProjectMutation({
+          userId: cleanUser,
+          projectId: proj.id,
+          entityType: 'project',
+          operationType: 'CREATE',
+          payload: createPayload,
+          expectedUpdatedAt: null,
+          description: `Import project "${proj.name}" offline (merge)`,
+        });
+        queuedOperations.push(createOp);
+
+        const dataPayload = pickWhitelistedFields(
+          proj,
+          ALLOWED_PROJECT_DATA_PATCH_FIELDS,
+          ['expectedUpdatedAt']
+        );
+        if (Object.keys(dataPayload).length > 0) {
+          const dataOp = await queueProjectMutation({
+            userId: cleanUser,
+            projectId: proj.id,
+            entityType: 'data',
+            operationType: 'UPDATE',
+            payload: dataPayload,
+            expectedUpdatedAt: null,
+            description: `Import QA workspace data for "${proj.name}" offline (merge)`,
+          });
+          queuedOperations.push(dataOp);
+        }
+        importedProjectsCount += 1;
+      }
+
+      const usedChecklistIds = new Set(knownChecklistsById.keys());
+      pendingOps.forEach((op) => {
+        if (op && op.entityType === 'checklist') {
+          const cid = String(op.checklistId || op.entityId || '').trim();
+          if (cid) usedChecklistIds.add(cid);
+        }
+      });
+
+      for (let i = 0; i < validatedChecklists.length; i += 1) {
+        const chk = validatedChecklists[i];
+        const origChkId = chk.id;
+        let finalChkId = origChkId;
+        let finalTitle = chk.title;
+
+        if (usedChecklistIds.has(finalChkId)) {
+          let attempt = 1;
+          const stamp = Date.now().toString(36);
+          finalChkId = `${origChkId}_imported_${stamp}_${i + 1}`;
+          while (usedChecklistIds.has(finalChkId)) {
+            attempt += 1;
+            finalChkId = `${origChkId}_imported_${stamp}_${i + 1}_${attempt}`;
+          }
+          finalTitle = chk.title.endsWith(' (Imported)')
+            ? chk.title
+            : `${chk.title} (Imported)`;
+          warnings.push(
+            `Checklist "${chk.title}" shared ID "${origChkId}" and was merged as new copy "${finalTitle}" (${finalChkId}).`
+          );
+        }
+        usedChecklistIds.add(finalChkId);
+
+        const rawLinkedProjectId = chk.projectId || chk.promotedProjectId || null;
+        const resolvedLinkedProjectId =
+          rawLinkedProjectId && projectIdMap.has(rawLinkedProjectId)
+            ? projectIdMap.get(rawLinkedProjectId)
+            : rawLinkedProjectId;
+        const resolvedLinkedProjectName =
+          resolvedLinkedProjectId &&
+          finalProjectNameById.has(resolvedLinkedProjectId)
+            ? finalProjectNameById.get(resolvedLinkedProjectId)
+            : chk.projectName || '';
+
+        const preparedChk = normalizeChecklistRecord({
+          ...chk,
+          id: finalChkId,
+          title: finalTitle,
+          userId: cleanUser,
+          projectId: resolvedLinkedProjectId,
+          promotedProjectId: resolvedLinkedProjectId,
+          projectName: resolvedLinkedProjectName,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          _serverUpdatedAt: null,
+          _pendingSync: true,
+          _pendingCreation: true,
+          _syncStatus: 'pending',
+        });
+
+        const chkOp = await queueChecklistMutation({
+          userId: cleanUser,
+          checklistId: preparedChk.id,
+          projectId: preparedChk.projectId || null,
+          operationType: 'CREATE',
+          mutationSubType: 'offline_import',
+          payload: buildChecklistQueuePayload(preparedChk, true),
+          expectedUpdatedAt: null,
+          description: `Import checklist "${preparedChk.title}" offline (merge)`,
+        });
+        queuedOperations.push(chkOp);
+        importedChecklistsCount += 1;
+      }
+    } else {
+      // REPLACE mode
+      const incomingProjectIds = new Set(validatedProjects.map((p) => p.id));
+      const incomingChecklistIds = new Set(validatedChecklists.map((c) => c.id));
+
+      // Clear stale per-project workspace snapshots for all known or incoming projects
+      const allProjectIdsToClean = new Set([
+        ...knownProjectsById.keys(),
+        ...incomingProjectIds,
+      ]);
+      if (storage && typeof storage.removeItem === 'function') {
+        for (const pid of allProjectIdsToClean) {
+          const wsKey = getProjectWorkspaceStorageKey(pid, cleanUser);
+          if (wsKey) {
+            await storage.removeItem(wsKey).catch(() => {});
+          }
+        }
+      }
+
+      // 1. Delete existing projects NOT present in imported set
+      for (const oldProj of knownProjectsById.values()) {
+        if (!oldProj || !oldProj.id || incomingProjectIds.has(oldProj.id)) {
+          continue;
+        }
+        const hasPendingCreate = pendingOps.some(
+          (op) =>
+            op.entityType === 'project' &&
+            op.operationType === 'CREATE' &&
+            op.projectId === oldProj.id &&
+            (op.status === 'pending' || op.status === 'failed')
+        );
+        const isOfflineOnlyWithoutCreate =
+          Boolean(oldProj._pendingCreation) && !hasPendingCreate;
+
+        if (isOfflineOnlyWithoutCreate) {
+          await removeCachedProjectOffline(oldProj.id, cleanUser);
+        } else {
+          const delOp = await queueProjectMutation({
+            userId: cleanUser,
+            projectId: oldProj.id,
+            entityType: 'project',
+            operationType: 'DELETE',
+            payload: {},
+            description: `Delete replaced project "${oldProj.name || oldProj.id}" offline (replace)`,
+          });
+          queuedOperations.push(delOp);
+        }
+        deletedProjectsCount += 1;
+      }
+
+      // 2. Delete existing checklists NOT present in imported set
+      for (const oldChk of knownChecklistsById.values()) {
+        if (!oldChk || !oldChk.id || incomingChecklistIds.has(oldChk.id)) {
+          continue;
+        }
+        const hasPendingCreate = pendingOps.some(
+          (op) =>
+            op.entityType === 'checklist' &&
+            op.operationType === 'CREATE' &&
+            (op.checklistId === oldChk.id || op.entityId === oldChk.id) &&
+            (op.status === 'pending' || op.status === 'failed')
+        );
+        const isOfflineOnlyWithoutCreate =
+          Boolean(oldChk._pendingCreation) && !hasPendingCreate;
+
+        if (isOfflineOnlyWithoutCreate) {
+          await removeCachedChecklistOffline(oldChk.id, cleanUser);
+        } else {
+          const delOp = await queueChecklistMutation({
+            userId: cleanUser,
+            checklistId: oldChk.id,
+            projectId: oldChk.projectId || null,
+            operationType: 'DELETE',
+            mutationSubType: 'offline_import_replace',
+            payload: {},
+            description: `Delete replaced checklist "${oldChk.title || oldChk.id}" offline (replace)`,
+          });
+          queuedOperations.push(delOp);
+        }
+        deletedChecklistsCount += 1;
+      }
+
+      // 3. Upsert imported projects (CREATE new / UPDATE existing server-backed)
+      for (let i = 0; i < validatedProjects.length; i += 1) {
+        const proj = validatedProjects[i];
+        const existingProj = knownProjectsById.get(proj.id) || null;
+        const hasPendingCreate = pendingOps.some(
+          (op) =>
+            op.entityType === 'project' &&
+            op.operationType === 'CREATE' &&
+            op.projectId === proj.id &&
+            (op.status === 'pending' || op.status === 'failed')
+        );
+        const hadPendingDelete = pendingOps.some(
+          (op) =>
+            op.entityType === 'project' &&
+            op.operationType === 'DELETE' &&
+            op.projectId === proj.id &&
+            op.status !== 'syncing'
+        );
+
+        const isServerBackedExisting = Boolean(
+          (existingProj &&
+            !existingProj._pendingCreation &&
+            !hasPendingCreate) ||
+            (!existingProj && hadPendingDelete)
+        );
+        const shouldCreate = !isServerBackedExisting;
+
+        if (shouldCreate) {
+          const preparedProj = normalizeProjectRecord({
+            ...proj,
+            userId: cleanUser,
+            updatedAt: nowIso,
+            _serverUpdatedAt: null,
+            _pendingSync: true,
+            _pendingCreation: true,
+          });
+          await cacheProjectOffline(
+            { ...preparedProj, _serverUpdatedAt: null },
+            cleanUser,
+            { pendingSync: true, pendingCreation: true }
+          );
+          const createPayload = pickWhitelistedFields(
+            preparedProj,
+            ALLOWED_PROJECT_CREATE_FIELDS
+          );
+          const createOp = await queueProjectMutation({
+            userId: cleanUser,
+            projectId: preparedProj.id,
+            entityType: 'project',
+            operationType: 'CREATE',
+            payload: createPayload,
+            expectedUpdatedAt: null,
+            description: `Import project "${preparedProj.name}" offline (replace)`,
+          });
+          queuedOperations.push(createOp);
+
+          const dataPayload = pickWhitelistedFields(
+            preparedProj,
+            ALLOWED_PROJECT_DATA_PATCH_FIELDS,
+            ['expectedUpdatedAt']
+          );
+          if (Object.keys(dataPayload).length > 0) {
+            const dataOp = await queueProjectMutation({
+              userId: cleanUser,
+              projectId: preparedProj.id,
+              entityType: 'data',
+              operationType: 'UPDATE',
+              payload: dataPayload,
+              expectedUpdatedAt: null,
+              description: `Import QA workspace data for "${preparedProj.name}" offline (replace)`,
+            });
+            queuedOperations.push(dataOp);
+          }
+        } else {
+          const baselineUpdatedAt =
+            (existingProj &&
+              (existingProj._serverUpdatedAt || existingProj.updatedAt)) ||
+            null;
+          const prevActive = extractActiveIdsFromProjectDataPayload(
+            existingProj || {}
+          );
+          const nextActive = extractActiveIdsFromProjectDataPayload(proj);
+          const replaceTombstones = subtractDeletionTombstones(
+            prevActive,
+            nextActive
+          );
+
+          const preparedProj = normalizeProjectRecord({
+            ...proj,
+            userId: cleanUser,
+            updatedAt: baselineUpdatedAt || nowIso,
+            _serverUpdatedAt: baselineUpdatedAt,
+            _pendingSync: true,
+            _pendingCreation: false,
+          });
+          await cacheProjectOffline(
+            { ...preparedProj, _serverUpdatedAt: baselineUpdatedAt },
+            cleanUser,
+            { pendingSync: true, pendingCreation: false }
+          );
+
+          const metaPayload = pickWhitelistedFields(
+            preparedProj,
+            ALLOWED_PROJECT_PATCH_FIELDS,
+            ['expectedUpdatedAt']
+          );
+          if (Object.keys(metaPayload).length > 0) {
+            const metaOp = await queueProjectMutation({
+              userId: cleanUser,
+              projectId: preparedProj.id,
+              entityType: 'project',
+              operationType: 'UPDATE',
+              payload: metaPayload,
+              expectedUpdatedAt: baselineUpdatedAt,
+              description: `Replace project "${preparedProj.name}" metadata offline`,
+            });
+            queuedOperations.push(metaOp);
+          }
+
+          const dataPayload = pickWhitelistedFields(
+            preparedProj,
+            ALLOWED_PROJECT_DATA_PATCH_FIELDS,
+            ['expectedUpdatedAt']
+          );
+          if (Object.keys(dataPayload).length > 0) {
+            const dataOp = await queueProjectMutation({
+              userId: cleanUser,
+              projectId: preparedProj.id,
+              entityType: 'data',
+              operationType: 'UPDATE',
+              payload: dataPayload,
+              expectedUpdatedAt: baselineUpdatedAt,
+              deletionTombstones: hasAnyDeletionTombstones(replaceTombstones)
+                ? replaceTombstones
+                : null,
+              description: `Replace QA workspace data for "${preparedProj.name}" offline`,
+            });
+            queuedOperations.push(dataOp);
+          }
+        }
+        importedProjectsCount += 1;
+      }
+
+      // 4. Upsert imported checklists (CREATE new / UPDATE existing server-backed)
+      for (let i = 0; i < validatedChecklists.length; i += 1) {
+        const chk = validatedChecklists[i];
+        const existingChk = knownChecklistsById.get(chk.id) || null;
+        const hasPendingCreate = pendingOps.some(
+          (op) =>
+            op.entityType === 'checklist' &&
+            op.operationType === 'CREATE' &&
+            (op.checklistId === chk.id || op.entityId === chk.id) &&
+            (op.status === 'pending' || op.status === 'failed')
+        );
+        const hadPendingDelete = pendingOps.some(
+          (op) =>
+            op.entityType === 'checklist' &&
+            op.operationType === 'DELETE' &&
+            (op.checklistId === chk.id || op.entityId === chk.id) &&
+            op.status !== 'syncing'
+        );
+
+        const isServerBackedExisting = Boolean(
+          (existingChk &&
+            !existingChk._pendingCreation &&
+            !hasPendingCreate) ||
+            (!existingChk && hadPendingDelete)
+        );
+        const shouldCreate = !isServerBackedExisting;
+
+        const baselineUpdatedAt = shouldCreate
+          ? null
+          : (existingChk &&
+              !existingChk._pendingCreation &&
+              (existingChk._serverUpdatedAt || existingChk.updatedAt)) ||
+            null;
+
+        const incomingItemIds = new Set(
+          (Array.isArray(chk.items) ? chk.items : []).map((it) => it && it.id)
+        );
+        const deletedItemIds =
+          !shouldCreate && existingChk && Array.isArray(existingChk.items)
+            ? existingChk.items
+                .filter((it) => it && it.id && !incomingItemIds.has(it.id))
+                .map((it) => it.id)
+            : [];
+
+        const preparedChk = normalizeChecklistRecord({
+          ...chk,
+          userId: cleanUser,
+          updatedAt: shouldCreate ? nowIso : baselineUpdatedAt || nowIso,
+          _serverUpdatedAt: baselineUpdatedAt,
+          _pendingSync: true,
+          _pendingCreation: shouldCreate,
+          _syncStatus: 'pending',
+        });
+
+        await cacheChecklistOffline(preparedChk, cleanUser, {
+          pendingSync: true,
+          pendingCreation: shouldCreate,
+          syncStatus: 'pending',
+          serverUpdatedAt: baselineUpdatedAt,
+          syncError: null,
+          conflictDetails: null,
+        });
+
+        const chkPayload = buildChecklistQueuePayload(
+          preparedChk,
+          shouldCreate
+        );
+        if (!shouldCreate && deletedItemIds.length > 0) {
+          chkPayload.deletedItemIds = deletedItemIds;
+        }
+
+        const chkOp = await queueChecklistMutation({
+          userId: cleanUser,
+          checklistId: preparedChk.id,
+          projectId: preparedChk.projectId || null,
+          operationType: shouldCreate ? 'CREATE' : 'UPDATE',
+          mutationSubType: 'offline_import_replace',
+          payload: chkPayload,
+          expectedUpdatedAt: baselineUpdatedAt,
+          description: `${
+            shouldCreate ? 'Import' : 'Replace'
+          } checklist "${preparedChk.title}" offline`,
+        });
+        queuedOperations.push(chkOp);
+        importedChecklistsCount += 1;
+      }
+    }
+
+    const finalProjects = await getCachedProjectsForUser(cleanUser, true);
+    const finalChecklists = await getCachedChecklistsForUser(cleanUser);
+
+    notifySyncListeners({
+      type: 'offline_import_completed',
+      mode,
+      userId: cleanUser,
+      importedProjectsCount,
+      importedChecklistsCount,
+      deletedProjectsCount,
+      deletedChecklistsCount,
+    });
+
+    return {
+      ok: true,
+      source: 'offline_cache',
+      mode,
+      projects: finalProjects,
+      checklists: finalChecklists,
+      importedProjectsCount,
+      importedChecklistsCount,
+      deletedProjectsCount,
+      deletedChecklistsCount,
+      queuedOperationsCount: queuedOperations.length,
+      queuedOperations,
+      warnings,
+      message: `Imported ${importedProjectsCount} project(s) and ${importedChecklistsCount} checklist(s) into offline workspace (${mode.toUpperCase()}). Pending sync queued for reconnection.`,
+    };
+  } catch (err) {
+    await restorePreImportStorage();
+    return {
+      ok: false,
+      error:
+        (err && err.message) ||
+        'Failed to persist offline workspace import safely. Previous workspace data was restored.',
     };
   }
 }
@@ -2924,6 +3872,7 @@ export const dataManagementService = {
   clearRecoverySnapshot,
   executeRollback,
   importWorkspaceData,
+  importWorkspaceOffline,
   resetWorkspaceData,
   getLocalRecoverySnapshots,
   createLocalRecoverySnapshot,

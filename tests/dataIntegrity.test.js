@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import {
+  dom,
   memoryAsyncStorage,
   secureStoreController,
   mockSecureStoreModule,
@@ -31,6 +32,7 @@ const {
 } = await import('../src/services/offlineSync/syncState.js');
 const {
   cacheProjectOffline,
+  cacheProjectsListOffline,
   getCachedProjectsForUser,
 } = await import('../src/services/offlineSync/offlineProjectCache.js');
 const {
@@ -41,6 +43,7 @@ const {
   retryProjectOperation,
   discardProjectOperation,
   queueProjectMutation,
+  queueChecklistMutation,
   getProjectDeletionTombstones,
   getCachedProjectById,
 } = await import('../src/services/offlineSyncService.js');
@@ -53,9 +56,15 @@ const {
 const { buildChecklistPromotionPreview } = await import(
   '../src/services/checklists/checklistPromotion.js'
 );
-const { promoteChecklistToProject } = await import(
-  '../src/services/checklistService.js'
-);
+const {
+  fetchChecklists,
+  promoteChecklistToProject,
+} = await import('../src/services/checklistService.js');
+const {
+  localMockFetch,
+  setLocalMockStorageAdapter,
+  resetLocalMockMemoryForTests,
+} = await import('../src/services/localMockBackend.js');
 const {
   createFullBackupPayload,
   parseAndValidateImportPayload,
@@ -65,6 +74,7 @@ const {
   fetchRecoverySnapshot,
   executeRollback,
   importWorkspaceData,
+  importWorkspaceOffline,
   getLocalRecoverySnapshots,
   createLocalRecoverySnapshot,
   restoreLocalRecoverySnapshot,
@@ -2189,4 +2199,1038 @@ describe('CRIT-03 — Offline Conflict Resolution, Deletion Tombstones & Dirty S
     ).toContain('TC-A2');
   });
 });
+
+// =============================================================================
+// 8. HIGH-02 — Offline Workspace Import Data Integrity & Online Import Refresh
+// =============================================================================
+describe('HIGH-02 — Offline Workspace Import Data Integrity', () => {
+  const originalFetch = globalThis.fetch;
+  const originalApiUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
+  let harness;
+
+  beforeEach(async () => {
+    memoryAsyncStorage._map.clear();
+    secureStoreController.reset();
+    resetLocalMockMemoryForTests();
+    setCookieStorageAdapter(null);
+    setSecureStoreImplementation(mockSecureStoreModule);
+    setOfflineSyncStorageAdapter(memoryAsyncStorage);
+    setProjectStorageAdapter(memoryAsyncStorage);
+    setChecklistStorageAdapter(memoryAsyncStorage);
+    setDataManagementStorageAdapter(memoryAsyncStorage);
+    setAuthUserStorageAdapter(memoryAsyncStorage);
+    setLocalMockStorageAdapter(memoryAsyncStorage);
+    setActiveSyncUser(null);
+    setSimulatedOfflineMode(false, { skipAutoReconnect: true });
+    await clearAllCookies();
+    process.env.EXPO_PUBLIC_API_BASE_URL = 'https://qavora.example.test';
+    harness = await createRenderHarness();
+  });
+
+  afterEach(async () => {
+    if (harness) {
+      await harness.cleanup();
+    }
+    setSimulatedOfflineMode(false, { skipAutoReconnect: true });
+    setActiveSyncUser(null);
+    globalThis.fetch = originalFetch;
+    if (originalApiUrl === undefined) {
+      delete process.env.EXPO_PUBLIC_API_BASE_URL;
+    } else {
+      process.env.EXPO_PUBLIC_API_BASE_URL = originalApiUrl;
+    }
+    await clearAllCookies();
+  });
+
+  it('1, 4 & 11. Offline import of new and existing projects in MERGE mode queues CREATE + data ops, preserves existing data, remaps checklist project links, and survives reconnection', async () => {
+    const userId = 'user-h2-merge';
+    setActiveSyncUser(userId);
+    setSimulatedOfflineMode(true, { skipAutoReconnect: true });
+
+    const existingProject = {
+      id: 'proj-existing',
+      userId,
+      name: 'Existing Alpha',
+      version: '1.0.0',
+      updatedAt: '2026-06-01T10:00:00.000Z',
+      _serverUpdatedAt: '2026-06-01T10:00:00.000Z',
+      testSuites: [
+        {
+          id: 'suite-alpha',
+          name: 'Original Alpha Suite',
+          cases: [{ id: 'TC-ALPHA-1', title: 'Original case', lastStatus: 'Passed' }],
+        },
+      ],
+      defects: [{ id: 'DEF-ALPHA-1', title: 'Original bug', severity: 'High', status: 'Open' }],
+    };
+    const existingChecklist = {
+      id: 'chk-existing',
+      userId,
+      title: 'Existing Alpha Checklist',
+      projectId: 'proj-existing',
+      items: [{ id: 'ci-existing', title: 'Original check', completed: true }],
+      updatedAt: '2026-06-01T10:00:00.000Z',
+      _serverUpdatedAt: '2026-06-01T10:00:00.000Z',
+    };
+
+    await cacheProjectOffline(existingProject, userId, {
+      pendingSync: false,
+      pendingCreation: false,
+    });
+    await cacheChecklistsForUser([existingChecklist], userId, {
+      preservePending: false,
+    });
+
+    const serverProjects = [JSON.parse(JSON.stringify(existingProject))];
+    const serverChecklists = [JSON.parse(JSON.stringify(existingChecklist))];
+    const incomingBackup = {
+      backupVersion: 1,
+      schemaVersion: 1,
+      application: 'Qavora',
+      projects: [
+        {
+          id: 'proj-existing',
+          name: 'Existing Alpha',
+          version: '2.0.0',
+          testSuites: [
+            {
+              id: 'suite-col',
+              name: 'Collided Imported Suite',
+              cases: [{ id: 'TC-COL-1', title: 'Collided case', lastStatus: 'Untested' }],
+            },
+          ],
+        },
+        {
+          id: 'proj-new-offline',
+          name: 'New Offline Project',
+          version: '1.0.0',
+          testSuites: [
+            {
+              id: 'suite-new',
+              name: 'New Suite',
+              cases: [{ id: 'TC-NEW-1', title: 'New case', lastStatus: 'Passed' }],
+            },
+          ],
+        },
+      ],
+      checklists: [
+        {
+          id: 'chk-existing',
+          title: 'Collided Release Checklist',
+          projectId: 'proj-existing',
+          priority: 'Critical',
+          items: [
+            {
+              id: 'ci-new-1',
+              title: 'Verify collided checklist copy',
+              completed: false,
+              priority: 'High',
+              notes: 'Must stay separate from existing checklist',
+            },
+          ],
+        },
+        {
+          id: 'chk-new-offline',
+          title: 'Brand New Offline Checklist',
+          projectId: 'proj-new-offline',
+          items: [{ id: 'ci-brand-1', title: 'Verify new project launch', completed: true }],
+        },
+      ],
+    };
+
+    const validated = parseAndValidateImportPayload(JSON.stringify(incomingBackup), {
+      existingProjects: [existingProject],
+      existingChecklists: [existingChecklist],
+    });
+    expect(validated.ok).toBe(true);
+    expect(validated.duplicateProjectIds).toEqual(['proj-existing']);
+    expect(validated.duplicateChecklistIds).toEqual(['chk-existing']);
+
+    const offlineRes = await importWorkspaceOffline({
+      userId,
+      mode: 'merge',
+      projects: validated.projects,
+      checklists: validated.checklists,
+      existingProjects: [existingProject],
+      existingChecklists: [existingChecklist],
+    });
+    expect(offlineRes.ok).toBe(true);
+    expect(offlineRes.importedProjectsCount).toBe(2);
+    expect(offlineRes.importedChecklistsCount).toBe(2);
+
+    // Existing project and checklist remain completely un-overwritten in MERGE mode
+    const cachedAfter = await getCachedProjectsForUser(userId, true);
+    const originalCachedProj = cachedAfter.find((p) => p.id === 'proj-existing');
+    const copiedProj = cachedAfter.find((p) => p.id !== 'proj-existing' && p.id !== 'proj-new-offline');
+    const newProj = cachedAfter.find((p) => p.id === 'proj-new-offline');
+
+    expect(originalCachedProj.name).toBe('Existing Alpha');
+    expect(originalCachedProj.testSuites[0].cases[0].id).toBe('TC-ALPHA-1');
+    expect(originalCachedProj.defects[0].id).toBe('DEF-ALPHA-1');
+    expect(copiedProj).toBeTruthy();
+    expect(copiedProj.name).toBe('Existing Alpha (Imported)');
+    expect(copiedProj._pendingCreation).toBe(true);
+    expect(copiedProj._pendingSync).toBe(true);
+    expect(newProj._pendingCreation).toBe(true);
+    expect(newProj._pendingSync).toBe(true);
+
+    const cachedChksAfter = await getCachedChecklistsForUser(userId);
+    const originalCachedChk = cachedChksAfter.find((c) => c.id === 'chk-existing');
+    const copiedChk = cachedChksAfter.find((c) => c.id !== 'chk-existing' && c.id !== 'chk-new-offline');
+    const newChk = cachedChksAfter.find((c) => c.id === 'chk-new-offline');
+
+    expect(originalCachedChk.title).toBe('Existing Alpha Checklist');
+    expect(originalCachedChk.items[0].id).toBe('ci-existing');
+    expect(copiedChk.title).toBe('Collided Release Checklist (Imported)');
+    expect(copiedChk.projectId).toBe(copiedProj.id);
+    expect(copiedChk.promotedProjectId).toBe(copiedProj.id);
+    expect(copiedChk.projectName).toBe('Existing Alpha (Imported)');
+    expect(newChk.projectId).toBe('proj-new-offline');
+    expect(newChk._pendingCreation).toBe(true);
+
+    const ops = await getPendingProjectOperations(userId);
+    expect(ops.filter((o) => o.entityType === 'project' && o.operationType === 'CREATE').length).toBe(2);
+    expect(ops.filter((o) => o.entityType === 'data' && o.operationType === 'UPDATE').length).toBe(2);
+    expect(ops.filter((o) => o.entityType === 'checklist' && o.operationType === 'CREATE').length).toBe(2);
+
+    // Even if server reconciliation runs BEFORE the queue drains, pending imported items survive
+    const preSyncReconciled = await cacheProjectsListOffline(serverProjects, userId);
+    expect(preSyncReconciled.some((p) => p.id === copiedProj.id)).toBe(true);
+    expect(preSyncReconciled.some((p) => p.id === 'proj-new-offline')).toBe(true);
+
+    // Reconnect and process queue against server
+    await storeCookiesFromResponse(
+      new Response('{}', {
+        status: 200,
+        headers: { 'set-cookie': 'qavora_auth_token=tok_h2m; Path=/; HttpOnly' },
+      }),
+      'https://qavora.example.test/api/auth/login'
+    );
+    globalThis.fetch = async (url, init = {}) => {
+      const target = String(url);
+      const method = String(init.method || 'GET').toUpperCase();
+      const body = init.body ? JSON.parse(init.body) : {};
+      if (target.endsWith('/api/auth/csrf')) {
+        return new Response(JSON.stringify({ csrfToken: 'csrf_h2m' }), { status: 200 });
+      }
+      if (target.endsWith('/api/projects') && method === 'POST') {
+        if (serverProjects.some((p) => p.id === body.id)) {
+          return new Response(JSON.stringify({ error: 'Duplicate ID', code: 'CONFLICT' }), { status: 409 });
+        }
+        const created = { ...body, userId, updatedAt: '2026-06-05T10:00:00.000Z' };
+        serverProjects.push(created);
+        return new Response(JSON.stringify(created), { status: 201 });
+      }
+      const dataMatch = target.match(/\/api\/projects\/([^/]+)\/data$/);
+      if (dataMatch && method === 'PATCH') {
+        const pid = decodeURIComponent(dataMatch[1]);
+        const idx = serverProjects.findIndex((p) => p.id === pid);
+        serverProjects[idx] = {
+          ...serverProjects[idx],
+          ...body,
+          updatedAt: '2026-06-05T10:01:00.000Z',
+        };
+        return new Response(JSON.stringify(serverProjects[idx]), { status: 200 });
+      }
+      if (target.endsWith('/api/projects') && method === 'GET') {
+        return new Response(JSON.stringify(serverProjects), { status: 200 });
+      }
+      if (target.endsWith('/api/checklists') && method === 'POST') {
+        if (serverChecklists.some((c) => c.id === body.id)) {
+          return new Response(JSON.stringify({ error: 'Duplicate ID', code: 'CONFLICT' }), { status: 409 });
+        }
+        const created = { ...body, userId, updatedAt: '2026-06-05T10:02:00.000Z' };
+        serverChecklists.push(created);
+        return new Response(JSON.stringify({ checklist: created }), { status: 201 });
+      }
+      if (target.endsWith('/api/checklists') && method === 'GET') {
+        return new Response(JSON.stringify({ checklists: serverChecklists }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    };
+
+    setSimulatedOfflineMode(false, { skipAutoReconnect: true });
+    const syncRes = await processProjectSyncQueue(userId, { ignoreBackoff: true });
+    expect(syncRes.failed).toBe(0);
+    expect(syncRes.conflicts).toBe(0);
+    expect(syncRes.synced).toBe(6);
+    expect((await getPendingProjectOperations(userId)).length).toBe(0);
+    expect(serverProjects.length).toBe(3);
+    expect(serverChecklists.length).toBe(3);
+
+    const refreshedChecklists = await fetchChecklists({ userId });
+    expect(refreshedChecklists.ok).toBe(true);
+    expect(refreshedChecklists.checklists.map((c) => c.id).sort()).toEqual(
+      ['chk-existing', copiedChk.id, 'chk-new-offline'].sort()
+    );
+  });
+
+  it('2, 3, 5 & 6. Offline REPLACE import deletes old server records, cancels unsynced local creates, strips stale DELETE ops on re-import, preserves rich checklist metadata, and rejects malformed checklists', async () => {
+    const userId = 'user-h2-replace';
+    setActiveSyncUser(userId);
+    setSimulatedOfflineMode(true, { skipAutoReconnect: true });
+
+    // Seed: 1 server-backed project & checklist to be replaced (deleted), 1 unsynced offline project & checklist to be cancelled,
+    // 1 server-backed project & checklist updated in-place by ID, plus 1 stale queued DELETE for a re-imported checklist ID.
+    const oldServerProj = {
+      id: 'proj-old-srv',
+      userId,
+      name: 'Old Server Proj',
+      updatedAt: '2026-06-01T08:00:00.000Z',
+      _serverUpdatedAt: '2026-06-01T08:00:00.000Z',
+    };
+    const oldOfflineProj = {
+      id: 'proj-old-local',
+      userId,
+      name: 'Old Local Unsynced Proj',
+      _pendingCreation: true,
+      _pendingSync: true,
+    };
+    const sharedProj = {
+      id: 'proj-shared',
+      userId,
+      name: 'Shared Before Replace',
+      updatedAt: '2026-06-01T09:00:00.000Z',
+      _serverUpdatedAt: '2026-06-01T09:00:00.000Z',
+      testSuites: [
+        {
+          id: 'suite-stale',
+          name: 'Stale Suite',
+          cases: [{ id: 'TC-STALE', title: 'Should tombstone' }],
+        },
+      ],
+    };
+
+    await cacheProjectOffline(oldServerProj, userId, { pendingSync: false, pendingCreation: false });
+    await queueProjectMutation({
+      userId,
+      projectId: 'proj-old-local',
+      entityType: 'project',
+      operationType: 'CREATE',
+      payload: oldOfflineProj,
+    });
+    await cacheProjectOffline(sharedProj, userId, { pendingSync: false, pendingCreation: false });
+    await memoryAsyncStorage.setItem(
+      `@qavora_qa_workspace_v2:project:${userId}:proj-shared`,
+      JSON.stringify({ isDirty: true, testCases: [{ id: 'TC-DIRTY' }] })
+    );
+
+    const oldServerChk = {
+      id: 'chk-old-srv',
+      userId,
+      title: 'Old Server Checklist',
+      items: [{ id: 'i-old', title: 'Old item' }],
+      updatedAt: '2026-06-01T08:00:00.000Z',
+      _serverUpdatedAt: '2026-06-01T08:00:00.000Z',
+    };
+    await cacheChecklistOffline(oldServerChk, userId, {
+      pendingSync: false,
+      pendingCreation: false,
+      serverUpdatedAt: '2026-06-01T08:00:00.000Z',
+    });
+    await queueChecklistMutation({
+      userId,
+      checklistId: 'chk-old-local',
+      operationType: 'CREATE',
+      payload: { id: 'chk-old-local', title: 'Old Local Unsynced Checklist', items: [{ id: 'il-1', title: 'Temp' }] },
+    });
+    // Previously deleted checklist offline that gets re-imported by same ID during REPLACE
+    await queueChecklistMutation({
+      userId,
+      checklistId: 'chk-reimported',
+      operationType: 'DELETE',
+      payload: {},
+    });
+
+    // Reject malformed / unsupported checklist payloads explicitly instead of silent discard
+    const badChecklistValidation = parseAndValidateImportPayload(
+      JSON.stringify({
+        application: 'Qavora',
+        backupVersion: 1,
+        schemaVersion: 1,
+        projects: [],
+        checklists: [
+          {
+            id: 'chk-bad',
+            title: 'Broken Checklist',
+            items: [{ priority: 'High', notes: 'missing title/text/label' }],
+          },
+        ],
+      })
+    );
+    expect(badChecklistValidation.ok).toBe(false);
+    expect(badChecklistValidation.error).toContain('malformed item');
+
+    const richReplacePayload = {
+      projects: [
+        {
+          id: 'proj-shared',
+          name: 'Shared After Replace',
+          testSuites: [
+            {
+              id: 'suite-fresh',
+              name: 'Fresh Replaced Suite',
+              cases: [{ id: 'TC-FRESH-1', title: 'Fresh case', lastStatus: 'Passed' }],
+            },
+          ],
+        },
+        {
+          id: 'proj-brand-new',
+          name: 'Brand New Replace Target',
+          testSuites: [],
+        },
+      ],
+      checklists: [
+        {
+          id: 'chk-reimported',
+          title: 'Rich Metadata Reimported Checklist',
+          description: 'Full phase & item metadata test',
+          category: 'Security & Auth',
+          priority: 'Critical',
+          status: 'In Progress',
+          projectId: 'proj-shared',
+          environment: 'Production',
+          targetRelease: 'v4.2.0',
+          tags: ['offline-import', 'high-02'],
+          phases: [
+            {
+              id: 'ph-sec',
+              title: 'Security Checks',
+              items: [
+                {
+                  id: 'itm-sec-1',
+                  title: 'Verify CSRF enforcement',
+                  completed: true,
+                  priority: 'Critical',
+                  notes: 'Confirmed header X-CSRF-Token sent',
+                  description: 'Check every mutating request',
+                  preconditions: 'Logged in',
+                  expectedResult: '403 without token',
+                  assignee: 'QA Lead',
+                },
+                {
+                  id: 'itm-sec-2',
+                  title: 'Verify audit logs',
+                  completed: false,
+                  priority: 'Low',
+                  notes: 'Pending check',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const replaceRes = await importWorkspaceOffline({
+      userId,
+      mode: 'replace',
+      projects: richReplacePayload.projects,
+      checklists: richReplacePayload.checklists,
+    });
+    expect(replaceRes.ok).toBe(true);
+    expect(replaceRes.deletedProjectsCount).toBe(2);
+    expect(replaceRes.deletedChecklistsCount).toBe(2);
+
+    // Stale workspace AsyncStorage key for replaced project cleared
+    expect(
+      await memoryAsyncStorage.getItem(`@qavora_qa_workspace_v2:project:${userId}:proj-shared`)
+    ).toBeNull();
+
+    const opsAfterReplace = await getPendingProjectOperations(userId);
+    // Unsynced local creates were cancelled cleanly (NO server DELETE for proj-old-local or chk-old-local)
+    expect(
+      opsAfterReplace.some((o) => o.projectId === 'proj-old-local' && o.operationType === 'DELETE')
+    ).toBe(false);
+    expect(
+      opsAfterReplace.some((o) => o.checklistId === 'chk-old-local' && o.operationType === 'DELETE')
+    ).toBe(false);
+    // Old server-backed project & checklist ARE queued for DELETE
+    expect(
+      opsAfterReplace.some(
+        (o) => o.entityType === 'project' && o.projectId === 'proj-old-srv' && o.operationType === 'DELETE'
+      )
+    ).toBe(true);
+    expect(
+      opsAfterReplace.some(
+        (o) => o.entityType === 'checklist' && o.checklistId === 'chk-old-srv' && o.operationType === 'DELETE'
+      )
+    ).toBe(true);
+    // Re-imported checklist had its stale DELETE stripped and replaced cleanly by UPDATE (since previously server-backed via DELETE op)
+    expect(
+      opsAfterReplace.some(
+        (o) => o.entityType === 'checklist' && o.checklistId === 'chk-reimported' && o.operationType === 'DELETE'
+      )
+    ).toBe(false);
+
+    // Deletion tombstones captured for replaced server project
+    const tombstones = await getProjectDeletionTombstones(userId, 'proj-shared');
+    expect(tombstones.suites).toContain('suite-stale');
+    expect(tombstones.testCases).toContain('TC-STALE');
+
+    // Sync against mock backend server state where old-srv, shared, and chk-reimported exist
+    const deletedProjectIds = [];
+    const deletedChecklistIds = [];
+    const serverProjects = [
+      { ...oldServerProj },
+      { ...sharedProj },
+    ];
+    const serverChecklists = [
+      { ...oldServerChk },
+      {
+        id: 'chk-reimported',
+        userId,
+        title: 'Pre-Delete Server Version',
+        items: [{ id: 'itm-stale-only', title: 'Old server item' }],
+        updatedAt: '2026-05-01T00:00:00.000Z',
+      },
+    ];
+
+    await storeCookiesFromResponse(
+      new Response('{}', {
+        status: 200,
+        headers: { 'set-cookie': 'qavora_auth_token=tok_h2r; Path=/; HttpOnly' },
+      }),
+      'https://qavora.example.test/api/auth/login'
+    );
+
+    globalThis.fetch = async (url, init = {}) => {
+      const target = String(url);
+      const method = String(init.method || 'GET').toUpperCase();
+      const body = init.body ? JSON.parse(init.body) : {};
+      if (target.endsWith('/api/auth/csrf')) {
+        return new Response(JSON.stringify({ csrfToken: 'csrf_h2r' }), { status: 200 });
+      }
+      if (target.endsWith('/api/projects') && method === 'POST') {
+        const created = { ...body, userId, updatedAt: '2026-06-05T11:00:00.000Z' };
+        serverProjects.push(created);
+        return new Response(JSON.stringify(created), { status: 201 });
+      }
+      const projMatch = target.match(/\/api\/projects\/([^/]+?)(?:\/(data))?$/);
+      if (projMatch) {
+        const pid = decodeURIComponent(projMatch[1]);
+        const isData = projMatch[2] === 'data';
+        const idx = serverProjects.findIndex((p) => p.id === pid);
+        if (method === 'DELETE' && !isData) {
+          deletedProjectIds.push(pid);
+          if (idx >= 0) serverProjects.splice(idx, 1);
+          return new Response(JSON.stringify({ deletedId: pid }), { status: 200 });
+        }
+        if (method === 'PATCH') {
+          serverProjects[idx] = {
+            ...serverProjects[idx],
+            ...body,
+            updatedAt: '2026-06-05T11:01:00.000Z',
+          };
+          return new Response(JSON.stringify(serverProjects[idx]), { status: 200 });
+        }
+      }
+      const chkMatch = target.match(/\/api\/checklists\/([^/]+)$/);
+      if (chkMatch) {
+        const cid = decodeURIComponent(chkMatch[1]);
+        const idx = serverChecklists.findIndex((c) => c.id === cid);
+        if (method === 'DELETE') {
+          deletedChecklistIds.push(cid);
+          if (idx >= 0) serverChecklists.splice(idx, 1);
+          return new Response(JSON.stringify({ deletedId: cid }), { status: 200 });
+        }
+        if (method === 'PATCH' || method === 'PUT') {
+          serverChecklists[idx] = {
+            ...serverChecklists[idx],
+            ...body,
+            updatedAt: '2026-06-05T11:02:00.000Z',
+          };
+          delete serverChecklists[idx].items;
+          return new Response(JSON.stringify({ checklist: serverChecklists[idx] }), { status: 200 });
+        }
+      }
+      if (target.endsWith('/api/checklists') && method === 'GET') {
+        return new Response(JSON.stringify({ checklists: serverChecklists }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    };
+
+    setSimulatedOfflineMode(false, { skipAutoReconnect: true });
+    const syncRes = await processProjectSyncQueue(userId, { ignoreBackoff: true });
+    expect(syncRes.failed).toBe(0);
+    expect(syncRes.conflicts).toBe(0);
+    expect((await getPendingProjectOperations(userId)).length).toBe(0);
+    expect(deletedProjectIds).toEqual(['proj-old-srv']);
+    expect(deletedChecklistIds).toEqual(['chk-old-srv']);
+    expect(serverProjects.map((p) => p.id).sort()).toEqual(['proj-brand-new', 'proj-shared']);
+
+    // Verify full checklist metadata and items survived round-trip cleanly
+    const fetchedAfter = await fetchChecklists({ userId });
+    expect(fetchedAfter.ok).toBe(true);
+    expect(fetchedAfter.checklists.length).toBe(1);
+    const reimported = fetchedAfter.checklists[0];
+    expect(reimported.id).toBe('chk-reimported');
+    expect(reimported.priority).toBe('Critical');
+    expect(reimported.category).toBe('Security & Auth');
+    expect(reimported.environment).toBe('Production');
+    expect(reimported.targetRelease).toBe('v4.2.0');
+    expect(reimported.tags).toEqual(['offline-import', 'high-02']);
+    expect(reimported.projectId).toBe('proj-shared');
+    expect(reimported.completedItems).toBe(1);
+    expect(reimported.totalItems).toBe(2);
+    expect(reimported.items[0]).toMatchObject({
+      id: 'itm-sec-1',
+      title: 'Verify CSRF enforcement',
+      completed: true,
+      priority: 'Critical',
+      notes: 'Confirmed header X-CSRF-Token sent',
+      description: 'Check every mutating request',
+      preconditions: 'Logged in',
+      expectedResult: '403 without token',
+      assignee: 'QA Lead',
+      phaseId: 'ph-sec',
+    });
+    expect(reimported.items[1]).toMatchObject({
+      id: 'itm-sec-2',
+      completed: false,
+      priority: 'Low',
+      notes: 'Pending check',
+    });
+  });
+
+  it('7, 8, 9 & 12. Prevents duplicates via HTTP 409 idempotent retries, handles partial sync failures without data loss, and preserves 409 mock backend behavior', async () => {
+    const userId = 'user-h2-retry';
+    setActiveSyncUser(userId);
+
+    // Part A: Verify localMockBackend enforces 409 CONFLICT on duplicate explicit project/checklist IDs
+    await resetLocalMockMemoryForTests();
+    const regResp = await localMockFetch('https://local.qavora/api/auth/register', {
+      method: 'POST',
+      body: { email: 'h2retry@example.com', password: 'Password123!', name: 'H2 Retry QA' },
+    });
+    expect(regResp.status).toBe(201);
+
+    const dupProj1 = await localMockFetch('https://local.qavora/api/projects', {
+      method: 'POST',
+      body: { id: 'mock-proj-dup', name: 'First Mock Proj' },
+    });
+    expect(dupProj1.status).toBe(201);
+    const dupProj2 = await localMockFetch('https://local.qavora/api/projects', {
+      method: 'POST',
+      body: { id: 'mock-proj-dup', name: 'Duplicate Mock Proj' },
+    });
+    expect(dupProj2.status).toBe(409);
+
+    const dupChk1 = await localMockFetch('https://local.qavora/api/checklists', {
+      method: 'POST',
+      body: { id: 'mock-chk-dup', title: 'First Mock Checklist', items: [] },
+    });
+    expect(dupChk1.status).toBe(201);
+    const dupChk2 = await localMockFetch('https://local.qavora/api/checklists', {
+      method: 'POST',
+      body: { id: 'mock-chk-dup', title: 'Duplicate Mock Checklist', items: [] },
+    });
+    expect(dupChk2.status).toBe(409);
+
+    // Part B: Partial sync failures + interrupted 409 duplicate recovery for imported projects & checklists
+    setSimulatedOfflineMode(true, { skipAutoReconnect: true });
+    const impRes = await importWorkspaceOffline({
+      userId,
+      mode: 'merge',
+      projects: [
+        { id: 'proj-p1', name: 'Project One', testSuites: [] },
+        { id: 'proj-p2', name: 'Project Two (Transient Fail)', testSuites: [] },
+      ],
+      checklists: [
+        { id: 'chk-c1', title: 'Checklist One', items: [{ id: 'i1', title: 'Item 1' }] },
+        { id: 'chk-c2', title: 'Checklist Two (Transient Fail)', items: [{ id: 'i2', title: 'Item 2' }] },
+      ],
+    });
+    expect(impRes.ok).toBe(true);
+
+    // Suppose proj-p1 & chk-c1 already succeeded on an interrupted prior network attempt
+    // (server returns 409 CONFLICT on retry CREATE), while proj-p2 & chk-c2 fail 500 on first pass.
+    const serverProjects = [
+      { id: 'proj-p1', userId, name: 'Project One', testSuites: [], updatedAt: '2026-06-05T12:00:00.000Z' },
+    ];
+    const serverChecklists = [
+      {
+        id: 'chk-c1',
+        userId,
+        title: 'Checklist One',
+        phases: [{ id: 'phase_main', title: 'General QA', items: [{ id: 'i1', title: 'Item 1' }] }],
+        updatedAt: '2026-06-05T12:00:00.000Z',
+      },
+    ];
+    let passCount = 1;
+
+    await storeCookiesFromResponse(
+      new Response('{}', {
+        status: 200,
+        headers: { 'set-cookie': 'qavora_auth_token=tok_h2p; Path=/; HttpOnly' },
+      }),
+      'https://qavora.example.test/api/auth/login'
+    );
+
+    globalThis.fetch = async (url, init = {}) => {
+      const target = String(url);
+      const method = String(init.method || 'GET').toUpperCase();
+      const body = init.body ? JSON.parse(init.body) : {};
+      if (target.endsWith('/api/auth/csrf')) {
+        return new Response(JSON.stringify({ csrfToken: 'csrf_h2p' }), { status: 200 });
+      }
+      if (target.endsWith('/api/projects') && method === 'POST') {
+        if (serverProjects.some((p) => p.id === body.id)) {
+          return new Response(JSON.stringify({ error: 'Already exists', code: 'CONFLICT' }), { status: 409 });
+        }
+        if (body.id === 'proj-p2' && passCount === 1) {
+          return new Response(JSON.stringify({ error: 'Temporary 500' }), { status: 500 });
+        }
+        const created = { ...body, userId, updatedAt: '2026-06-05T12:05:00.000Z' };
+        serverProjects.push(created);
+        return new Response(JSON.stringify(created), { status: 201 });
+      }
+      if (target.endsWith('/api/projects/proj-p1') && method === 'GET') {
+        return new Response(JSON.stringify({ project: serverProjects[0] }), { status: 200 });
+      }
+      if (target.match(/\/api\/projects\/[^/]+\/data$/) && method === 'PATCH') {
+        const pid = target.split('/').slice(-2, -1)[0];
+        const idx = serverProjects.findIndex((p) => p.id === pid);
+        serverProjects[idx] = { ...serverProjects[idx], ...body, updatedAt: '2026-06-05T12:06:00.000Z' };
+        return new Response(JSON.stringify(serverProjects[idx]), { status: 200 });
+      }
+      if (target.endsWith('/api/checklists') && method === 'POST') {
+        if (serverChecklists.some((c) => c.id === body.id)) {
+          return new Response(JSON.stringify({ error: 'Already exists', code: 'CONFLICT' }), { status: 409 });
+        }
+        if (body.id === 'chk-c2' && passCount === 1) {
+          return new Response(JSON.stringify({ error: 'Temporary 500' }), { status: 500 });
+        }
+        const created = { ...body, userId, updatedAt: '2026-06-05T12:07:00.000Z' };
+        serverChecklists.push(created);
+        return new Response(JSON.stringify({ checklist: created }), { status: 201 });
+      }
+      if (target.endsWith('/api/checklists/chk-c1') && method === 'GET') {
+        return new Response(JSON.stringify({ checklist: serverChecklists[0] }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    };
+
+    setSimulatedOfflineMode(false, { skipAutoReconnect: true });
+    const firstPass = await processProjectSyncQueue(userId, { ignoreBackoff: true });
+    // proj-p1 CREATE (409->idempotent fetch) + data UPDATE + chk-c1 CREATE (409->idempotent fetch) = 3 synced; proj-p2 + chk-c2 = 2 failed
+    expect(firstPass.synced).toBe(3);
+    expect(firstPass.failed).toBe(2);
+
+    const remainingAfterFirstPass = await getPendingProjectOperations(userId);
+    expect(remainingAfterFirstPass.some((o) => o.projectId === 'proj-p2')).toBe(true);
+    expect(remainingAfterFirstPass.some((o) => o.checklistId === 'chk-c2')).toBe(true);
+    // proj-p2 and chk-c2 still safely cached offline
+    const midProjCache = await getCachedProjectsForUser(userId, true);
+    const midChkCache = await getCachedChecklistsForUser(userId);
+    expect(midProjCache.some((p) => p.id === 'proj-p2')).toBe(true);
+    expect(midChkCache.some((c) => c.id === 'chk-c2')).toBe(true);
+
+    // Retry pass succeeds cleanly without creating duplicate p1 or c1
+    passCount = 2;
+    const secondPass = await processProjectSyncQueue(userId, {
+      ignoreBackoff: true,
+      retryFailed: true,
+    });
+    expect(secondPass.failed).toBe(0);
+    expect(secondPass.conflicts).toBe(0);
+    expect((await getPendingProjectOperations(userId)).length).toBe(0);
+    // Third sync run is a pure no-op — zero duplicates
+    const thirdPass = await processProjectSyncQueue(userId, { ignoreBackoff: true });
+    expect(thirdPass.synced).toBe(0);
+    expect(serverProjects.map((p) => p.id).sort()).toEqual(['proj-p1', 'proj-p2']);
+    expect(serverChecklists.map((c) => c.id).sort()).toEqual(['chk-c1', 'chk-c2']);
+  });
+
+  it('10. Online import in DataManagementSection immediately refreshes projects AND checklists without duplicate requests', async () => {
+    const userId = 'user-h2-online';
+    let checklistGetCount = 0;
+    let projectGetCount = 0;
+
+    let serverProjects = [
+      { id: 'proj-init', userId, name: 'Initial Project', testSuites: [], updatedAt: '2026-06-01T00:00:00.000Z' },
+    ];
+    let serverChecklists = [
+      { id: 'chk-init', userId, title: 'Initial Checklist', items: [], updatedAt: '2026-06-01T00:00:00.000Z' },
+    ];
+
+    globalThis.fetch = async (url, init = {}) => {
+      const target = String(url);
+      const method = String(init.method || 'GET').toUpperCase();
+      const body = init.body ? JSON.parse(init.body) : {};
+      if (target.endsWith('/api/auth/me')) {
+        return new Response(
+          JSON.stringify({ user: { userId, email: 'online@example.com', name: 'Online QA', role: 'QA Tester' } }),
+          { status: 200 }
+        );
+      }
+      if (target.endsWith('/api/auth/csrf')) {
+        return new Response(JSON.stringify({ csrfToken: 'csrf_h2o' }), { status: 200 });
+      }
+      if (target.endsWith('/api/projects') && method === 'GET') {
+        projectGetCount += 1;
+        return new Response(JSON.stringify(serverProjects), { status: 200 });
+      }
+      if (target.endsWith('/api/checklists') && method === 'GET') {
+        checklistGetCount += 1;
+        return new Response(JSON.stringify({ checklists: serverChecklists }), { status: 200 });
+      }
+      if (target.endsWith('/api/data/import') && method === 'POST') {
+        serverProjects = [...body.projects.map((p) => ({ ...p, userId })), ...serverProjects];
+        serverChecklists = [...body.checklists.map((c) => ({ ...c, userId })), ...serverChecklists];
+        return new Response(
+          JSON.stringify({
+            mode: body.mode || 'merge',
+            message: 'Imported workspace and checklists cleanly',
+            imported: { projects: body.projects.length, checklists: body.checklists.length },
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    };
+
+    await storeCookiesFromResponse(
+      new Response('{}', {
+        status: 200,
+        headers: { 'set-cookie': 'qavora_auth_token=tok_h2o; Path=/; HttpOnly' },
+      }),
+      'https://qavora.example.test/api/auth/login'
+    );
+
+    let wsCtx = null;
+    let projCtx = null;
+    function Observer() {
+      wsCtx = useWorkspace();
+      projCtx = useProjects();
+      return React.createElement(DataManagementSection);
+    }
+
+    await harness.render(
+      React.createElement(
+        ThemeProvider,
+        null,
+        React.createElement(
+          AuthProvider,
+          null,
+          React.createElement(
+            ProjectProvider,
+            null,
+            React.createElement(WorkspaceProvider, null, React.createElement(Observer))
+          )
+        )
+      )
+    );
+    await harness.flush(60);
+
+    expect(projCtx.projects.map((p) => p.id)).toEqual(['proj-init']);
+    expect(wsCtx.checklists.map((c) => c.id)).toEqual(['chk-init']);
+
+    const baselineChecklistGets = checklistGetCount;
+    const baselineProjectGets = projectGetCount;
+
+    const onlineImportJson = JSON.stringify({
+      application: 'Qavora',
+      backupVersion: 1,
+      schemaVersion: 1,
+      projects: [{ id: 'proj-imported-online', name: 'Imported Online Proj', testSuites: [] }],
+      checklists: [
+        {
+          id: 'chk-imported-online',
+          title: 'Imported Online Checklist',
+          priority: 'High',
+          items: [{ id: 'i-on-1', title: 'Verify online import refresh', completed: false }],
+        },
+      ],
+    });
+
+    const inputNodes = harness.findByAttr('aria-label', 'Backup JSON payload input');
+    expect(inputNodes.length).toBe(1);
+    const inputNode = inputNodes[0];
+    inputNode.value = onlineImportJson;
+    const reactPropsKey = Object.keys(inputNode).find((k) =>
+      k.startsWith('__reactProps$')
+    );
+    await React.act(async () => {
+      if (reactPropsKey && typeof inputNode[reactPropsKey]?.onChange === 'function') {
+        inputNode[reactPropsKey].onChange({ target: inputNode });
+      } else {
+        inputNode.dispatchEvent(
+          new dom.Event('change', { bubbles: true, target: inputNode })
+        );
+      }
+    });
+    await harness.flush(20);
+
+    const previewBtns = harness.findByAttr(
+      'aria-label',
+      'Validate and preview JSON import'
+    );
+    expect(previewBtns.length).toBe(1);
+    await harness.press(previewBtns[0]);
+    await harness.flush(20);
+
+    // Import preview shows both projects and checklists count cleanly
+    expect(harness.container.textContent).toContain('Checklists');
+
+    const confirmBtns = harness.findByAttr('aria-label', 'Execute Safe Merge');
+    expect(confirmBtns.length).toBe(1);
+    await harness.press(confirmBtns[0]);
+    await harness.flush(60);
+
+    // Both projects AND checklists updated immediately in context with exactly one GET each
+    expect(projCtx.projects.map((p) => p.id)).toEqual(['proj-imported-online', 'proj-init']);
+    expect(wsCtx.checklists.map((c) => c.id).sort()).toEqual(['chk-imported-online', 'chk-init']);
+    expect(checklistGetCount - baselineChecklistGets).toBe(1);
+    expect(projectGetCount - baselineProjectGets).toBe(1);
+  });
+
+  it('10b. Offline import via DataManagementSection UI persists projects and checklists, updates WorkspaceContext immediately, and syncs on reconnect', async () => {
+    const userId = 'user-h2-ui-offline';
+    const serverProjects = [
+      { id: 'proj-ui-base', userId, name: 'UI Base Project', testSuites: [], updatedAt: '2026-06-01T00:00:00.000Z' },
+    ];
+    const serverChecklists = [
+      { id: 'chk-ui-base', userId, title: 'UI Base Checklist', items: [], updatedAt: '2026-06-01T00:00:00.000Z' },
+    ];
+
+    globalThis.fetch = async (url, init = {}) => {
+      const target = String(url);
+      const method = String(init.method || 'GET').toUpperCase();
+      const body = init.body ? JSON.parse(init.body) : {};
+      if (target.endsWith('/api/auth/me')) {
+        return new Response(
+          JSON.stringify({ user: { userId, email: 'uioffline@example.com', name: 'Offline UI QA', role: 'QA Tester' } }),
+          { status: 200 }
+        );
+      }
+      if (target.endsWith('/api/auth/csrf')) {
+        return new Response(JSON.stringify({ csrfToken: 'csrf_uioff' }), { status: 200 });
+      }
+      if (target.endsWith('/api/projects') && method === 'GET') {
+        return new Response(JSON.stringify(serverProjects), { status: 200 });
+      }
+      if (target.endsWith('/api/projects') && method === 'POST') {
+        const created = { ...body, userId, updatedAt: '2026-06-06T00:00:00.000Z' };
+        serverProjects.push(created);
+        return new Response(JSON.stringify(created), { status: 201 });
+      }
+      if (target.match(/\/api\/projects\/[^/]+\/data$/) && method === 'PATCH') {
+        const pid = target.split('/').slice(-2, -1)[0];
+        const idx = serverProjects.findIndex((p) => p.id === pid);
+        if (idx >= 0) {
+          serverProjects[idx] = { ...serverProjects[idx], ...body, updatedAt: '2026-06-06T00:01:00.000Z' };
+        }
+        return new Response(JSON.stringify(serverProjects[idx] || {}), { status: 200 });
+      }
+      if (target.endsWith('/api/checklists') && method === 'GET') {
+        return new Response(JSON.stringify({ checklists: serverChecklists }), { status: 200 });
+      }
+      if (target.endsWith('/api/checklists') && method === 'POST') {
+        const created = { ...body, userId, updatedAt: '2026-06-06T00:02:00.000Z' };
+        serverChecklists.push(created);
+        return new Response(JSON.stringify({ checklist: created }), { status: 201 });
+      }
+      if (target.endsWith('/api/data/import')) {
+        throw new Error('Must NOT call /api/data/import while offline');
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    };
+
+    await storeCookiesFromResponse(
+      new Response('{}', {
+        status: 200,
+        headers: { 'set-cookie': 'qavora_auth_token=tok_uioff; Path=/; HttpOnly' },
+      }),
+      'https://qavora.example.test/api/auth/login'
+    );
+
+    let wsCtx = null;
+    let projCtx = null;
+    function Observer() {
+      wsCtx = useWorkspace();
+      projCtx = useProjects();
+      return React.createElement(DataManagementSection);
+    }
+
+    await harness.render(
+      React.createElement(
+        ThemeProvider,
+        null,
+        React.createElement(
+          AuthProvider,
+          null,
+          React.createElement(
+            ProjectProvider,
+            null,
+            React.createElement(WorkspaceProvider, null, React.createElement(Observer))
+          )
+        )
+      )
+    );
+    await harness.flush(60);
+
+    // Go offline after initial load
+    await React.act(async () => {
+      setSimulatedOfflineMode(true, { skipAutoReconnect: true });
+    });
+    await harness.flush(30);
+
+    const offlineBackupJson = JSON.stringify({
+      application: 'Qavora',
+      backupVersion: 1,
+      schemaVersion: 1,
+      projects: [{ id: 'proj-ui-offline-new', name: 'Offline UI Imported', testSuites: [] }],
+      checklists: [
+        {
+          id: 'chk-ui-offline-new',
+          title: 'Offline UI Checklist',
+          priority: 'Critical',
+          projectId: 'proj-ui-offline-new',
+          items: [{ id: 'iuo-1', title: 'Offline UI check', completed: true }],
+        },
+      ],
+    });
+
+    const inputNodes = harness.findByAttr('aria-label', 'Backup JSON payload input');
+    const inputNode = inputNodes[0];
+    inputNode.value = offlineBackupJson;
+    const reactPropsKey = Object.keys(inputNode).find((k) =>
+      k.startsWith('__reactProps$')
+    );
+    await React.act(async () => {
+      if (reactPropsKey && typeof inputNode[reactPropsKey]?.onChange === 'function') {
+        inputNode[reactPropsKey].onChange({ target: inputNode });
+      } else {
+        inputNode.dispatchEvent(
+          new dom.Event('change', { bubbles: true, target: inputNode })
+        );
+      }
+    });
+    await harness.flush(20);
+
+    await harness.press(
+      harness.findByAttr('aria-label', 'Validate and preview JSON import')[0]
+    );
+    await harness.flush(20);
+
+    await harness.press(harness.findByAttr('aria-label', 'Execute Safe Merge')[0]);
+    await harness.flush(60);
+
+    expect(projCtx.projects.some((p) => p.id === 'proj-ui-offline-new')).toBe(true);
+    expect(wsCtx.checklists.some((c) => c.id === 'chk-ui-offline-new')).toBe(true);
+
+    // Reconnect and process queued ops -> both imported records land on server
+    let syncRes;
+    await React.act(async () => {
+      setSimulatedOfflineMode(false, { skipAutoReconnect: true });
+      syncRes = await processProjectSyncQueue(userId, { ignoreBackoff: true });
+    });
+    await harness.flush(30);
+    expect(syncRes.failed).toBe(0);
+    expect(serverProjects.some((p) => p.id === 'proj-ui-offline-new')).toBe(true);
+    expect(serverChecklists.some((c) => c.id === 'chk-ui-offline-new')).toBe(true);
+  });
+});
+
 

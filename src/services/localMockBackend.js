@@ -660,12 +660,25 @@ export async function localMockFetch(urlString, init = {}) {
   }
 
   if (method === 'POST' && path === '/api/projects') {
+    const requestedId =
+      typeof body.id === 'string' && body.id.trim() ? body.id.trim() : '';
+    if (
+      requestedId &&
+      userProjects.some((p) => p.id === requestedId || p._id === requestedId)
+    ) {
+      return jsonResponse(
+        {
+          error: 'A project with this ID already exists.',
+          code: 'CONFLICT',
+        },
+        409
+      );
+    }
     const id =
-      typeof body.id === 'string' && body.id.trim()
-        ? body.id.trim()
-        : `proj_${Date.now().toString(36)}_${Math.random()
-            .toString(36)
-            .slice(2, 6)}`;
+      requestedId ||
+      `proj_${Date.now().toString(36)}_${Math.random()
+        .toString(36)
+        .slice(2, 6)}`;
     const name = String(body.name || '').trim();
     if (!name) {
       return jsonResponse({ error: "Field 'name' is required." }, 400);
@@ -782,12 +795,27 @@ export async function localMockFetch(urlString, init = {}) {
   }
 
   if (method === 'POST' && path === '/api/checklists') {
+    const requestedId =
+      typeof body.id === 'string' && body.id.trim() ? body.id.trim() : '';
+    if (
+      requestedId &&
+      userChecklists.some(
+        (c) => c.id === requestedId || c._id === requestedId
+      )
+    ) {
+      return jsonResponse(
+        {
+          error: 'A checklist with this ID already exists.',
+          code: 'CONFLICT',
+        },
+        409
+      );
+    }
     const id =
-      typeof body.id === 'string' && body.id.trim()
-        ? body.id.trim()
-        : `chk_${Date.now().toString(36)}_${Math.random()
-            .toString(36)
-            .slice(2, 6)}`;
+      requestedId ||
+      `chk_${Date.now().toString(36)}_${Math.random()
+        .toString(36)
+        .slice(2, 6)}`;
     const newChecklist = {
       ...cloneJson(body),
       id,
@@ -849,6 +877,9 @@ export async function localMockFetch(urlString, init = {}) {
         userId,
         updatedAt: nowIso,
       };
+      if (Array.isArray(updates.phases) && updates.items === undefined) {
+        delete updated.items;
+      }
       userChecklists[idx] = updated;
       await saveState(state);
       return jsonResponse({ checklist: cloneJson(updated) });
