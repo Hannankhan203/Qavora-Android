@@ -13,6 +13,7 @@
       "package": "com.qavora.android",
       "versionCode": 2,
       "softwareKeyboardLayoutMode": "resize",
+      "allowBackup": false,
       "adaptiveIcon": {
         "backgroundColor": "#0E1424",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -24,7 +25,13 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": false
+        }
+      ],
+      "./plugins/withAndroidBackupProtection",
       [
         "expo-splash-screen",
         {
