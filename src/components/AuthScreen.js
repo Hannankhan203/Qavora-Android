@@ -34,6 +34,7 @@ import {
   EMAIL_REGEX,
   formatAuthErrorMessage,
 } from '../services/authService';
+import { isLocalMockBackendActive } from '../services/apiClient';
 
 const ROLE_OPTIONS = [
   'QA Tester',
@@ -122,6 +123,7 @@ export default function AuthScreen() {
     clearAuthFeedback,
   } = useAuth();
 
+  const isLocalMockActive = isLocalMockBackendActive();
   const [mode, setMode] = useState('login'); // 'login' | 'register'
 
   // Login fields
@@ -472,10 +474,15 @@ export default function AuthScreen() {
               <Text
                 style={[
                   styles.kicker,
-                  { color: colors.primary, fontFamily: monoFontFamily },
+                  {
+                    color: isLocalMockActive ? colors.warning : colors.primary,
+                    fontFamily: monoFontFamily,
+                  },
                 ]}
               >
-                QAVORA CLOUD WORKSPACE
+                {isLocalMockActive
+                  ? 'LOCAL DEMO WORKSPACE'
+                  : 'QAVORA CLOUD WORKSPACE'}
               </Text>
               <Text style={[styles.heading, { color: colors.text }]}>
                 {mode === 'login'
@@ -487,6 +494,34 @@ export default function AuthScreen() {
                   ? 'Authenticate with your Qavora credentials to access your QA workspace.'
                   : 'Register a new tester profile on the Qavora backend.'}
               </Text>
+
+              {isLocalMockActive ? (
+                <View
+                  testID="local-demo-backend-indicator"
+                  accessibilityRole="alert"
+                  style={[
+                    styles.demoBanner,
+                    {
+                      backgroundColor: colors.warningSoft,
+                      borderColor: colors.warning,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.demoBannerTitle,
+                      { color: colors.warning, fontFamily: monoFontFamily },
+                    ]}
+                  >
+                    LOCAL DEMO BACKEND
+                  </Text>
+                  <Text style={[styles.demoBannerText, { color: colors.text }]}>
+                    Running in local demo mode. Data is stored only on this device
+                    and is not synced with a Qavora production server. Use Create
+                    Account to register a demo user for this session.
+                  </Text>
+                </View>
+              ) : null}
 
               {/* Mode Switcher Tabs */}
               <View
@@ -1519,6 +1554,24 @@ const styles = StyleSheet.create({
   alertText: {
     fontSize: 13,
     fontWeight: '600',
+    lineHeight: 18,
+  },
+  demoBanner: {
+    borderWidth: 1.5,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 18,
+    gap: 4,
+  },
+  demoBannerTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+  },
+  demoBannerText: {
+    fontSize: 12.5,
+    fontWeight: '500',
     lineHeight: 18,
   },
   formSection: {

@@ -35,6 +35,7 @@ import ProfileSettingsScreen from './src/components/ProfileSettingsScreen';
 import DataManagementSection from './src/components/DataManagementSection';
 import VectorIcon from './src/components/VectorIcon';
 import { startConnectivityMonitoring } from './src/services/offlineSyncService';
+import { isLocalMockBackendActive } from './src/services/apiClient';
 
 export { NAVIGATION_DESTINATIONS };
 
@@ -1124,6 +1125,35 @@ function QavoraQAShell() {
         </View>
       </View>
 
+      {isLocalMockBackendActive() ? (
+        <View
+          testID="local-demo-backend-indicator"
+          accessibilityRole="alert"
+          style={[
+            styles.localDemoBanner,
+            {
+              backgroundColor: colors.warningSoft,
+              borderBottomColor: colors.warning,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.localDemoBannerBadge,
+              { color: colors.warning, fontFamily: monoFontFamily },
+            ]}
+          >
+            LOCAL DEMO BACKEND
+          </Text>
+          <Text
+            numberOfLines={2}
+            style={[styles.localDemoBannerText, { color: colors.text }]}
+          >
+            On-device demo mode active (not connected to production Qavora server).
+          </Text>
+        </View>
+      ) : null}
+
       <View
         style={styles.workspaceBody}
         collapsable={false}
@@ -1571,7 +1601,11 @@ function QavoraQAShell() {
                   { color: colors.textMuted, fontFamily: monoFontFamily },
                 ]}
               >
-                {isOffline ? 'Offline Queue Active' : 'Online · Synced'}
+                {isLocalMockBackendActive()
+                  ? 'LOCAL DEMO BACKEND · Not Synced'
+                  : isOffline
+                  ? 'Offline Queue Active'
+                  : 'Online · Synced'}
               </Text>
               <Pressable
                 onPress={toggleTheme}
@@ -1859,6 +1893,26 @@ const styles = StyleSheet.create({
   workspaceBody: {
     flex: 1,
     position: 'relative',
+  },
+  localDemoBanner: {
+    borderBottomWidth: 1.5,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+  },
+  localDemoBannerBadge: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    letterSpacing: 0.7,
+  },
+  localDemoBannerText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    flex: 1,
+    minWidth: 180,
   },
   mainViewport: {
     flex: 1,

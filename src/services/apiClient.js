@@ -27,6 +27,7 @@ import {
   getCookieHeader,
   clearAllCookies,
 } from './cookieManager.js';
+import { localMockFetch } from './localMockBackend.js';
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const HEALTH_ENDPOINT_PATH = '/api/health';
@@ -200,6 +201,62 @@ export function isProductionEnvironment() {
 }
 
 /**
+ * Returns true only when EXPO_PUBLIC_ALLOW_LOCAL_MOCK is explicitly set to "true".
+ */
+export function isLocalMockOptedIn() {
+  if (typeof process === 'undefined' || !process.env) {
+    return false;
+  }
+  return (
+    stripQuotesAndTrim(process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK).toLowerCase() ===
+    'true'
+  );
+}
+
+/**
+ * Determines whether the runtime is a production or compiled release build
+ * where local mock fallback must always be forbidden.
+ */
+export function isReleaseOrProductionRuntime() {
+  if (isProductionEnvironment()) {
+    return true;
+  }
+  const isNodeTest =
+    typeof process !== 'undefined' &&
+    process.env &&
+    process.env.NODE_ENV === 'test';
+  if (typeof __DEV__ === 'boolean' && __DEV__ === false && !isNodeTest) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Determines whether the built-in local demo backend is actively selected.
+ * Never activates when a backend base URL or custom fetch implementation is provided,
+ * never activates in production/release builds, and never activates silently
+ * without explicit `EXPO_PUBLIC_ALLOW_LOCAL_MOCK=true`.
+ *
+ * @param {string} [overrideBaseUrl]
+ * @param {object} [options]
+ * @param {boolean} [options.hasCustomFetch]
+ * @returns {boolean}
+ */
+export function isLocalMockBackendActive(overrideBaseUrl, options = {}) {
+  const resolvedBaseUrl = getApiBaseUrl(overrideBaseUrl);
+  if (resolvedBaseUrl) {
+    return false;
+  }
+  if (options && options.hasCustomFetch) {
+    return false;
+  }
+  if (isReleaseOrProductionRuntime()) {
+    return false;
+  }
+  return isLocalMockOptedIn();
+}
+
+/**
  * Normalizes a base URL string by trimming whitespace, stripping surrounding
  * quotes, and stripping trailing slashes.
  *
@@ -363,11 +420,13 @@ export function getTrustedOrigin(overrideBaseUrl, explicitTrustedOrigin) {
  */
 export function validateBaseUrl(baseUrl, options = {}) {
   if (!baseUrl) {
+    const isProdOrRelease = isReleaseOrProductionRuntime();
     return {
       valid: false,
       code: 'INVALID_BASE_URL',
-      reason:
-        'Backend API base URL is not configured. Set EXPO_PUBLIC_API_BASE_URL in your environment.',
+      reason: isProdOrRelease
+        ? 'Backend API base URL is not configured for production. Set EXPO_PUBLIC_API_BASE_URL in your environment (local mock mode is disabled in production builds).'
+        : 'Backend API base URL is not configured. Set EXPO_PUBLIC_API_BASE_URL in your environment, or set EXPO_PUBLIC_ALLOW_LOCAL_MOCK=true for explicit local demo mode.',
     };
   }
 
@@ -620,12 +679,36 @@ export function createApiClient(clientConfig = {}) {
       cleanPath === '/api/auth/login' || cleanPath === '/api/auth/register';
 
     const effectiveBaseUrl = options.baseUrl ?? clientConfig.baseUrl;
-    const url = buildRequestUrl(path, {
-      baseUrl: effectiveBaseUrl,
-      params: options.params,
-      method: normalizedMethod,
-      requireHttps: options.requireHttps,
+    const hasCustomFetch = Boolean(clientConfig.fetchImpl || options.fetchImpl);
+    const useLocalMock = isLocalMockBackendActive(effectiveBaseUrl, {
+      hasCustomFetch,
     });
+
+    let url;
+    if (useLocalMock) {
+      const normalizedPath =
+        typeof path === 'string' && path.trim() !== ''
+          ? path.startsWith('/')
+            ? path.trim()
+            : `/${path.trim()}`
+          : '/';
+      const mockUrl = new URL(`http://localhost:3000${normalizedPath}`);
+      if (options.params && typeof options.params === 'object') {
+        Object.entries(options.params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            mockUrl.searchParams.append(key, String(value));
+          }
+        });
+      }
+      url = mockUrl.toString();
+    } else {
+      url = buildRequestUrl(path, {
+        baseUrl: effectiveBaseUrl,
+        params: options.params,
+        method: normalizedMethod,
+        requireHttps: options.requireHttps,
+      });
+    }
 
     const timeoutMs =
       typeof options.timeoutMs === 'number' && options.timeoutMs > 0
@@ -714,7 +797,9 @@ export function createApiClient(clientConfig = {}) {
       controller.abort();
     }, timeoutMs);
 
-    const fetchFn = clientConfig.fetchImpl || options.fetchImpl || globalThis.fetch;
+    const fetchFn = useLocalMock
+      ? localMockFetch
+      : clientConfig.fetchImpl || options.fetchImpl || globalThis.fetch;
     if (typeof fetchFn !== 'function') {
       clearTimeout(timeoutId);
       throw new ApiClientError({

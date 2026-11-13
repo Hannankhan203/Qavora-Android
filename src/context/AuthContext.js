@@ -73,6 +73,14 @@ export function AuthProvider({ children }) {
             'session'
           )
         );
+      } else if (
+        result.reason === 'UNCONFIGURED_BASE_URL' ||
+        result.code === 'INVALID_BASE_URL'
+      ) {
+        setAuthError(
+          result.error ||
+            formatAuthErrorMessage({ code: 'INVALID_BASE_URL' }, 'session')
+        );
       }
       return result;
     } finally {

@@ -11,7 +11,8 @@
       },
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://qavora-mongo-db-integrated.vercel.app",
-        "EXPO_PUBLIC_TRUSTED_ORIGIN": "https://qavora-mongo-db-integrated.vercel.app"
+        "EXPO_PUBLIC_TRUSTED_ORIGIN": "https://qavora-mongo-db-integrated.vercel.app",
+        "EXPO_PUBLIC_ALLOW_LOCAL_MOCK": "false"
       }
     },
     "production": {
@@ -20,8 +21,10 @@
         "buildType": "app-bundle"
       },
       "env": {
+        "EXPO_PUBLIC_ENV": "production",
         "EXPO_PUBLIC_API_BASE_URL": "https://qavora-mongo-db-integrated.vercel.app",
-        "EXPO_PUBLIC_TRUSTED_ORIGIN": "https://qavora-mongo-db-integrated.vercel.app"
+        "EXPO_PUBLIC_TRUSTED_ORIGIN": "https://qavora-mongo-db-integrated.vercel.app",
+        "EXPO_PUBLIC_ALLOW_LOCAL_MOCK": "false"
       }
     }
   }

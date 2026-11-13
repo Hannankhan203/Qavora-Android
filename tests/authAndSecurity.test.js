@@ -16,10 +16,26 @@ const {
   getLastAuthDebugDiagnostic,
   formatAuthErrorMessage,
   setAuthUserStorageAdapter,
+  loginUser,
+  registerUser,
+  restoreAuthenticatedSession,
 } = await import('../src/services/authService.js');
 const { AuthProvider, useAuth } = await import('../src/context/AuthContext.js');
 const AuthScreen = (await import('../src/components/AuthScreen.js')).default;
-const { onUnauthorizedResponse } = await import('../src/services/apiClient.js');
+const {
+  onUnauthorizedResponse,
+  ApiClientError,
+  validateBaseUrl,
+  isLocalMockBackendActive,
+  apiClient,
+  checkBackendHealth,
+} = await import('../src/services/apiClient.js');
+const {
+  localMockFetch,
+  hasActiveLocalMockSession,
+  setLocalMockStorageAdapter,
+  resetLocalMockMemoryForTests,
+} = await import('../src/services/localMockBackend.js');
 const {
   COOKIE_JAR_SECURE_STORE_KEY,
   CookiePersistenceError,
@@ -816,5 +832,402 @@ describe('HIGH-06 — ProjectContext Render Purity & User Isolation', () => {
     expect(syncUserSeenDuringRender[0].activeSyncUserAtRender).toBeNull();
     expect(getActiveSyncUser()).toBe('user-B');
     expect(latestProjectsCtx.projects.map((p) => p.id)).toEqual(['proj-B1']);
+  });
+});
+
+// =============================================================================
+// 6. HIGH-01 — Mock Backend Security Hardening
+// =============================================================================
+describe('HIGH-01 — Mock Backend Security Hardening', () => {
+  const originalFetch = globalThis.fetch;
+  const originalApiUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
+  const originalApiUrlFallback = process.env.EXPO_PUBLIC_API_URL;
+  const originalAllowMock = process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK;
+  const originalExpoEnv = process.env.EXPO_PUBLIC_ENV;
+  const originalNodeEnv = process.env.NODE_ENV;
+  let harness;
+
+  beforeEach(async () => {
+    memoryAsyncStorage._map.clear();
+    secureStoreController.reset();
+    setCookieStorageAdapter(null);
+    setSecureStoreImplementation(mockSecureStoreModule);
+    setAuthUserStorageAdapter(memoryAsyncStorage);
+    setLocalMockStorageAdapter(memoryAsyncStorage);
+    resetLocalMockMemoryForTests();
+    await clearAllCookies();
+    delete process.env.EXPO_PUBLIC_API_BASE_URL;
+    delete process.env.EXPO_PUBLIC_API_URL;
+    delete process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK;
+    delete process.env.EXPO_PUBLIC_ENV;
+    process.env.NODE_ENV = 'test';
+    harness = await createRenderHarness();
+  });
+
+  afterEach(async () => {
+    await harness.cleanup();
+    globalThis.fetch = originalFetch;
+    setLocalMockStorageAdapter(null);
+    resetLocalMockMemoryForTests();
+
+    if (originalApiUrl === undefined) {
+      delete process.env.EXPO_PUBLIC_API_BASE_URL;
+    } else {
+      process.env.EXPO_PUBLIC_API_BASE_URL = originalApiUrl;
+    }
+    if (originalApiUrlFallback === undefined) {
+      delete process.env.EXPO_PUBLIC_API_URL;
+    } else {
+      process.env.EXPO_PUBLIC_API_URL = originalApiUrlFallback;
+    }
+    if (originalAllowMock === undefined) {
+      delete process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK;
+    } else {
+      process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK = originalAllowMock;
+    }
+    if (originalExpoEnv === undefined) {
+      delete process.env.EXPO_PUBLIC_ENV;
+    } else {
+      process.env.EXPO_PUBLIC_ENV = originalExpoEnv;
+    }
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+    await clearAllCookies();
+  });
+
+  it('1. missing API URL in production fails closed even if EXPO_PUBLIC_ALLOW_LOCAL_MOCK=true', async () => {
+    process.env.EXPO_PUBLIC_ENV = 'production';
+    process.env.NODE_ENV = 'production';
+    process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK = 'true';
+
+    expect(isLocalMockBackendActive()).toBe(false);
+    expect(validateBaseUrl('')).toEqual({
+      valid: false,
+      code: 'INVALID_BASE_URL',
+      reason: expect.stringContaining('not configured for production'),
+    });
+
+    let prodErr = null;
+    try {
+      await apiClient.get('/api/projects');
+    } catch (err) {
+      prodErr = err;
+    }
+    expect(prodErr).toBeInstanceOf(ApiClientError);
+    expect(prodErr?.code).toBe('INVALID_BASE_URL');
+
+    const directMockRes = await localMockFetch('http://localhost:3000/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'prod@example.com', password: 'Password123!' }),
+    });
+    expect(directMockRes.status).toBe(403);
+    expect(await hasActiveLocalMockSession()).toBe(false);
+  });
+
+  it('2. missing API URL in development/test does NOT silently activate mock mode', async () => {
+    delete process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK;
+    expect(isLocalMockBackendActive()).toBe(false);
+
+    const healthRes = await checkBackendHealth();
+    expect(healthRes.ok).toBe(false);
+    expect(healthRes.error?.code).toBe('INVALID_BASE_URL');
+
+    const loginRes = await loginUser({
+      email: 'silent@example.com',
+      password: 'Password123!',
+    });
+    expect(loginRes.ok).toBe(false);
+    expect(loginRes.user).toBeNull();
+    expect(loginRes.error).toContain('not configured properly');
+
+    const registerRes = await registerUser({
+      name: 'Silent Tester',
+      email: 'silent@example.com',
+      password: 'Password123!',
+    });
+    expect(registerRes.ok).toBe(false);
+    expect(registerRes.user).toBeNull();
+
+    const restoreRes = await restoreAuthenticatedSession();
+    expect(restoreRes.ok).toBe(false);
+    expect(restoreRes.code).toBe('INVALID_BASE_URL');
+    expect(restoreRes.reason).toBe('UNCONFIGURED_BASE_URL');
+
+    expect(memoryAsyncStorage._map.get('@qavora_local_mock_backend_v1')).toBeUndefined();
+  });
+
+  it('3. explicit EXPO_PUBLIC_ALLOW_LOCAL_MOCK=true activates demo mode and shows LOCAL DEMO BACKEND indicator', async () => {
+    process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK = 'true';
+    expect(isLocalMockBackendActive()).toBe(true);
+
+    const healthRes = await checkBackendHealth();
+    expect(healthRes.ok).toBe(true);
+    expect(healthRes.data?.mode).toBe('local-mock');
+
+    globalThis.fetch = async () => {
+      throw new Error('Network fetch must not be called in explicit local mock mode');
+    };
+
+    await harness.render(
+      React.createElement(
+        ThemeProvider,
+        null,
+        React.createElement(AuthProvider, null, React.createElement(AuthScreen))
+      )
+    );
+    await harness.flush(30);
+
+    const indicators = harness.findByAttr(
+      'data-testid',
+      'local-demo-backend-indicator'
+    );
+    expect(indicators.length).toBe(1);
+    expect(indicators[0].textContent).toContain('LOCAL DEMO BACKEND');
+  });
+
+  it('4 & 5. unknown email login fails with 401 and does NOT auto-create accounts', async () => {
+    process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK = 'true';
+
+    const attempt = await loginUser({
+      email: 'unknown.tester@example.com',
+      password: 'Password123!',
+    });
+
+    expect(attempt.ok).toBe(false);
+    expect(attempt.status).toBe(401);
+    expect(attempt.user).toBeNull();
+    expect(await hasActiveLocalMockSession()).toBe(false);
+
+    const persistedRaw = memoryAsyncStorage._map.get('@qavora_local_mock_backend_v1');
+    if (persistedRaw) {
+      const persisted = JSON.parse(persistedRaw);
+      expect(Object.keys(persisted.users || {})).toHaveLength(0);
+    }
+  });
+
+  it('6. registration avoids persisting any password/secret to AsyncStorage while authenticating non-persistently in RAM', async () => {
+    process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK = 'true';
+
+    const regRes = await registerUser({
+      name: 'Demo Tester',
+      email: 'demo.tester@example.com',
+      password: 'SuperSecretDemoPassword!99',
+      role: 'QA Tester',
+    });
+
+    expect(regRes.ok).toBe(true);
+    expect(regRes.user?.email).toBe('demo.tester@example.com');
+
+    const persistedRaw = memoryAsyncStorage._map.get('@qavora_local_mock_backend_v1');
+    expect(typeof persistedRaw).toBe('string');
+    expect(persistedRaw).not.toContain('SuperSecretDemoPassword!99');
+    expect(persistedRaw).not.toContain('"password"');
+    expect(persistedRaw).not.toContain('"passwordHash"');
+
+    const persisted = JSON.parse(persistedRaw);
+    const savedUsers = Object.values(persisted.users || {});
+    expect(savedUsers).toHaveLength(1);
+    expect(savedUsers[0].password).toBeUndefined();
+    expect(savedUsers[0].passwordHash).toBeUndefined();
+    expect(savedUsers[0].salt).toBeUndefined();
+
+    // Wrong password fails 401
+    const wrongLogin = await loginUser({
+      email: 'demo.tester@example.com',
+      password: 'WrongPassword!11',
+    });
+    expect(wrongLogin.ok).toBe(false);
+    expect(wrongLogin.status).toBe(401);
+
+    // Correct password succeeds in the same active runtime
+    const goodLogin = await loginUser({
+      email: 'demo.tester@example.com',
+      password: 'SuperSecretDemoPassword!99',
+    });
+    expect(goodLogin.ok).toBe(true);
+    expect(goodLogin.status).toBe(200);
+
+    // Simulating cold restart clears ephemeral RAM credential map; password is NOT persisted on disk
+    resetLocalMockMemoryForTests();
+    const afterRestartLogin = await loginUser({
+      email: 'demo.tester@example.com',
+      password: 'SuperSecretDemoPassword!99',
+    });
+    expect(afterRestartLogin.ok).toBe(false);
+    expect(afterRestartLogin.status).toBe(401);
+  });
+
+  it('7. scrubs legacy persisted plaintext passwords from existing stored mock records on load', async () => {
+    process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK = 'true';
+
+    await memoryAsyncStorage.setItem(
+      '@qavora_local_mock_backend_v1',
+      JSON.stringify({
+        users: {
+          user_legacy_1: {
+            userId: 'user_legacy_1',
+            email: 'legacy@example.com',
+            name: 'Legacy User',
+            role: 'QA Tester',
+            password: 'ExposedLegacyPlaintextPassword!',
+            passwordHash: 'stale_hash',
+            token: 'stale_token',
+          },
+        },
+        activeUserId: null,
+        csrfToken: 'mock_csrf_legacy',
+        projectsByUser: {},
+        checklistsByUser: {},
+        snapshotsByUser: {},
+      })
+    );
+
+    const loginRes = await loginUser({
+      email: 'legacy@example.com',
+      password: 'ExposedLegacyPlaintextPassword!',
+    });
+    expect(loginRes.ok).toBe(false);
+    expect(loginRes.status).toBe(401);
+
+    const migratedRaw = memoryAsyncStorage._map.get('@qavora_local_mock_backend_v1');
+    expect(migratedRaw).not.toContain('ExposedLegacyPlaintextPassword!');
+    expect(migratedRaw).not.toContain('stale_hash');
+    expect(migratedRaw).not.toContain('stale_token');
+
+    const migrated = JSON.parse(migratedRaw);
+    expect(migrated.users.user_legacy_1.email).toBe('legacy@example.com');
+    expect(migrated.users.user_legacy_1.password).toBeUndefined();
+    expect(migrated.users.user_legacy_1.passwordHash).toBeUndefined();
+    expect(migrated.users.user_legacy_1.token).toBeUndefined();
+  });
+
+  it('8. real backend configuration overrides EXPO_PUBLIC_ALLOW_LOCAL_MOCK and hides LOCAL DEMO BACKEND indicator', async () => {
+    process.env.EXPO_PUBLIC_API_BASE_URL = 'https://qavora.example.test';
+    process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK = 'true';
+    expect(isLocalMockBackendActive()).toBe(false);
+
+    let capturedLoginUrl = null;
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      if (target.endsWith('/api/auth/me')) {
+        return new Response(JSON.stringify({ user: null }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (target.endsWith('/api/auth/csrf')) {
+        return new Response(JSON.stringify({ csrfToken: 'real_csrf_tok' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (target.endsWith('/api/auth/login')) {
+        capturedLoginUrl = target;
+        return new Response(
+          JSON.stringify({
+            user: {
+              userId: 'real_u1',
+              email: 'real@qavora.app',
+              name: 'Real QA',
+              role: 'QA Engineer',
+            },
+          }),
+          {
+            status: 200,
+            headers: {
+              'content-type': 'application/json',
+              'set-cookie': '__Host-qavora_auth_token=real_tok; Path=/; Secure; HttpOnly',
+            },
+          }
+        );
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    };
+
+    const loginRes = await loginUser({
+      email: 'real@qavora.app',
+      password: 'RealPassword123!',
+    });
+    expect(loginRes.ok).toBe(true);
+    expect(capturedLoginUrl).toBe('https://qavora.example.test/api/auth/login');
+    expect(memoryAsyncStorage._map.get('@qavora_local_mock_backend_v1')).toBeUndefined();
+
+    await harness.render(
+      React.createElement(
+        ThemeProvider,
+        null,
+        React.createElement(AuthProvider, null, React.createElement(AuthScreen))
+      )
+    );
+    await harness.flush(30);
+
+    expect(
+      harness.findByAttr('data-testid', 'local-demo-backend-indicator')
+    ).toHaveLength(0);
+    expect(harness.container.textContent).toContain('QAVORA CLOUD WORKSPACE');
+  });
+
+  it('9. preserves CSRF header injection, SecureStore cookie persistence, and HTTPS enforcement in production', async () => {
+    process.env.EXPO_PUBLIC_ENV = 'production';
+    process.env.NODE_ENV = 'production';
+    process.env.EXPO_PUBLIC_API_BASE_URL = 'http://insecure.qavora.app';
+
+    expect(validateBaseUrl('http://insecure.qavora.app')).toMatchObject({
+      valid: false,
+      code: 'INSECURE_PRODUCTION_URL',
+    });
+    let insecureErr = null;
+    try {
+      await apiClient.get('/api/projects');
+    } catch (err) {
+      insecureErr = err;
+    }
+    expect(insecureErr).toBeInstanceOf(ApiClientError);
+    expect(insecureErr?.code).toBe('INSECURE_PRODUCTION_URL');
+
+    process.env.EXPO_PUBLIC_API_BASE_URL = 'https://qavora.example.test';
+    let capturedPostHeaders = null;
+
+    await runWithNativeRuntime(async () => {
+      globalThis.fetch = async (url, init = {}) => {
+        const target = String(url);
+        if (target.endsWith('/api/auth/csrf')) {
+          return new Response(JSON.stringify({ csrfToken: 'csrf_prod_789' }), {
+            status: 200,
+            headers: {
+              'content-type': 'application/json',
+              'set-cookie': 'qavora_csrf_token=csrf_prod_789; Path=/; Secure',
+            },
+          });
+        }
+        if (target.endsWith('/api/projects')) {
+          capturedPostHeaders = Object.fromEntries(new Headers(init.headers).entries());
+          return new Response(JSON.stringify({ id: 'p_prod', name: 'Prod Proj' }), {
+            status: 201,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      };
+
+      await storeCookiesFromResponse(
+        new Response('{}', {
+          status: 200,
+          headers: {
+            'set-cookie': '__Host-qavora_auth_token=tok_prod; Path=/; Secure; HttpOnly',
+          },
+        }),
+        'https://qavora.example.test/api/auth/login'
+      );
+
+      const postRes = await apiClient.post('/api/projects', { name: 'Prod Proj' });
+      expect(postRes.status).toBe(201);
+      expect(capturedPostHeaders['x-csrf-token']).toBe('csrf_prod_789');
+      expect(capturedPostHeaders['cookie']).toContain('__Host-qavora_auth_token=tok_prod');
+      expect(secureStoreMap.get(COOKIE_JAR_SECURE_STORE_KEY)).toBeDefined();
+    });
   });
 });

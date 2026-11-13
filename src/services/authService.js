@@ -20,6 +20,7 @@ import {
   apiGet,
   apiPost,
   getApiBaseUrl,
+  isLocalMockBackendActive,
   ApiClientError,
 } from './apiClient.js';
 import {
@@ -29,6 +30,7 @@ import {
   getCsrfToken,
   clearAllCookies,
 } from './cookieManager.js';
+import { hasActiveLocalMockSession } from './localMockBackend.js';
 
 export const AUTH_USER_STORAGE_KEY = '@qavora_auth_user_v1';
 export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -818,23 +820,42 @@ export async function restoreAuthenticatedSession(options = {}) {
   await ensureCookieJarHydrated();
   const cachedUser = await loadCachedUserProfile();
   const baseUrl = getApiBaseUrl(options.baseUrl);
-
-  // If no backend base URL is configured, cannot verify remote session
-  if (!baseUrl) {
-    return {
-      ok: false,
-      status: null,
-      user: null,
-      isExpired: false,
-      reason: 'UNCONFIGURED_BASE_URL',
-    };
-  }
-
   const isBrowserDom =
     typeof window !== 'undefined' && typeof document !== 'undefined';
 
-  // In React Native / non-DOM environments, if no auth cookie is stored, skip network call
-  if (!isBrowserDom && !hasAuthCookie()) {
+  // If no remote backend base URL is configured, only check local demo session
+  // when local mock mode is explicitly opted into (never in production/release builds).
+  if (!baseUrl) {
+    if (!isLocalMockBackendActive(options.baseUrl)) {
+      if (cachedUser) {
+        await clearCachedUserProfile();
+      }
+      return {
+        ok: false,
+        status: null,
+        user: null,
+        isExpired: false,
+        code: 'INVALID_BASE_URL',
+        reason: 'UNCONFIGURED_BASE_URL',
+        error: formatAuthErrorMessage({ code: 'INVALID_BASE_URL' }, 'session'),
+      };
+    }
+
+    const hasMockSession = await hasActiveLocalMockSession();
+    if (!hasMockSession) {
+      if (cachedUser) {
+        await clearCachedUserProfile();
+      }
+      return {
+        ok: false,
+        status: null,
+        user: null,
+        isExpired: false,
+        reason: 'NO_STORED_SESSION',
+      };
+    }
+  } else if (!isBrowserDom && !hasAuthCookie()) {
+    // In React Native / non-DOM environments, if no auth cookie is stored, skip network call
     if (cachedUser) {
       await clearCachedUserProfile();
     }
